@@ -29,7 +29,7 @@ TITLE = "History"
 SUBTITLE = "Saved only on this PC."
 OFF_TITLE = "History is off."
 # Turning it on also keeps recordings that fail (for Try again): say so, briefly.
-OFF_TEXT = "Turn it on to keep what you dictate, and recordings that fail, on this PC."
+OFF_TEXT = "Turn it on to keep what you dictate, and recordings that fail."
 EMPTY_TEXT = "Nothing yet."
 NO_MATCH_TEXT = "Nothing matches that search."
 CLEARED = "History cleared."

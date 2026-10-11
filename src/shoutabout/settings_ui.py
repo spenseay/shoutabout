@@ -30,7 +30,7 @@ from shoutabout.settings_model import (
 log = logging.getLogger(__name__)
 
 WINDOW_TITLE = "ShoutAbout settings"
-BASE_W, BASE_H = 640, 960
+BASE_W, BASE_H = 640, 940
 POLL_MS = 120
 CONFIRM_MS = 3000
 QUALITY_LABELS = {"best": "Best", "balanced": "Balanced", "light": "Light"}
@@ -196,9 +196,10 @@ class SettingsWindow:
             canvas.configure(scrollregion=canvas.bbox("all"))
             box = canvas.bbox("all")
             needed = box is not None and box[3] > canvas.winfo_height() + 1
-            if needed and not self.scrollbar.winfo_ismapped():
+            packed = bool(self.scrollbar.winfo_manager())  # mapped or not (yet)
+            if needed and not packed:
                 self.scrollbar.pack(side="right", fill="y")
-            elif not needed and self.scrollbar.winfo_ismapped():
+            elif not needed and packed:
                 self.scrollbar.pack_forget()
                 canvas.yview_moveto(0)
 

@@ -531,7 +531,7 @@ def test_failed_transcription_keeps_the_recording_for_history(tmp_path):
     (item,) = failed.list()
     assert item.route == "local" and item.seconds == pytest.approx(2.0)
     assert "CUDA out of memory" in item.error
-    assert any("open History" in m for _, m in h.notes)
+    assert any("saved in History" in m for _, m in h.notes)
     h.dictation.stop()
 
 

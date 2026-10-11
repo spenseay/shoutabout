@@ -292,7 +292,7 @@ def test_history_is_off_on_a_fresh_install_and_the_window_says_so(tmp_path):
     assert hm.OFF_TITLE == "History is off."
     # one line, and it says that recordings that fail are kept too once it's on
     assert hm.OFF_TEXT.startswith("Turn it on") and "recordings that fail" in hm.OFF_TEXT
-    assert "this PC" in hm.OFF_TEXT and "this PC" in hm.SUBTITLE
+    assert hm.SUBTITLE == "Saved only on this PC."
     # and nothing that fails to go through is kept while it's off
     assert svc.failed_recordings().keep_samples(np.full(1600, 0.1, np.float32)) is None
     assert not svc.paths.failed_dir.exists()

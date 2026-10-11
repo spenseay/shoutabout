@@ -193,7 +193,8 @@ class SetupWindow:
         import tkinter as tk
 
         f, fonts, s = self.flow, self.fonts, self.scale
-        if f.phase == "failed":
+        failed = f.phase == "failed"
+        if failed:
             foot = self._footer()
             kit.button(foot, "Try again", f.retry, fonts, big=True).pack(side="right")
             kit.link(foot, "Skip for now", f.skip_download, fonts).pack(side="left")
@@ -205,6 +206,8 @@ class SetupWindow:
         self._widgets["status"] = self._line(
             text, "", fonts.big, pady=(round(18 * s), round(14 * s))
         )
+        if failed:  # no bar: just what happened and the way out
+            return
         bar = kit.ProgressBar(text, round(460 * s), round(16 * s))
         bar.canvas.pack(anchor="w")
         self._widgets["bar"] = bar
@@ -215,8 +218,9 @@ class SetupWindow:
     def _refresh_check(self) -> None:
         f, w = self.flow, self._widgets
         w["status"].configure(text=f.status_line())
-        w["bar"].set(f.progress_fraction())
-        w["size"].configure(text=f.size_line())
+        if "bar" in w:
+            w["bar"].set(f.progress_fraction())
+            w["size"].configure(text=f.size_line())
         if self._mouth is not None:
             if f.phase in ("checking", "downloading"):
                 self._mouth.talk()
@@ -320,7 +324,7 @@ class SetupWindow:
             padx=round(22 * s),
             pady=round(18 * s),
         )
-        card.pack(fill="both", expand=True, pady=(0, round(20 * s)))
+        card.pack(fill="x", pady=(0, round(20 * s)))
         wrap = round(600 * s)
         if f.prompt is not None:  # inline approval
             self._line(card, f.phone_line(), fonts.big, wrap=wrap, pady=(0, round(8 * s)))
