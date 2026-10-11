@@ -104,15 +104,15 @@ enum KeyboardMouthAction: Equatable, Sendable {
     /// Listening (whatever started it), or a start not answered yet: stop and send.
     case signalStop
     /// Working on the last one, or no Full Access (the keyboard can't reach the App Group).
-    case none
+    case ignore
 
     static func decide(hasFullAccess: Bool, app: KeyboardAppState?, startPending: Bool, now: Date) -> KeyboardMouthAction {
-        guard hasFullAccess else { return .none }
+        guard hasFullAccess else { return .ignore }
         switch app?.phase(at: now) ?? .idle {
         case .listening:
             return .signalStop
         case .working:
-            return .none
+            return .ignore
         case .idle, .failed:
             if startPending { return .signalStop }
             return app?.sessionIsAlive(at: now) == true ? .signalStart : .openApp
@@ -164,10 +164,11 @@ struct KeyboardHandoff: Codable, Equatable, Sendable {
         return age > Self.maxAge || age < -60
     }
 
-    /// Which finished dictations go to the keyboard: phone ones with words. Never one sent to
-    /// the computer (it was typed there).
-    static func shouldPublish(toPhone: Bool, text: String) -> Bool {
-        toPhone && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    /// Which finished dictations go to the keyboard: phone ones with words, once the keyboard
+    /// is set up (nothing waits in the App Group for a keyboard that's never used). Never one
+    /// sent to the computer (it was typed there).
+    static func shouldPublish(toPhone: Bool, text: String, keyboardSetUp: Bool) -> Bool {
+        toPhone && keyboardSetUp && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }
 
@@ -269,6 +270,12 @@ struct KeyboardLinkStore {
 
     func holdsClaim(_ handoff: KeyboardHandoff, by claimant: String) -> Bool {
         defaults.string(forKey: Key.claim) == KeyboardClaim(id: handoff.id, claimant: claimant).stored
+    }
+
+    /// Gives a claim back (the keyboard went away before typing it), so the next one can.
+    func releaseClaim(_ handoff: KeyboardHandoff, by claimant: String) {
+        guard holdsClaim(handoff, by: claimant) else { return }
+        defaults.removeObject(forKey: Key.claim)
     }
 
     /// When the keyboard last came up with Full Access (Settings shows "Keyboard: On").

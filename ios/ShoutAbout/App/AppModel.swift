@@ -557,7 +557,11 @@ final class AppModel {
         )
         // A phone dictation (any trigger) for the ShoutAbout keyboard, if it's on screen or
         // comes up soon. Never one sent to the computer.
-        if !isDemo, KeyboardHandoff.shouldPublish(toPhone: job.target == .phone, text: outcome.text) {
+        if !isDemo, KeyboardHandoff.shouldPublish(
+            toPhone: job.target == .phone,
+            text: outcome.text,
+            keyboardSetUp: keyboardLink.keyboardIsSetUp
+        ) {
             publishKeyboardHandoff(outcome.text)
         }
         complete(item, job: job)

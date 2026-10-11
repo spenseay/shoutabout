@@ -88,7 +88,7 @@ def test_ios_workflow(config):
     assert "bash ios/scripts/install-xcodegen.sh" in text and "generate" in text
     assert "keychain initialize" in text and "keychain add-certificates" in text
     assert 'fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create' in text
-    assert "--strict-match-identifier" not in text  # the widgets' and keyboard's bundle IDs must match too
+    assert "--strict-match-identifier" not in text  # the extensions' bundle IDs must match too
     assert "xcode-project use-profiles" in text
     assert "next-build-number.sh" in text and "CM_ENV" in text
     assert "CURRENT_PROJECT_VERSION=$IOS_BUILD_NUMBER" in text
@@ -111,7 +111,11 @@ def test_signing_covers_every_shipped_ios_target(config):
     xcconfig = (REPO / "ios" / "Config" / "Base.xcconfig").read_text("utf-8")
     prefix = re.search(r"^BUNDLE_ID_PREFIX = (\S+)$", xcconfig, re.M).group(1)
     bundle_id = config["workflows"]["ios-testflight"]["environment"]["vars"]["BUNDLE_ID"]
-    shipped = {"ShoutAbout": "app", "ShoutAboutWidgets": "app.widgets", "ShoutAboutKeyboard": "app.keyboard"}
+    shipped = {
+        "ShoutAbout": "app",
+        "ShoutAboutWidgets": "app.widgets",
+        "ShoutAboutKeyboard": "app.keyboard",
+    }
     for name, suffix in shipped.items():
         target = project["targets"][name]
         base = target["settings"]["base"]

@@ -159,7 +159,7 @@ final class KeyboardViewController: UIInputViewController {
         case .signalStop:
             startPendingSince = nil
             KeyboardSignals.post(.stop)
-        case .none:
+        case .ignore:
             break
         }
         updateMouth()
@@ -188,7 +188,11 @@ final class KeyboardViewController: UIInputViewController {
             try? await Task.sleep(for: .milliseconds(80))
             guard let self else { return }
             self.claimingID = nil
-            guard self.visible, self.store.holdsClaim(handoff, by: self.claimant) else { return }
+            guard self.store.holdsClaim(handoff, by: self.claimant) else { return }
+            guard self.visible else {
+                self.store.releaseClaim(handoff, by: self.claimant)  // the next keyboard types it
+                return
+            }
             self.store.removeHandoff(id: handoff.id)
             self.type(handoff.text)
         }

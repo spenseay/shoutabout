@@ -67,7 +67,9 @@ def test_keyboard_target(keyboard):
     assert "SWIFT_ACTIVE_COMPILATION_CONDITIONS" not in base
     entitlements = keyboard["entitlements"]
     assert entitlements["path"] == "Config/ShoutAboutKeyboard.entitlements"
-    assert entitlements["properties"]["com.apple.security.application-groups"] == ["$(APP_GROUP_ID)"]
+    assert entitlements["properties"]["com.apple.security.application-groups"] == [
+        "$(APP_GROUP_ID)"
+    ]
 
 
 def test_keyboard_info_plist(keyboard):
@@ -99,7 +101,9 @@ def test_keyboard_compiles_only_small_shared_pieces(keyboard):
     for source in keyboard["sources"]:
         assert (IOS / source["path"]).exists(), source["path"]
     privacy = [s for s in keyboard["sources"] if s["path"].endswith(".xcprivacy")]
-    assert privacy == [{"path": "Privacy/Keyboard/PrivacyInfo.xcprivacy", "buildPhase": "resources"}]
+    assert privacy == [
+        {"path": "Privacy/Keyboard/PrivacyInfo.xcprivacy", "buildPhase": "resources"}
+    ]
 
 
 def test_keyboard_sources_only_use_types_they_compile(keyboard):
@@ -116,19 +120,30 @@ def test_keyboard_sources_only_use_types_they_compile(keyboard):
     for path, code in sources.items():
         for name in sorted(set(re.findall(r"\b[A-Z]\w*\b", code))):
             if name in declared_anywhere and name not in declared_here:
-                problems.append(f"{path.relative_to(IOS)} uses {name} from {sorted(declared_anywhere[name])}")
+                problems.append(
+                    f"{path.relative_to(IOS)} uses {name} from {sorted(declared_anywhere[name])}"
+                )
     assert not problems, "\n".join(problems)
 
 
 def test_keyboard_never_goes_online_or_uses_the_shared_application():
     for path in (IOS / "ShoutAboutKeyboard").rglob("*.swift"):
         code = code_only(path.read_text("utf-8"))
-        for banned in ("URLSession", "UIApplication.shared", "NWConnection", "print(", "os_log", "Logger("):
+        for banned in (
+            "URLSession",
+            "UIApplication.shared",
+            "NWConnection",
+            "print(",
+            "os_log",
+            "Logger(",
+        ):
             assert banned not in code, f"{path.name}: {banned}"
 
 
 def test_the_app_opens_from_the_keyboard(project):
-    schemes = project["targets"]["ShoutAbout"]["info"]["properties"]["CFBundleURLTypes"][0]["CFBundleURLSchemes"]
+    schemes = project["targets"]["ShoutAbout"]["info"]["properties"]["CFBundleURLTypes"][0][
+        "CFBundleURLSchemes"
+    ]
     assert schemes == ["shoutabout"]
     controller = (IOS / "ShoutAboutKeyboard" / "KeyboardViewController.swift").read_text("utf-8")
     assert '"shoutabout://keyboard"' in controller

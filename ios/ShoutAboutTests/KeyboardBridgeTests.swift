@@ -105,13 +105,13 @@ final class KeyboardBridgeTests: XCTestCase {
     func testTapWhileWorkingOrWithoutFullAccessDoesNothing() {
         XCTAssertEqual(
             KeyboardMouthAction.decide(hasFullAccess: true, app: app(.working, session: true), startPending: false, now: now),
-            .none
+            .ignore
         )
         XCTAssertEqual(
             KeyboardMouthAction.decide(hasFullAccess: false, app: app(.idle, session: true), startPending: false, now: now),
-            .none
+            .ignore
         )
-        XCTAssertEqual(KeyboardMouthAction.decide(hasFullAccess: false, app: nil, startPending: false, now: now), .none)
+        XCTAssertEqual(KeyboardMouthAction.decide(hasFullAccess: false, app: nil, startPending: false, now: now), .ignore)
     }
 
     func testTapAfterAFailureStartsAgain() {
@@ -160,10 +160,12 @@ final class KeyboardBridgeTests: XCTestCase {
     // MARK: Which dictations the keyboard types
 
     func testOnlyPhoneDictationsWithWordsAreHandedOver() {
-        XCTAssertTrue(KeyboardHandoff.shouldPublish(toPhone: true, text: "Sample text: call Sofia."))
-        XCTAssertFalse(KeyboardHandoff.shouldPublish(toPhone: false, text: "Sample text: typed on the PC."))
-        XCTAssertFalse(KeyboardHandoff.shouldPublish(toPhone: true, text: ""))
-        XCTAssertFalse(KeyboardHandoff.shouldPublish(toPhone: true, text: "  \n"))
+        XCTAssertTrue(KeyboardHandoff.shouldPublish(toPhone: true, text: "Sample text: call Sofia.", keyboardSetUp: true))
+        XCTAssertFalse(KeyboardHandoff.shouldPublish(toPhone: false, text: "Sample text: typed on the PC.", keyboardSetUp: true))
+        XCTAssertFalse(KeyboardHandoff.shouldPublish(toPhone: true, text: "", keyboardSetUp: true))
+        XCTAssertFalse(KeyboardHandoff.shouldPublish(toPhone: true, text: "  \n", keyboardSetUp: true))
+        // No keyboard: nothing waits in the App Group.
+        XCTAssertFalse(KeyboardHandoff.shouldPublish(toPhone: true, text: "Sample text: call Sofia.", keyboardSetUp: false))
     }
 
     func testAutoInsertWindowAndExpiry() {
@@ -220,6 +222,17 @@ final class KeyboardBridgeTests: XCTestCase {
         XCTAssertTrue(store.claim(next, by: "keyboard-b"))
         XCTAssertFalse(store.holdsClaim(next, by: "keyboard-a"))
         XCTAssertTrue(store.holdsClaim(next, by: "keyboard-b"))
+    }
+
+    func testAReleasedClaimCanBeTakenAgain() {
+        let store = makeStore()
+        let handoff = KeyboardHandoff(id: "dictation-4", text: "Sample text", createdAt: now)
+        XCTAssertTrue(store.claim(handoff, by: "keyboard-a"))
+        store.releaseClaim(handoff, by: "keyboard-b")  // not b's to give back
+        XCTAssertTrue(store.holdsClaim(handoff, by: "keyboard-a"))
+        store.releaseClaim(handoff, by: "keyboard-a")
+        XCTAssertTrue(store.claim(handoff, by: "keyboard-b"))
+        XCTAssertTrue(store.holdsClaim(handoff, by: "keyboard-b"))
     }
 
     func testSimultaneousClaimsAgreeOnOneWinner() {
