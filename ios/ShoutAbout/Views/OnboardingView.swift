@@ -109,27 +109,23 @@ private struct ChooseStep: View {
                     ChoiceCard(
                         systemImage: "iphone",
                         title: "This iPhone",
-                        detail: "Talk, and the text is copied here. Works anywhere.",
+                        detail: "Copied to your clipboard.",
                         action: onPhone
                     )
                     .accessibilityIdentifier("choosePhone")
                     ChoiceCard(
                         systemImage: "desktopcomputer",
                         title: "My computer",
-                        detail: "Talk, and the text is typed into your PC.",
+                        detail: "Typed into your PC.",
                         action: onComputer
                     )
                     .accessibilityIdentifier("chooseComputer")
                 }
                 .padding(.top, Theme.Spacing.xl)
-                Text("You can use both, and switch any time.")
-                    .font(Theme.Typography.body(14))
-                    .foregroundStyle(Theme.Colors.inkMuted)
-                    .padding(.top, Theme.Spacing.l)
-                Label("Private: your voice stays on your own devices.", systemImage: "lock.fill")
+                Label("Your voice stays on your devices.", systemImage: "lock.fill")
                     .font(Theme.Typography.body(13))
                     .foregroundStyle(Theme.Colors.inkMuted)
-                    .padding(.top, Theme.Spacing.xs)
+                    .padding(.top, Theme.Spacing.l)
             }
             .padding(.horizontal, Theme.Spacing.xl)
             Spacer(minLength: Theme.Spacing.xl)
@@ -192,7 +188,7 @@ private struct PhoneStep: View {
             Text("Let it hear you")
                 .shoutHeadline(42)
                 .multilineTextAlignment(.center)
-            Text("ShoutAbout listens only while you dictate, and turns your voice into text right here on this iPhone.")
+            Text("Only while you dictate.")
                 .font(Theme.Typography.body(17))
                 .foregroundStyle(Theme.Colors.inkMuted)
                 .multilineTextAlignment(.center)
@@ -257,8 +253,8 @@ private struct ActionButtonStep: View {
 
 /// "One press to talk": how to put Dictate on the Action Button (end of the setup, and in
 /// Settings). iOS doesn't let an app assign the Action Button or add a Control Center control
-/// by itself, so this is the shortest way there: the exact steps and a button into Settings.
-/// The Control Center card (`ControlCenterGuide`) goes with it.
+/// by itself, so: one line, the exact steps and a button into Settings (no steps on a phone
+/// without one). The Control Center card (`ControlCenterGuide`) goes with it.
 struct ActionButtonGuide: View {
     /// nil when the model can't be told (then the steps show, with the model note).
     private var hasActionButton: Bool? { DeviceFeatures.thisPhoneHasActionButton }
@@ -270,31 +266,20 @@ struct ActionButtonGuide: View {
             Text("One press to talk")
                 .shoutHeadline(40)
                 .multilineTextAlignment(.center)
-            if hasActionButton == false {
-                Text("Add Dictate to Control Center: one swipe and a tap, and you talk. A little mouth pops up at the top while it listens: no need to open the app.")
-                    .font(Theme.Typography.body(16))
-                    .foregroundStyle(Theme.Colors.inkMuted)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("The Action Button is on iPhone 15 Pro and later, so on this iPhone Control Center is the quick way.")
-                    .font(Theme.Typography.body(14))
-                    .foregroundStyle(Theme.Colors.inkMuted)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                Text("Press the Action Button and talk. Press it again to send. A little mouth pops up at the top while it listens: no need to open the app.")
-                    .font(Theme.Typography.body(16))
-                    .foregroundStyle(Theme.Colors.inkMuted)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                GuideCard(title: "Set up the Action Button", steps: [
+            Text("Press once to talk, again to send.")
+                .font(Theme.Typography.body(16))
+                .foregroundStyle(Theme.Colors.inkMuted)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            if hasActionButton != false {
+                GuideCard(title: "Action Button", steps: [
                     "Open Settings › Action Button.",
-                    "Swipe to Controls, then tap Choose a Control.",
+                    "Swipe to Controls, tap Choose a Control.",
                     "Pick ShoutAbout › Dictate.",
                 ])
                 OpenSettingsButton()
                 if hasActionButton == nil {
-                    Text("Needs an iPhone with an Action Button: iPhone 15 Pro or later.")
+                    Text("iPhone 15 Pro or later.")
                         .font(Theme.Typography.body(14))
                         .foregroundStyle(Theme.Colors.inkMuted)
                         .multilineTextAlignment(.center)
@@ -305,21 +290,14 @@ struct ActionButtonGuide: View {
     }
 }
 
-/// Dictate in Control Center (any iPhone): the steps, and how it works once it's there.
+/// Dictate in Control Center (any iPhone): the steps.
 struct ControlCenterGuide: View {
     var body: some View {
-        VStack(spacing: Theme.Spacing.s) {
-            GuideCard(title: "Add to Control Center", steps: [
-                "Swipe down from the top-right corner.",
-                "Tap + at the top left, then Add a Control.",
-                "Search for ShoutAbout and tap Dictate.",
-            ])
-            Text("Then tap the mouth in Control Center to talk, and tap it again to send. Siri works too: \u{201C}Dictate with ShoutAbout\u{201D}.")
-                .font(Theme.Typography.body(14))
-                .foregroundStyle(Theme.Colors.inkMuted)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-        }
+        GuideCard(title: "Control Center", steps: [
+            "Swipe down from the top-right corner.",
+            "Tap + at the top left, then Add a Control.",
+            "Search for ShoutAbout and tap Dictate.",
+        ])
     }
 }
 
@@ -336,7 +314,7 @@ struct OpenSettingsButton: View {
                     openURL(url)
                 }
             }
-            Text("It opens on ShoutAbout's page: go back to the main Settings list, then tap Action Button.")
+            Text("Then go back and tap Action Button.")
                 .font(Theme.Typography.body(13))
                 .foregroundStyle(Theme.Colors.inkMuted)
                 .multilineTextAlignment(.center)

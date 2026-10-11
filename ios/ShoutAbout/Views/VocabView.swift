@@ -25,12 +25,10 @@ struct VocabView: View {
                         .font(Theme.Typography.body(13))
                         .foregroundStyle(.secondary)
                 }
-            } footer: {
-                Text("Your PC keeps the list. This iPhone picks up new words whenever your PC is around, and when it writes the text itself it uses your spelling, even for words that only sound alike (Sophia \u{2192} Sofia).")
             }
             Section("On your PC (\(model.vocab.count))") {
                 if model.vocab.isEmpty {
-                    Text("No terms cached yet. Pull to refresh.")
+                    Text("No words yet. Pull to refresh.")
                         .foregroundStyle(.secondary)
                 }
                 ForEach(model.vocab, id: \.self) { term in
@@ -38,7 +36,7 @@ struct VocabView: View {
                 }
             }
         }
-        .navigationTitle("Vocabulary")
+        .navigationTitle("Custom words")
         .refreshable { await model.refreshVocab() }
         .task { await model.refreshVocab(silently: true) }
     }

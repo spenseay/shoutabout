@@ -80,7 +80,7 @@ enum HubFailure: Error, Equatable, Sendable {
             return "Couldn't reach your PC (\(why))."
         case .hub(let status, let detail):
             switch status {
-            case 401: return "Your PC didn't accept this iPhone (\(detail)). Connect again in Settings."
+            case 401: return "Your PC didn't accept this iPhone. Connect again in Settings."
             case 403: return "Your PC refused the request: \(detail)."
             case 409: return "Your PC is paused: \(detail)."
             case 413: return "Too long for your PC: \(detail)."
@@ -91,11 +91,11 @@ enum HubFailure: Error, Equatable, Sendable {
         case .gateway(let status, _):
             switch status {
             case 401, 403:
-                return "Cloudflare Access blocked the request (\(status)). Check the service token in Settings."
+                return "Cloudflare Access blocked it (\(status)). Check the service token."
             case 502, 504, 521, 522, 523, 524, 530:
-                return "The tunnel is up but the PC didn't answer (\(status)). Is the hub running?"
+                return "Your PC didn't answer (\(status)). Is ShoutAbout running?"
             default:
-                return "Unexpected answer from the server (\(status))."
+                return "Unexpected answer (\(status))."
             }
         case .badResponse(let why):
             return "Your PC's answer couldn't be read (\(why))."

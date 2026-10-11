@@ -46,7 +46,7 @@ final class DevicePairingTests: XCTestCase {
         XCTAssertTrue(busy.problem?.message.contains("already asking") ?? false)
 
         let old = await pairing(MockTransport(pair: .failure(.hub(status: 404, detail: "Not Found")))).request(base, deviceName: "iPhone", deviceID: "d")
-        XCTAssertTrue(old.problem?.message.contains("older ShoutAbout") ?? false)
+        XCTAssertTrue(old.problem?.message.contains("Update ShoutAbout") ?? false)
 
         let limited = await pairing(MockTransport(pair: .failure(.hub(status: 429, detail: "slow down")))).request(base, deviceName: "iPhone", deviceID: "d")
         XCTAssertTrue(limited.problem?.message.contains("Wait a minute") ?? false)

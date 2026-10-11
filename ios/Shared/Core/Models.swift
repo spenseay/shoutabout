@@ -65,7 +65,7 @@ struct HistoryItem: Codable, Identifiable, Equatable, Sendable {
     var route: Route
     /// True when the computer pasted it.
     var pasted: Bool = false
-    /// A short note for the user ("Your PC isn't reachable, so it's on your clipboard.").
+    /// A short note for the user ("Your PC isn't reachable.").
     var warning: String?
     var cleanup: String?
     var timings: TranscribeResponse.Timings?

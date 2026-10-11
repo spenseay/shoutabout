@@ -308,7 +308,7 @@ final class AppModel {
             startedAt: startedAt
         )
         if !live, UIApplication.shared.applicationState != .active {
-            return .needsForeground("Turn on Live Activities for ShoutAbout (Settings › ShoutAbout) to dictate without opening the app.")
+            return .needsForeground("Turn on Live Activities in Settings › ShoutAbout.")
         }
         guard phase != .recording, !phase.isBusy else {
             await activity.cancel()
@@ -837,7 +837,7 @@ final class AppModel {
                 checks.append(ConnectionCheck(
                     title: "Home Wi-Fi",
                     ok: false,
-                    detail: "\(computerDisplayName) didn't answer. Is it on, with ShoutAbout running, on the same Wi-Fi as this iPhone?"
+                    detail: "\(computerDisplayName) didn't answer. Is ShoutAbout open on the same Wi-Fi?"
                 ))
             }
         }
@@ -867,7 +867,7 @@ final class AppModel {
             do {
                 let list = try await HubClient.fetchVocab(endpoint)
                 storeVocab(list)
-                return ConnectionCheck(title: title, ok: true, detail: "Yes. This PC runs an older ShoutAbout: update it for quick pairing.")
+                return ConnectionCheck(title: title, ok: true, detail: "Yes. Update ShoutAbout on the PC.")
             } catch {
                 return ConnectionCheck(title: title, ok: false, detail: HubFailure.from(error).userMessage)
             }
@@ -877,13 +877,13 @@ final class AppModel {
     static func speedDetail(_ info: HubInfo) -> String {
         switch info.speed {
         case .fast:
-            return "Yes. Your PC writes the text, fast."
+            return "Yes, fast."
         case .ok:
-            return "Yes. Your PC writes the text."
+            return "Yes."
         case .slow:
             return info.acceptsText
-                ? "Yes. This iPhone writes the text and your PC pastes it (quicker on this PC)."
-                : "Yes. Your PC writes the text."
+                ? "Yes. This iPhone writes, your PC pastes."
+                : "Yes."
         }
     }
 
@@ -905,7 +905,7 @@ final class AppModel {
     func refreshVocab(silently: Bool = false) async {
         guard !isDemo else { return }
         guard let endpoint = await reachableEndpoint() else {
-            if !silently { vocabMessage = "Couldn't reach your PC. Showing the saved list." }
+            if !silently { vocabMessage = "Couldn't reach your PC." }
             return
         }
         do {
@@ -915,7 +915,7 @@ final class AppModel {
         } catch {
             guard !silently else { return }
             let failure = HubFailure.from(error)
-            vocabMessage = failure.status == 404 ? "Your PC's ShoutAbout is too old for this. Update it." : failure.userMessage
+            vocabMessage = failure.status == 404 ? "Update ShoutAbout on your PC." : failure.userMessage
         }
     }
 
@@ -940,7 +940,7 @@ final class AppModel {
             successTick += 1
         } catch {
             let failure = HubFailure.from(error)
-            vocabMessage = failure.status == 404 ? "Your PC's ShoutAbout is too old for this. Update it." : failure.userMessage
+            vocabMessage = failure.status == 404 ? "Update ShoutAbout on your PC." : failure.userMessage
         }
     }
 

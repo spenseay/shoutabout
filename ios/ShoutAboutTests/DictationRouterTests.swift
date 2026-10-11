@@ -252,7 +252,7 @@ final class DictationRouterTests: XCTestCase {
         XCTAssertEqual(outcome.text, Samples.phoneText)
         XCTAssertEqual(outcome.delivery, .clipboard)
         XCTAssertEqual(outcome.route, .offline)
-        XCTAssertEqual(outcome.notice, "Your PC isn't reachable, so it's on your clipboard.")
+        XCTAssertEqual(outcome.notice, "Your PC isn't reachable.")
         let calls = await transport.calls
         XCTAssertEqual(calls, ["hello"])
     }

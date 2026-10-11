@@ -13,17 +13,13 @@ struct HistoryView: View {
                     ContentUnavailableView {
                         Label("History is off", systemImage: "clock.badge.xmark")
                     } description: {
-                        Text("Turn it on to keep what you dictate on this phone, so you can copy it later.")
+                        Text("Saved only on this phone.")
                     } actions: {
                         Button("Turn on history") { model.setKeepHistory(true) }
                             .font(Theme.Typography.bold(16))
                     }
                 } else if model.history.isEmpty {
-                    ContentUnavailableView {
-                        Label("Nothing shouted yet", systemImage: "mouth")
-                    } description: {
-                        Text("Your dictations show up here. They stay on this iPhone.")
-                    }
+                    ContentUnavailableView("Nothing shouted yet", systemImage: "mouth")
                 } else {
                     List {
                         if !model.keepHistory {
@@ -31,7 +27,7 @@ struct HistoryView: View {
                                 Button("Turn on history") { model.setKeepHistory(true) }
                                     .font(Theme.Typography.bold(16))
                             } footer: {
-                                Text("History is off: new dictations aren't saved.")
+                                Text("New dictations aren't saved.")
                             }
                         }
                         ForEach(model.history) { item in
@@ -80,7 +76,7 @@ struct HistoryView: View {
                         .font(Theme.Typography.bold(17))
                 }
             }
-            .confirmationDialog("Clear all history on this iPhone?", isPresented: $confirmClear, titleVisibility: .visible) {
+            .confirmationDialog("Clear all history?", isPresented: $confirmClear, titleVisibility: .visible) {
                 Button("Clear History", role: .destructive) { model.clearHistory() }
             }
         }
@@ -129,7 +125,6 @@ private struct HistoryRow: View {
 
     private var label: String {
         guard item.succeeded else { return "FAILED" }
-        if item.pasted { return "PASTED ON PC" }
-        return item.engine == nil ? "COPIED · PC WROTE IT" : "COPIED · IPHONE WROTE IT"
+        return item.pasted ? "PASTED" : "COPIED"
     }
 }

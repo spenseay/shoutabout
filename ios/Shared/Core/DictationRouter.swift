@@ -36,7 +36,7 @@ enum DictationStage: Equatable, Sendable {
         case .lookingForComputer: return "Knocking on your PC…"
         case .sendingAudio(.tunnel): return "Shouting through your tunnel…"
         case .sendingAudio: return "Your PC is listening…"
-        case .transcribingOnPhone: return "Writing it down on this iPhone…"
+        case .transcribingOnPhone: return "Writing it down…"
         case .pastingOnComputer: return "Pasting on your PC…"
         }
     }
@@ -73,15 +73,15 @@ struct DictationFailure: Error, Equatable, Sendable {
     var message: String
 }
 
-/// Short notes shown when the text ends up somewhere other than planned.
+/// Short notes shown (under "Copied!") when the text went to the clipboard instead of the PC.
 enum DictationNotice {
-    static let away = "Your PC isn't reachable, so it's on your clipboard."
-    static let paused = "Your PC is paused, so it's on your clipboard."
-    static let busy = "Your PC is busy, so it's on your clipboard."
-    static let rejected = "Your PC didn't accept this iPhone, so it's on your clipboard. Connect again in Settings."
-    static let tooLong = "Too long to paste in one go, so it's on your clipboard."
-    static let notPasted = "Your PC didn't paste it, so it's on your clipboard."
-    static let noComputer = "No computer is connected, so it's on your clipboard."
+    static let away = "Your PC isn't reachable."
+    static let paused = "Your PC is paused."
+    static let busy = "Your PC is busy."
+    static let rejected = "Your PC didn't accept this iPhone. Connect again in Settings."
+    static let tooLong = "Too long to paste."
+    static let notPasted = "Your PC didn't paste it."
+    static let noComputer = "No computer connected."
 
     /// The note for a failed hub call after which the text goes to the clipboard.
     static func forFailure(_ failure: HubFailure) -> String {
@@ -105,7 +105,7 @@ enum DictationNotice {
 ///      speed != slow -> upload the audio to `/transcribe?target=pc` (the PC pastes);
 ///      speed == slow -> transcribe on this iPhone, `POST /paste` (faster on a CPU-only PC).
 ///  - PC unreachable: the owner's tunnel if it's set up (advanced), otherwise transcribe on this
-///    iPhone and copy, telling the user "Your PC isn't reachable, so it's on your clipboard".
+///    iPhone and copy, telling the user "Your PC isn't reachable".
 ///
 /// The words are never lost: any hub failure falls back to on-device transcription + clipboard.
 /// Only when this iPhone can't transcribe either does it fail (the app keeps the audio).

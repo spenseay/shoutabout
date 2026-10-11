@@ -23,30 +23,14 @@ struct SettingsView: View {
                             .padding(Theme.Spacing.xl)
                         }
                         .background(Theme.Colors.ground.ignoresSafeArea())
-                        .navigationTitle("Action Button")
                         .navigationBarTitleDisplayMode(.inline)
                     } label: {
-                        Label("Set up the Action Button", systemImage: "button.horizontal.top.press")
+                        Label("One press to talk", systemImage: "button.horizontal.top.press")
                     }
-                    NavigationLink {
-                        ScrollView {
-                            ControlCenterGuide()
-                                .padding(Theme.Spacing.xl)
-                        }
-                        .background(Theme.Colors.ground.ignoresSafeArea())
-                        .navigationTitle("Control Center")
-                        .navigationBarTitleDisplayMode(.inline)
-                    } label: {
-                        Label("Add to Control Center", systemImage: "switch.2")
-                    }
-                } header: {
-                    Text("One press to talk")
-                } footer: {
-                    Text("iOS doesn't let apps set these up by themselves: these are the few taps it takes.")
                 }
                 Section {
                     if model.hasComputer {
-                        Toggle("Also copy on iPhone when it goes to your computer", isOn: $model.copyInPCMode)
+                        Toggle("Also copy on this phone", isOn: $model.copyInPCMode)
                         NavigationLink {
                             VocabView()
                         } label: {
@@ -65,12 +49,10 @@ struct SettingsView: View {
                 } header: {
                     Text("History")
                 } footer: {
-                    Text("Saves what you dictate on this phone so you can copy it later. Off by default.")
+                    Text("Off by default. Saved only on this phone.")
                 }
                 Section {
                     NavigationLink("Advanced") { AdvancedSettingsView() }
-                } footer: {
-                    Text("Private by design: your voice and text only go between your own devices. No accounts, no cloud.")
                 }
                 Section {
                     LabeledContent("Version", value: Self.version)
@@ -102,8 +84,6 @@ struct SettingsView: View {
             }
             .confirmationDialog("Disconnect \(model.computerDisplayName)?", isPresented: $confirmDisconnect, titleVisibility: .visible) {
                 Button("Disconnect", role: .destructive) { model.disconnectComputer() }
-            } message: {
-                Text("This iPhone forgets the computer. Your words go to this iPhone's clipboard until you connect again.")
             }
             .task {
                 model.syncIconState()
@@ -134,7 +114,7 @@ struct SettingsView: View {
                     Task { await model.testConnection() }
                 } label: {
                     HStack {
-                        Label("Check the connection", systemImage: "antenna.radiowaves.left.and.right")
+                        Label("Check connection", systemImage: "antenna.radiowaves.left.and.right")
                         if model.isCheckingConnection {
                             Spacer()
                             ProgressView()
@@ -162,9 +142,6 @@ struct SettingsView: View {
                     Label("Connect a computer", systemImage: "desktopcomputer")
                         .font(Theme.Typography.bold(17))
                 }
-                Text("Type straight into any app on your Windows PC. Install ShoutAbout on it, then tap Connect.")
-                    .font(Theme.Typography.body(13))
-                    .foregroundStyle(.secondary)
             }
         } header: {
             Text("Your computer")
@@ -177,7 +154,7 @@ struct SettingsView: View {
             switch info.speed {
             case .fast: parts.append("Fast")
             case .ok: parts.append("Ready")
-            case .slow: parts.append(info.acceptsText ? "This iPhone writes, your PC pastes" : "Ready")
+            case .slow: parts.append("Ready")
             }
         } else {
             parts.append("Paired")
@@ -215,8 +192,6 @@ struct KeepHistoryToggle: View {
             Button("Clear saved dictations", role: .destructive) { model.setKeepHistory(false, clearSaved: true) }
             Button("Keep saved dictations") { model.setKeepHistory(false) }
             Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("New dictations won't be saved. What about the ones already on this phone?")
         }
     }
 }
@@ -241,7 +216,7 @@ struct AdvancedSettingsView: View {
                     Task { await model.prepareOffline() }
                 } label: {
                     HStack {
-                        Label("Download the on-device model", systemImage: "arrow.down.circle")
+                        Label("Download the model", systemImage: "arrow.down.circle")
                         if model.isPreparingOffline {
                             Spacer()
                             ProgressView()
@@ -252,7 +227,7 @@ struct AdvancedSettingsView: View {
             } header: {
                 Text("On this iPhone")
             } footer: {
-                Text("Automatic picks the best on-device model this iPhone has, and the one that listens for your custom words when you have some. \u{201C}Custom vocabulary\u{201D} always uses that one. Downloading ahead means it works without a network later.")
+                Text("Download ahead to dictate without a network.")
             }
 
             Section {
@@ -277,7 +252,7 @@ struct AdvancedSettingsView: View {
             } header: {
                 Text("Pairing with a code (older PCs)")
             } footer: {
-                Text("For PCs with an older ShoutAbout: run python -m shoutabout pair on the PC and scan the code. The tunnel (Cloudflare) is only used when the PC isn't on your Wi-Fi.")
+                Text("On the PC, run python -m shoutabout pair, then scan the code.")
             }
 
             Section {
@@ -292,7 +267,7 @@ struct AdvancedSettingsView: View {
         .confirmationDialog("Forget the code pairing?", isPresented: $confirmForgetLegacy, titleVisibility: .visible) {
             Button("Forget", role: .destructive) { model.forgetLegacyPairing() }
         } message: {
-            Text("Removes the hub token, the Cloudflare token and the addresses from this iPhone.")
+            Text("Removes its tokens and addresses from this iPhone.")
         }
         .task {
             await model.refreshOfflineStatus()

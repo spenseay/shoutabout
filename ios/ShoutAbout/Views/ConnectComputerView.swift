@@ -62,7 +62,7 @@ struct ConnectComputerView: View {
                 Text("Find your computer")
                     .shoutHeadline(40)
                     .padding(.top, Theme.Spacing.huge + Theme.Spacing.xl)
-                Text("Open ShoutAbout on your PC. It shows up here when both are on the same Wi-Fi.")
+                Text("Open ShoutAbout on your PC, on the same Wi-Fi.")
                     .font(Theme.Typography.body(16))
                     .foregroundStyle(Theme.Colors.inkMuted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -82,16 +82,11 @@ struct ConnectComputerView: View {
                     }
                 }
 
-                if pairing.searchedLong, pairing.finder.computers.isEmpty {
-                    helpCard
-                }
-
-                PrimaryButton(title: "Scan a code instead", style: .secondary) { showScanner = true }
-                    .padding(.top, Theme.Spacing.s)
-
                 DisclosureGroup(isExpanded: $showMore) {
                     VStack(alignment: .leading, spacing: Theme.Spacing.m) {
-                        Text("Type the address ShoutAbout shows on your PC:")
+                        Button("Scan a code instead") { showScanner = true }
+                            .font(Theme.Typography.bold(15))
+                        Text("Or type the address your PC shows:")
                             .font(Theme.Typography.body(14))
                             .foregroundStyle(Theme.Colors.inkMuted)
                         HStack {
@@ -133,7 +128,7 @@ struct ConnectComputerView: View {
         InfoCard(
             systemImage: "wifi.exclamationmark",
             title: "Allow Local Network",
-            detail: "ShoutAbout needs it to find your PC on the Wi-Fi. Turn on Settings › ShoutAbout › Local Network."
+            detail: "Turn on Settings › ShoutAbout › Local Network."
         ) {
             Button("Open Settings") {
                 if let url = URL(string: UIApplication.openSettingsURLString) {
@@ -141,16 +136,6 @@ struct ConnectComputerView: View {
                 }
             }
             .font(Theme.Typography.bold(15))
-        }
-    }
-
-    private var helpCard: some View {
-        InfoCard(
-            systemImage: "desktopcomputer.trianglebadge.exclamationmark",
-            title: "No computer yet?",
-            detail: "Install ShoutAbout on your Windows PC and open it. Make sure the PC and this iPhone use the same Wi-Fi."
-        ) {
-            EmptyView()
         }
     }
 
@@ -181,7 +166,7 @@ struct ConnectComputerView: View {
             Text("Click Allow on your PC")
                 .shoutHeadline(40)
                 .multilineTextAlignment(.center)
-            Text("\(name) is asking if this iPhone may type on it. Check the code matches:")
+            Text("Check the code matches on \(name).")
                 .font(Theme.Typography.body(16))
                 .foregroundStyle(Theme.Colors.inkMuted)
                 .multilineTextAlignment(.center)
@@ -214,7 +199,7 @@ struct ConnectComputerView: View {
                 .shoutPunch(trigger: 1, strength: 1.4)
             Text("Connected!")
                 .shoutHeadline(48)
-            Text("Your words can now land on \(name).")
+            Text(name)
                 .font(Theme.Typography.body(17))
                 .foregroundStyle(Theme.Colors.inkMuted)
                 .multilineTextAlignment(.center)
@@ -272,7 +257,7 @@ private struct ComputerRow: View {
                         .font(Theme.Typography.bold(19))
                         .foregroundStyle(Theme.Colors.cardInk)
                         .lineLimit(1)
-                    Text(computer.isCompatible ? "ShoutAbout \(computer.version ?? "")" : "Needs a newer ShoutAbout on this iPhone")
+                    Text(computer.isCompatible ? "ShoutAbout \(computer.version ?? "")" : "Update ShoutAbout on this iPhone")
                         .font(Theme.Typography.body(13))
                         .foregroundStyle(Theme.Colors.cardInkMuted)
                 }
@@ -352,30 +337,19 @@ final class PairingModel {
     }
 
     private(set) var step: Step = .searching
-    /// No PC turned up after a few seconds: show the help card.
-    private(set) var searchedLong = false
     let finder = ComputerFinder()
 
     @ObservationIgnored private var task: Task<Void, Never>?
-    @ObservationIgnored private var hintTask: Task<Void, Never>?
     @ObservationIgnored private var isDemo = false
 
     func start() {
         guard !isDemo else { return }
         finder.start()
-        guard hintTask == nil else { return }
-        hintTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(6))
-            guard !Task.isCancelled else { return }
-            self?.searchedLong = true
-        }
     }
 
     func stop() {
         task?.cancel()
         task = nil
-        hintTask?.cancel()
-        hintTask = nil
         finder.stop()
     }
 
@@ -386,7 +360,7 @@ final class PairingModel {
         task = Task { [weak self] in
             guard let self else { return }
             guard let base = await self.finder.baseURL(for: computer) else {
-                self.step = .problem("Couldn't find \(computer.name) on the network. Is it still on?")
+                self.step = .problem("Couldn't find \(computer.name). Is it still on?")
                 return
             }
             await self.pair(base: base, name: computer.name, model: model)
@@ -396,7 +370,7 @@ final class PairingModel {
     func connect(address: String, model: AppModel) {
         guard !isDemo else { return }
         guard let base = URLRules.lanBaseURL(address) else {
-            step = .problem("That isn't an address on your home network. Type it like 192.168.1.20:8766.")
+            step = .problem("Type a home address, like 192.168.1.20:8766.")
             return
         }
         task?.cancel()
@@ -453,10 +427,10 @@ final class PairingModel {
                 try model.applyDevicePairing(token: token, hub: hub, address: base, fallbackName: pcName)
                 step = .connected(model.computerName ?? pcName)
             } catch {
-                step = .problem("Couldn't save the connection on this iPhone: \(error.localizedDescription)")
+                step = .problem("Couldn't save the connection: \(error.localizedDescription)")
             }
         case .denied:
-            step = .problem("\(pcName) said no. Try again, and click Allow on the PC.")
+            step = .problem("\(pcName) said no. Try again and click Allow.")
         case .expired:
             step = .problem("Nobody clicked Allow in time. Try again.")
         case .cancelled:
