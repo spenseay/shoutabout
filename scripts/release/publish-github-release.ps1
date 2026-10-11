@@ -220,7 +220,7 @@ if ($NotesFile) {
     $notes = (Resolve-Path -LiteralPath $NotesFile).Path
 } else {
     $notes = Join-Path $work 'notes.md'
-    $lines = @("ShoutAbout $Version`: private voice dictation. Free. https://shoutabout.fyi", '')
+    $lines = @("Private voice dictation. Free. https://shoutabout.fyi", '')
     if ($files.Contains('ShoutAbout-Setup.exe')) {
         $lines += @(
             '**Windows** (10 version 1809 or later, or 11, 64-bit): download **ShoutAbout-Setup.exe**, open it.',
@@ -241,7 +241,7 @@ if ($NotesFile) {
 }
 
 $ghArgs = @('release', 'create', $tag) + @($files.Keys | ForEach-Object { $files[$_].Path }) + @($sums,
-    '--repo', $Repo, '--title', "ShoutAbout $Version", '--notes-file', $notes)
+    '--repo', $Repo, '--title', 'ShoutAbout', '--notes-file', $notes)
 if ($Draft) { $ghArgs += '--draft' } else { $ghArgs += '--latest' }
 
 # ---------------------------------------------------------------------- publish
