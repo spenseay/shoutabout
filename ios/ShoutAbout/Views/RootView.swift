@@ -15,6 +15,13 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.3), value: model.onboardingDone)
+        .overlay {
+            if model.keyboardListeningScreen {
+                KeyboardListeningView()
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: model.keyboardListeningScreen)
         .tint(Theme.Colors.tint)
 #if DEBUG
         .preferredColorScheme(ScreenshotScene.forcedColorScheme)

@@ -88,7 +88,7 @@ def test_ios_workflow(config):
     assert "bash ios/scripts/install-xcodegen.sh" in text and "generate" in text
     assert "keychain initialize" in text and "keychain add-certificates" in text
     assert 'fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create' in text
-    assert "--strict-match-identifier" not in text  # the widgets' bundle ID must match too
+    assert "--strict-match-identifier" not in text  # the extensions' bundle IDs must match too
     assert "xcode-project use-profiles" in text
     assert "next-build-number.sh" in text and "CM_ENV" in text
     assert "CURRENT_PROJECT_VERSION=$IOS_BUILD_NUMBER" in text
@@ -100,6 +100,32 @@ def test_ios_workflow(config):
     assert publish["issuer_id"] == "$APP_STORE_CONNECT_ISSUER_ID"
     # Internal testers need no beta review; submit_to_testflight would start one.
     assert publish["submit_to_testflight"] is False
+
+
+def test_signing_covers_every_shipped_ios_target(config):
+    """fetch-signing-files "$BUNDLE_ID" matches bundle IDs by prefix: the app, the widgets and
+    the keyboard all sit under it, with the App Group, and are iPhone-only (an iPad build must
+    allow every orientation: App Store Connect rejects the upload, ITMS-90474)."""
+    yaml = pytest.importorskip("yaml")
+    project = yaml.safe_load((REPO / "ios" / "project.yml").read_text("utf-8"))
+    xcconfig = (REPO / "ios" / "Config" / "Base.xcconfig").read_text("utf-8")
+    prefix = re.search(r"^BUNDLE_ID_PREFIX = (\S+)$", xcconfig, re.M).group(1)
+    bundle_id = config["workflows"]["ios-testflight"]["environment"]["vars"]["BUNDLE_ID"]
+    shipped = {
+        "ShoutAbout": "app",
+        "ShoutAboutWidgets": "app.widgets",
+        "ShoutAboutKeyboard": "app.keyboard",
+    }
+    for name, suffix in shipped.items():
+        target = project["targets"][name]
+        base = target["settings"]["base"]
+        assert base["PRODUCT_BUNDLE_IDENTIFIER"] == f"$(BUNDLE_ID_PREFIX).{suffix}", name
+        assert f"{prefix}.{suffix}".startswith(bundle_id), name
+        assert base["TARGETED_DEVICE_FAMILY"] == "1", name
+        groups = target["entitlements"]["properties"]["com.apple.security.application-groups"]
+        assert groups == ["$(APP_GROUP_ID)"], name
+    embedded = [dep["target"] for dep in project["targets"]["ShoutAbout"]["dependencies"]]
+    assert embedded == ["ShoutAboutWidgets", "ShoutAboutKeyboard"]
 
 
 def test_mac_workflows(config):

@@ -6,7 +6,7 @@
   user's own devices (this iPhone and their own computer), never to the developer or a third party.
   Required-reason APIs:
     UserDefaults  CA92.1  settings read/written by the app itself
-                  1C8F.1  settings shared with the app's own widget extension (App Group)
+                  1C8F.1  settings shared with the app's own extensions (App Group: widgets, keyboard)
     System boot time 35F9.1  elapsed time between in-app events (recording length, round trip)
 -->
 <plist version="1.0">

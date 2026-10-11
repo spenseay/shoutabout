@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Settings (a sheet from the main screen): the computer, the Action Button guide, a couple
 /// of plain switches. Everything technical lives under Advanced.
@@ -26,6 +27,11 @@ struct SettingsView: View {
                         .navigationBarTitleDisplayMode(.inline)
                     } label: {
                         Label("One press to talk", systemImage: "button.horizontal.top.press")
+                    }
+                    KeyboardSetupRow()
+                } footer: {
+                    if !model.keyboardOn {
+                        Text("Keyboards › ShoutAbout, then Allow Full Access.")
                     }
                 }
                 Section {
@@ -168,6 +174,36 @@ struct SettingsView: View {
         let short = info?["CFBundleShortVersionString"] as? String ?? "?"
         let build = info?["CFBundleVersion"] as? String ?? "?"
         return "\(short) (\(build))"
+    }
+}
+
+/// Settings › Keyboard: "On" once the ShoutAbout keyboard has come up with Full Access;
+/// otherwise a button into ShoutAbout's page in the Settings app, where iOS lists its keyboard.
+private struct KeyboardSetupRow: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        if model.keyboardOn {
+            LabeledContent {
+                Text("On")
+            } label: {
+                Label("Keyboard", systemImage: "keyboard")
+            }
+        } else {
+            Button {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    openURL(url)
+                }
+            } label: {
+                LabeledContent {
+                    Text("Turn on")
+                        .font(Theme.Typography.bold(15))
+                } label: {
+                    Label("Keyboard", systemImage: "keyboard")
+                }
+            }
+        }
     }
 }
 

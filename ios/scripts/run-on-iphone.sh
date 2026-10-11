@@ -98,7 +98,8 @@ cat <<'EOF'
    2. At the top of the Xcode window, click the device name and choose your iPhone.
    3. Press Run (the play button). The first build takes a few minutes.
    If Xcode says "Signing requires a development team": click the error, choose
-   "Your Name (Personal Team)" in Team, for the ShoutAbout and ShoutAboutWidgets targets.
+   "Your Name (Personal Team)" in Team, for the ShoutAbout, ShoutAboutWidgets and
+   ShoutAboutKeyboard targets.
    If the iPhone says "Developer Mode required": Settings > Privacy & Security >
    Developer Mode > On, restart the phone, then press Run again.
    If it says "Untrusted Developer": Settings > General > VPN & Device Management >

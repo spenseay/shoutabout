@@ -55,6 +55,8 @@ Open [developer.apple.com/account/resources/identifiers](https://developer.apple
       **Save** (and **Confirm** if it warns that profiles will be regenerated).
 3. **App ID for the widgets**: repeat step 2 with Description `ShoutAbout Widgets` and Bundle
    ID `fyi.shoutabout.app.widgets`, with the same App Group.
+4. **App ID for the keyboard**: the same with Description `ShoutAbout Keyboard` and Bundle ID
+   `fyi.shoutabout.app.keyboard`, with the same App Group.
 
 The Mac app needs no App ID.
 
@@ -262,7 +264,7 @@ The build page shows each step; the red one has the error. Common first-build pr
 | `FORBIDDEN_ERROR`, `403`, `not allowed to perform this operation` | The API key's access is too low | A5 with **Admin**, then update the three API values in C2 |
 | `A required agreement is missing or has expired` | Apple updated an agreement | Part A1 |
 | `Did not find Bundle ID with identifier fyi.shoutabout.app` | The App IDs don't exist (or have a typo) | Part A2 |
-| `… doesn't include the com.apple.security.application-groups entitlement` or `doesn't match the entitlements file's value for … application-groups` | App Groups isn't ticked or the group isn't assigned on one of the two App IDs | Part A2, steps 2.3-2.5 and 3, for **both** App IDs; then run D1 again (a new profile is made automatically) |
+| `… doesn't include the com.apple.security.application-groups entitlement` or `doesn't match the entitlements file's value for … application-groups` | App Groups isn't ticked or the group isn't assigned on one of the App IDs | Part A2, steps 2.3-2.5, 3 and 4, for **every** App ID; then run D1 again (a new profile is made automatically) |
 | `You already have a current Distribution certificate` / `maximum number of certificates` | Apple's limit on Apple Distribution certificates; the build tries to make one for your key | developer.apple.com > Certificates: revoke an Apple Distribution certificate you don't use, run D1 again |
 | `App Store Connect has no app with bundle ID fyi.shoutabout.app` | No app record | Part A3 |
 | Upload refused: `bundle version must be higher` | A build with that number exists | Run D1 again (the number is read from TestFlight each time) |
@@ -306,14 +308,14 @@ unavailable).
 3. `keychain initialize` (a temporary keychain);
    `app-store-connect fetch-signing-files fyi.shoutabout.app --type IOS_APP_STORE --create`
    fetches, or creates, the App Store provisioning profiles for `fyi.shoutabout.app` and
-   every bundle ID under it (the widgets: the prefix match is the CLI's default) and the
-   Apple Distribution certificate for `CERTIFICATE_PRIVATE_KEY`;
-   `keychain add-certificates`; `xcode-project use-profiles` switches both targets to
+   every bundle ID under it (the widgets and the keyboard: the prefix match is the CLI's
+   default) and the Apple Distribution certificate for `CERTIFICATE_PRIVATE_KEY`;
+   `keychain add-certificates`; `xcode-project use-profiles` switches all three targets to
    manual signing with those profiles and writes the export options
    (`manageAppVersionAndBuildNumber` off, so the number below is kept).
 4. `ios/scripts/next-build-number.sh`: finds the app by bundle ID and asks
    `app-store-connect get-latest-testflight-build-number`; build number = that + 1 (1 for the
-   first upload), passed as `CURRENT_PROJECT_VERSION` (app and widgets get the same).
+   first upload), passed as `CURRENT_PROJECT_VERSION` (the app and its extensions get the same).
 5. `xcode-project build-ipa` (Release, `generic/platform=iOS`). No tests in this workflow, to
    save minutes; the unit tests are in `ios.yml` for when GitHub Actions runs again.
 6. Publishing: uploads the .ipa with the same API key. `submit_to_testflight` is off on
@@ -395,7 +397,7 @@ PyObjC modules, the whole test suite and ruff. Unproven until the first builds:
 
 - Codemagic's machine: Xcode 26.5 on `mac_mini_m2`, the CLI tools' exact output and
   options as installed there, `$CM_ENV`, the shebang lines in the YAML scripts;
-- the iPhone signing: profiles for both bundle IDs with the App Group, `use-profiles`
+- the iPhone signing: profiles for the three bundle IDs with the App Group, `use-profiles`
   resolving the bundle IDs from `Base.xcconfig`, the archive and export, the upload, and
   TestFlight's internal distribution;
 - the Mac build with uv's Python on Codemagic, the number of files to sign and the time

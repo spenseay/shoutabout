@@ -12,10 +12,12 @@
 // Reverse-DNS prefix for every bundle ID:
 //   app      $(BUNDLE_ID_PREFIX).app
 //   widgets  $(BUNDLE_ID_PREFIX).app.widgets
+//   keyboard $(BUNDLE_ID_PREFIX).app.keyboard
 //   tests    $(BUNDLE_ID_PREFIX).app.tests
 BUNDLE_ID_PREFIX = fyi.shoutabout
 
-// App Group shared by the app and the widget extension (settings, pending commands).
+// App Group shared by the app and its extensions (settings, pending commands, the keyboard's
+// hand-off).
 // The same identifier is used as the keychain access group for the hub secrets.
 APP_GROUP_ID = group.$(BUNDLE_ID_PREFIX).app
 
