@@ -1,8 +1,8 @@
 # The Windows installer
 
 ShoutAbout for Windows ships as one file, `ShoutAbout-Setup-<version>.exe`. People download it,
-double-click it, click **Next** and **Install**, and ShoutAbout starts: the yellow mouth appears
-next to the clock. They need no Python, no terminal and no config files.
+double-click it, click **Next** and **Install**, and ShoutAbout starts. They need no Python, no
+terminal and no config files.
 
 This page covers what the installer does to a PC, how it's built and tested, and how to release
 it. The developer setup (a clone, `uv`, `scripts\setup.ps1`) still works and is described in
@@ -30,8 +30,9 @@ it. The developer setup (a clone, `uv`, `scripts\setup.ps1`) still works and is 
 3. Click **Next**. Leave **Start ShoutAbout when I sign in** ticked, unless you don't want it.
 4. On the last page, leave **Start ShoutAbout now** ticked and click **Finish**.
 
-ShoutAbout then starts in the notification area, next to the clock. Its own setup window
-takes it from there.
+ShoutAbout then starts, and its own setup window takes it from there. The wizard itself says
+as little as possible: one line on the welcome page and nothing but "ShoutAbout is ready" on
+the last one.
 
 **"Windows protected your PC".** The first releases aren't code-signed, so Microsoft
 Defender SmartScreen warns about an unrecognised app. Click **More info**, check that the app

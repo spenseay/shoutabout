@@ -27,7 +27,6 @@ BLACK = "#0A0A0A"
 RED = "#FF1A1A"
 WHITE = "#FFFFFF"
 PAPER = "#FFF8C4"  # a lighter yellow for cards
-CARD_OFF = "#FFF3A0"
 MUTED = "#4A4A4A"  # secondary text (7:1 on yellow)
 GREY = "#8C8C84"
 

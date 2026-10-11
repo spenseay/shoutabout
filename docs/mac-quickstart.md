@@ -56,13 +56,11 @@ goes away once Accessibility is on), and macOS's **"Background Items Added"** no
 
 The ShoutAbout window opens by itself:
 
-1. **"Let's get you talking"**: it checks your Mac and downloads the speech model
-   (about 490 MB, a minute or two). Click **Next** when the bar is full.
-2. **"How will you use ShoutAbout?"**: leave **Talk to this Mac** on. Turn on **Talk from
-   my iPhone** if you want to pair your phone now (step 6). Click **Next**.
-3. **"Try it"**: press **Right ⌘ Command** once (the ⌘ key to the right of the space bar),
+1. **"Getting ready"**: it downloads the speech model (about 490 MB, a minute or two) and
+   moves on by itself.
+2. **"Try it"**: press **Right ⌘ Command** once (the ⌘ key to the right of the space bar),
    say "This is my first dictation.", press **Right ⌘** again. The words appear in the box.
-4. **"You're all set!"** → **Done**.
+3. **"You're all set"** → **Done**, or **Connect your iPhone** to pair your phone now (step 6).
 
 ## 5. Dictate anywhere
 

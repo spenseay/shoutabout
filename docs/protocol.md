@@ -84,7 +84,7 @@ Body (JSON, at most 2 KB; unknown fields are ignored):
 * `code`: 4 random digits. The phone shows it; the PC shows the same code in its prompt.
 
 The PC immediately shows an approval prompt (a small always-on-top window, or inline in the
-setup window when it's open on the iPhone card):
+setup window when it's showing "Connect your iPhone"):
 
 > **Sam's iPhone wants to dictate to this PC.**  CODE **4821**  [Allow] [Don't allow]
 
