@@ -122,6 +122,47 @@ EOF
   say "Done: download $CSR_NAME from this build's Artifacts and upload it to Apple"
 }
 
+probe() {  # probe IDENTITY [codesign options...]: sign a scratch copy of /usr/bin/true
+  local identity="$1"
+  shift
+  cp -f /usr/bin/true "$WORK/probe"
+  if codesign --force --timestamp "$@" --sign "$identity" "$WORK/probe" 2>"$WORK/probe.log"; then
+    return 0
+  fi
+  sed 's/^/  codesign: /' "$WORK/probe.log" >&2
+  return 1
+}
+
+repair() {  # repair IDENTITY KEYCHAIN: what's wrong (Apple's checks), then known fixes in turn
+  local identity="$1" keychain_path="$2" leaf="$WORK/leaf.pem"
+  say "codesign failed: checking the certificate chain and the key"
+  security find-certificate -a -c "Developer ID Application" -Z "$keychain_path" \
+    | awk '/^SHA-1/ { n++ } END { print "  Developer ID Application certificates in the keychain: " n+0 }'
+  security find-certificate -c "Developer ID Application" -p "$keychain_path" > "$leaf" || true
+  openssl x509 -in "$leaf" -noout -subject -issuer -enddate 2>&1 | sed 's/^/  leaf /' || true
+  echo "  chain check (security verify-cert, code signing policy):"
+  security verify-cert -c "$leaf" -p codeSign 2>&1 | sed 's/^/    /' || true
+  echo "  trust settings (user, then admin):"
+  { security dump-trust-settings 2>&1; security dump-trust-settings -d 2>&1; } \
+    | head -n 20 | sed 's/^/    /' || true
+  security list-keychains -d user | sed 's/^/  search list: /' || true
+
+  say "Trying fixes"
+  echo "- unlock the keychain again"
+  security unlock-keychain -p "" "$keychain_path" 2>&1 | sed 's/^/  /' || true
+  if probe "$identity"; then echo "  that fixed it"; return 0; fi
+  echo "- the intermediate in the login keychain too"
+  security add-certificates -k "$HOME/Library/Keychains/login.keychain-db" \
+    "$WORK/DeveloperIDG2CA.cer" 2>&1 | grep -v "already exists" | sed 's/^/  /' || true
+  if probe "$identity"; then echo "  that fixed it"; return 0; fi
+  # Diagnostics only (the build doesn't use these options):
+  echo "- (diagnostic) only this keychain (--keychain)"
+  probe "$identity" --keychain "$keychain_path" && echo "  works with --keychain"
+  echo "- (diagnostic) no secure timestamp"
+  probe "$identity" --timestamp=none && echo "  works without a timestamp: timestamp.apple.com is the problem"
+  return 1
+}
+
 install() {
   need_env
   KEY="$(key_file)"
@@ -140,20 +181,28 @@ Run the mac-signing-request workflow once, upload the file it makes to Apple
   keychain initialize
   keychain add-certificates --certificate "$WORK/certificates/*.p12"
   # The Developer ID intermediate certificates (G2 for certificates made since 2019, and the
-  # original), so codesign can build the chain even on a machine that lacks them.
+  # original), so codesign can build the chain to Apple's root. They go into the System
+  # keychain: in a session without a logged-in desktop (a build machine) the trust service
+  # doesn't look for intermediates in the user's keychains, and codesign then fails with
+  # "unable to build chain to self-signed root" + errSecInternalComponent (Apple forums
+  # threads 733941/737019). Codemagic's machines have the iPhone intermediates there, not
+  # these. Also into the temporary keychain, for a machine where sudo needs a password.
   local keychain_path
   keychain_path="$(security default-keychain | sed -e 's/^ *"//' -e 's/" *$//')"
   for ca in DeveloperIDG2CA.cer DeveloperIDCA.cer; do
     if curl -fsSL --retry 3 -o "$WORK/$ca" "https://www.apple.com/certificateauthority/$ca"; then
       # add-certificates takes DER .cer files as they are (import guesses the format).
+      sudo -n security add-certificates -k /Library/Keychains/System.keychain "$WORK/$ca" 2>&1 \
+        | grep -v "already exists" | sed 's/^/  System keychain: /' || true
       security add-certificates -k "$keychain_path" "$WORK/$ca" 2>&1 \
         | grep -v "already exists" || true
     else
       echo "(couldn't download $ca; relying on the machine's own copy)"
     fi
   done
-  security find-certificate -a -c "Developer ID Certification Authority" "$keychain_path" \
-    | awk -F'"' '/"labl"/ { print "  intermediate: " $4 }' || true
+  security find-certificate -a -c "Developer ID Certification Authority" \
+    /Library/Keychains/System.keychain "$keychain_path" \
+    | awk -F'"' '/^keychain:/ { k = $2 } /"labl"/ { print "  intermediate: " $4 " in " k }' || true
 
   local identity
   identity="$(security find-identity -v -p codesigning \
@@ -170,11 +219,8 @@ Run the mac-signing-request workflow once, upload the file it makes to Apple
     >/dev/null 2>&1 || echo "(couldn't set the key's partition list; going on)"
   # Sign a scratch copy of a system binary now, so a keychain problem fails here in seconds
   # instead of after the 1-minute build, with codesign's own words in the log.
-  cp /usr/bin/true "$WORK/probe"
-  if ! codesign --force --timestamp --sign "$identity" "$WORK/probe" 2>"$WORK/probe.log"; then
-    cat "$WORK/probe.log" >&2
-    security list-keychains -d user >&2 || true
-    fail "codesign can't sign with the Developer ID identity (codesign's message is above)."
+  if ! probe "$identity" && ! repair "$identity" "$keychain_path"; then
+    fail "codesign can't sign with the Developer ID identity (codesign's messages are above)."
   fi
   echo "  test signature ok"
   if [ -n "${CM_ENV:-}" ]; then
