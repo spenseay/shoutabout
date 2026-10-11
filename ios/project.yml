@@ -42,6 +42,7 @@ targets:
         buildPhase: resources
     dependencies:
       - target: ShoutAboutWidgets
+      - target: ShoutAboutKeyboard
     settings:
       base:
         PRODUCT_NAME: ShoutAbout
@@ -130,6 +131,53 @@ targets:
         ShoutAboutAppGroup: $(APP_GROUP_ID)
     entitlements:
       path: Config/ShoutAboutWidgets.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - $(APP_GROUP_ID)
+
+  # The ShoutAbout keyboard: the mouth, the globe (when iOS wants one), space, delete, return.
+  # A keyboard can't record, so the app does and the keyboard types the result; they talk
+  # through the App Group (hence RequestsOpenAccess) and Darwin notifications. Keyboards get
+  # little memory (~48-70 MB): only the small shared pieces below, none of the app's code.
+  ShoutAboutKeyboard:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ShoutAboutKeyboard
+      - path: Shared/Core/AppGroup.swift
+      - path: Shared/Core/KeyboardBridge.swift
+      - path: Shared/Core/KeyboardSignals.swift
+      - path: Shared/Core/ZipTimeline.swift
+      - path: Shared/UI/Theme.swift
+      - path: Shared/UI/Mouth.swift
+      - path: Shared/UI/MouthMotion.swift
+      - path: Shared/UI/ZipMouth.swift
+      - path: Privacy/Keyboard/PrivacyInfo.xcprivacy
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_NAME: ShoutAboutKeyboard
+        PRODUCT_BUNDLE_IDENTIFIER: $(BUNDLE_ID_PREFIX).app.keyboard
+        TARGETED_DEVICE_FAMILY: "1"  # must match the app (see above)
+        SKIP_INSTALL: YES
+        APPLICATION_EXTENSION_API_ONLY: YES
+    info:
+      path: Config/ShoutAboutKeyboard-Info.plist
+      properties:
+        CFBundleDisplayName: ShoutAbout
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.keyboard-service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).KeyboardViewController
+          NSExtensionAttributes:
+            IsASCIICapable: false
+            PrefersRightToLeft: false
+            PrimaryLanguage: en-US
+            RequestsOpenAccess: true
+        ShoutAboutAppGroup: $(APP_GROUP_ID)
+    entitlements:
+      path: Config/ShoutAboutKeyboard.entitlements
       properties:
         com.apple.security.application-groups:
           - $(APP_GROUP_ID)

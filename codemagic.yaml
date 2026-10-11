@@ -78,17 +78,18 @@ workflows:
           XCODEGEN="$(bash ios/scripts/install-xcodegen.sh "$HOME/xcodegen" | tail -n 1)"
           cd ios
           "$XCODEGEN" generate
-      - name: Signing files from Apple (App Store distribution, app + widgets)
+      - name: Signing files from Apple (App Store distribution, app + widgets + keyboard)
         script: |
           #!/bin/bash
           set -euo pipefail
           keychain initialize
           # Provisioning profiles for fyi.shoutabout.app and every bundle ID under it (the
-          # widgets), and the Apple Distribution certificate for CERTIFICATE_PRIVATE_KEY:
-          # fetched, or created if Apple has none yet.
+          # widgets, fyi.shoutabout.app.widgets, and the keyboard, fyi.shoutabout.app.keyboard:
+          # the CLI matches by prefix), and the Apple Distribution certificate for
+          # CERTIFICATE_PRIVATE_KEY: fetched, or created if Apple has none yet.
           app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
           keychain add-certificates
-          # Manual signing with those profiles for both targets, and the export options.
+          # Manual signing with those profiles for all three targets, and the export options.
           xcode-project use-profiles --project "$XCODE_PROJECT" \
             --custom-export-options '{"manageAppVersionAndBuildNumber": false}'
       - name: Build number (newest TestFlight build + 1)

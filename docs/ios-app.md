@@ -95,6 +95,17 @@ tour runs in the iOS Simulator. Nothing has run on a real iPhone yet (see
     clipboard, with a short note.
 - **Control Center**: **Dictate** (the same background recording) and a **Computer / Phone**
   toggle. **Lock Screen widget**: the mouth; tapping it opens the app recording.
+- **The ShoutAbout keyboard** (Settings › Keyboard): a big mouth, the globe (when iOS wants
+  one), space, delete (hold to repeat) and return. Tap the mouth to talk, again to stop: the
+  words land at the cursor by themselves. Every phone dictation (any trigger) is typed when
+  the keyboard is on screen, or comes up within a minute; computer ones never are. A
+  keyboard can't use the microphone, so the app records: a **keyboard session** keeps the
+  app's microphone input running in the background (an `AVAudioEngine` tap that throws the
+  audio away between dictations) so a tap starts at once, and it ends after 5 minutes
+  without a dictation or on an interruption. Without a session, the keyboard opens
+  `shoutabout://keyboard`; the app opens one, starts listening and says only "Listening /
+  Go back to keep typing.". Needs Full Access (the App Group); without it the keyboard
+  says "Allow Full Access to dictate". Details: `Shared/Core/KeyboardBridge.swift`.
 - **Siri / Shortcuts**: "Dictate with ShoutAbout", "Open ShoutAbout and dictate" (the
   foreground fallback), "Toggle ShoutAbout target", plus Set Dictation Target.
 - **History**: off by default (Settings › Keep history: "Saves what you dictate on this phone
@@ -118,7 +129,7 @@ tour runs in the iOS Simulator. Nothing has run on a real iPhone yet (see
 ios/
   project.yml                 XcodeGen spec (the .xcodeproj is generated, never committed)
   Config/Base.xcconfig        BUNDLE_ID_PREFIX, APP_GROUP_ID, DEVELOPMENT_TEAM (empty), versions
-  Privacy/{App,Widgets}/      PrivacyInfo.xcprivacy for the app and the widget extension
+  Privacy/{App,Widgets,Keyboard}/  PrivacyInfo.xcprivacy for the app and each extension
   scripts/make_icons.py       pure-Python (zlib) renderer for the app icons
   Shared/                     compiled into the app AND the widget extension
     Core/                     pure Foundation logic, also compiled into the unit tests
@@ -138,11 +149,16 @@ ios/
       SharedSettings.swift    App Group defaults (target, paired computer, /info cache, keep
                               history, pending copy, ...)
       DeviceFeatures.swift    does this iPhone have an Action Button (model identifier)
+      AppGroup.swift          the App Group id and its shared defaults
+      KeyboardBridge.swift    the keyboard <-> app link: state + heartbeat, tap decisions,
+                              the dictation hand-off and its once-only claim
+      KeyboardSignals.swift   Darwin notifications (fyi.shoutabout.keyboard.*)
     LiveActivity/             DictationActivityAttributes (ActivityKit)
     UI/Theme.swift            ALL brand tokens (colours, type, spacing, geometry, motion)
     UI/Mouth.swift            MouthView (animatable shapes), TalkingMouthView, .shoutPunch()
     UI/ZipMouth.swift         ZipMouthView: the "done" zip, drawn from a ZipPose
                               (Core/ZipTimeline.swift: geometry + timeline, unit-tested)
+    UI/MouthMotion.swift      BreathingMouth, ZipFinishMouth (app button and keyboard)
     Intents/                  DictateIntent, StopDictationIntent, DictateInAppIntent,
                               Toggle/Set target intents, the Control Center toggle intent
   ShoutAbout/                 the app
@@ -157,6 +173,9 @@ ios/
     Resources/                Assets.xcassets (icons, launch colour), Fonts (+ OFL licences)
   ShoutAboutWidgets/          widget extension: Control Center controls, Lock Screen widget,
                               DictationLiveActivity (Dynamic Island + Lock Screen UI)
+  ShoutAboutKeyboard/         keyboard extension: KeyboardViewController, KeyboardView,
+                              AppOpener (opens the app from the keyboard); compiles only
+                              the shared files project.yml lists, none of the app's code
   ShoutAboutTests/            XCTest logic tests (no host app), mocked transport
   ShoutAboutUITests/          XCUITest screenshot tour (Debug sample data)
 ```
@@ -280,6 +299,7 @@ time).
   |---|---|
   | App | `$(BUNDLE_ID_PREFIX).app` → `fyi.shoutabout.app` |
   | Widgets | `fyi.shoutabout.app.widgets` |
+  | Keyboard | `fyi.shoutabout.app.keyboard` |
   | Unit tests / UI tests | `fyi.shoutabout.app.tests` / `fyi.shoutabout.app.uitests` |
   | App Group | `group.fyi.shoutabout.app` |
 
@@ -415,6 +435,8 @@ surprises.
       `group.fyi.shoutabout.app`, then **Continue** and **Save**.
 3. **App ID for the widgets:** repeat step 2 with Description `ShoutAbout Widgets` and Bundle
    ID `fyi.shoutabout.app.widgets`, with the same App Group.
+4. **App ID for the keyboard:** the same with Description `ShoutAbout Keyboard` and Bundle ID
+   `fyi.shoutabout.app.keyboard`, with the same App Group.
 
 If `fyi.shoutabout.app` is taken, change `BUNDLE_ID_PREFIX` in `ios/Config/Base.xcconfig`. All
 the identifiers follow from it.
@@ -533,10 +555,10 @@ If the run fails:
 
 ## App Store readiness
 
-- `PrivacyInfo.xcprivacy` for the app and the widget extension: no tracking, no tracking
+- `PrivacyInfo.xcprivacy` for the app and each extension: no tracking, no tracking
   domains, no collected data (audio and text only go between the user's own devices).
   Required-reason APIs: UserDefaults `CA92.1` (the app's own settings) and `1C8F.1` (shared
-  with its own widget extension through the App Group); system boot time `35F9.1` (elapsed
+  with its own extensions through the App Group); system boot time `35F9.1` (elapsed
   time between in-app events).
 - Info.plist: `NSMicrophoneUsageDescription`, `NSSpeechRecognitionUsageDescription`,
   `NSCameraUsageDescription` (QR code only), `NSLocalNetworkUsageDescription`,
@@ -544,6 +566,9 @@ If the run fails:
   `audio`, `ITSAppUsesNonExemptEncryption = NO`.
 - Display name **ShoutAbout**; version `MARKETING_VERSION = 1.0.0` in `Config/Base.xcconfig`,
   build number from the CI run.
+- The keyboard (`RequestsOpenAccess`): fine for TestFlight. Before the App Store, guideline
+  4.4.1 expects a keyboard to offer typing and to work without Full Access; this one has no
+  letter keys and only space / delete / return without it.
 
 ## What's untested
 
@@ -563,6 +588,9 @@ None of this has been tried on a real iPhone:
 - recording itself (AAC 16 kHz acceptance, metering), real uploads, the clipboard written from
   the background, on-device transcription and model downloads, haptics
 - the Control Center controls, the Lock Screen widget, App Shortcuts phrases and Siri
+- the **keyboard**: opening the app from it (the responder-chain call), the system's back
+  link afterwards, the background keyboard session (does iOS keep the input running and
+  the app alive for 5 minutes), Darwin start/stop, auto-typing, memory, Full Access
 - keychain access groups with real entitlements, the App Group shared with the extension
 - the `testflight` job (signing, export, upload): never run, the secrets don't exist yet
 
