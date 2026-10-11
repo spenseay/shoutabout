@@ -68,9 +68,9 @@ IOS_SHOTS = [
 # (source file, output name, kind). kind: "window" = a PC window, kept at full size;
 # "alpha" = a transparent image (the pill, from overlay.write_state_pngs at 4x).
 PC_SHOTS = [
-    ("setup-1-ready.png", "pc-setup-ready", "window"),
-    ("setup-2-use.png", "pc-setup-use", "window"),
-    ("setup-3-try.png", "pc-setup-try", "window"),
+    ("setup-1-downloading.png", "pc-setup-ready", "window"),
+    ("setup-2-try.png", "pc-setup-try", "window"),
+    ("setup-4-phone.png", "pc-setup-phone", "window"),
     ("approval-prompt.png", "pc-approval", "window"),
     ("overlay-listening-loud.png", "pc-pill-listening", "alpha"),
 ]
