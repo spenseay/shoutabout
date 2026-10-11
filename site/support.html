@@ -45,7 +45,7 @@
   <div class="page-hero">
     <div class="wrap">
       <h1 class="h1">Help</h1>
-      <p class="lead">Quick answers and quick fixes. Most things take a minute to sort out.</p>
+      <p class="lead">Answers and quick fixes.</p>
       <nav aria-label="On this page">
         <ul class="toc">
           <li><a href="#questions">Questions</a></li>
@@ -67,67 +67,40 @@
       <div class="faq">
         <details>
           <summary>Is it really free?</summary>
-          <div class="faq__answer"><p>Yes. ShoutAbout is free to download and use. No ads, no account, no trial, no in-app purchases.</p></div>
+          <div class="faq__answer"><p>Yes. No ads, no account, no trial, no in-app purchases.</p></div>
+        </details>
+        <details>
+          <summary>Is it private?</summary>
+          <div class="faq__answer"><p>Yes. Speech is turned into text on your computer or your iPhone, and we never receive your audio or your words. See the <a href="/privacy">privacy policy</a>.</p></div>
         </details>
         <details>
           <summary>What does it run on?</summary>
           <div class="faq__answer">
             <ul>
-              <li><strong>Windows:</strong> Windows 10 (version 1809 or later) or Windows 11, 64-bit. An NVIDIA graphics card makes it faster, but any PC works.</li>
-              <li><strong>Mac:</strong> a Mac with Apple silicon (M1 or newer) and macOS 14 Sonoma or later.</li>
-              <li><strong>iPhone:</strong> iOS 26 or later (iPhone 11 and newer). It starts as a TestFlight beta; the App Store comes later.</li>
+              <li><strong>Windows:</strong> Windows 10 (version 1809 or later) or Windows 11, 64-bit. Any PC works; an NVIDIA graphics card makes it faster.</li>
+              <li><strong>Mac:</strong> Apple silicon (M1 or newer), macOS 14 Sonoma or later.</li>
+              <li><strong>iPhone:</strong> iOS 26 or later (iPhone 11 and newer).</li>
             </ul>
+            <p>It understands English.</p>
           </div>
         </details>
         <details>
-          <summary>Does my voice go to the cloud?</summary>
-          <div class="faq__answer"><p>No. Speech is turned into text on your computer or on your iPhone. When your iPhone sends a recording to your computer, it goes straight across your home Wi-Fi. We never receive your audio or your words. The <a href="/privacy">privacy policy</a> has the details.</p></div>
+          <summary>Does it need the internet?</summary>
+          <div class="faq__answer"><p>Only once, to download the speech model. Your iPhone sends to your computer over your home Wi-Fi; away from home, it writes the text itself and copies it.</p></div>
         </details>
         <details>
-          <summary>Do I need the iPhone app?</summary>
-          <div class="faq__answer"><p>No. Your computer works on its own with a key, and the iPhone app works on its own too. Use both, and your iPhone becomes a microphone for your computer.</p></div>
-        </details>
-        <details>
-          <summary>Does it work away from home?</summary>
-          <div class="faq__answer"><p>Your iPhone does: away from home it writes the text itself, puts it on your clipboard, and tells you so. Your computer only listens on your own network, so sending to it needs the same Wi-Fi.</p></div>
-        </details>
-        <details>
-          <summary>Could it send something by mistake?</summary>
-          <div class="faq__answer"><p>No. ShoutAbout only pastes text where you're typing. It never presses Enter, and it never treats what you say as a command.</p></div>
-        </details>
-        <details>
-          <summary>Which languages does it understand?</summary>
-          <div class="faq__answer"><p>English, for now.</p></div>
-        </details>
-        <details>
-          <summary>Why does Windows warn me when I install it?</summary>
-          <div class="faq__answer"><p>Windows doesn't know ShoutAbout's installer yet, so it says &ldquo;Windows protected your PC&rdquo;. Click <strong>More info</strong>, check the app is ShoutAbout-Setup.exe, then click <strong>Run anyway</strong>. A Microsoft Store version, which installs without the warning, is planned. On PCs with Smart App Control turned on there's no Run anyway button: please wait for the Store version.</p></div>
-        </details>
-        <details>
-          <summary>What's TestFlight?</summary>
-          <div class="faq__answer"><p>Apple's app for trying apps before they're in the App Store. Install <strong>TestFlight</strong> from the App Store, then open ShoutAbout's beta link on your iPhone (it's on the <a href="/download#iphone">download page</a>). Each beta build works for 90 days; new ones arrive through TestFlight.</p></div>
-        </details>
-        <details>
-          <summary>How do I change the key?</summary>
-          <div class="faq__answer"><p>Click the yellow mouth (next to the clock on Windows, in the menu bar on a Mac) and open <strong>Settings</strong>. Under <strong>Key</strong> you can pick another key, and choose <strong>Press to start and stop</strong> or <strong>Hold to talk</strong>.</p></div>
-        </details>
-        <details>
-          <summary>Can it tidy punctuation and filler words?</summary>
-          <div class="faq__answer"><p>On a Windows PC, yes, if you already have <a href="https://ollama.com">Ollama</a> and your PC can afford it: a small AI model on your PC fixes punctuation and filler words. Settings &rsaquo; Clean up wording with AI. It's off on Macs for now.</p></div>
-        </details>
-        <details>
-          <summary>How do I remove it?</summary>
+          <summary>How do I uninstall it?</summary>
           <div class="faq__answer">
             <ul>
-              <li><strong>Windows:</strong> Settings &rsaquo; Apps &rsaquo; Installed apps &rsaquo; ShoutAbout &rsaquo; Uninstall. Tick the box if you also want your settings and history gone.</li>
-              <li><strong>Mac:</strong> quit ShoutAbout from the menu bar, then drag it from Applications to the Trash.</li>
+              <li><strong>Windows:</strong> Settings &rsaquo; Apps &rsaquo; Installed apps &rsaquo; ShoutAbout &rsaquo; Uninstall.</li>
+              <li><strong>Mac:</strong> quit ShoutAbout, then drag it from Applications to the Trash.</li>
               <li><strong>iPhone:</strong> delete the app.</li>
             </ul>
           </div>
         </details>
         <details>
-          <summary>Is ShoutAbout open source?</summary>
-          <div class="faq__answer"><p>Yes. The code is on <a href="https://github.com/spenseay/shoutabout">GitHub</a> under the MIT License, so anyone can check that your voice never leaves your devices. It's also built with open-source parts, listed on the <a href="/licenses">licenses page</a>.</p></div>
+          <summary>Is it open source?</summary>
+          <div class="faq__answer"><p>Yes. The code is on <a href="https://github.com/spenseay/shoutabout">GitHub</a> under the MIT License. The open-source parts it uses are on the <a href="/licenses">licenses page</a>.</p></div>
         </details>
       </div>
     </section>
@@ -140,28 +113,28 @@
         <div class="card tip">
           <h3>My iPhone doesn't find my computer</h3>
           <ul>
-            <li>Both on the same Wi-Fi, and ShoutAbout running on the computer (the yellow mouth by the clock, or in the Mac's menu bar).</li>
+            <li>Both on the same Wi-Fi, with ShoutAbout running on the computer.</li>
             <li>Windows: your Wi-Fi must be a <strong>Private</strong> network. Settings &rsaquo; Network &amp; internet &rsaquo; Wi-Fi &rsaquo; your network &rsaquo; Network profile type &rsaquo; Private network.</li>
             <li>iPhone: Settings &rsaquo; Privacy &amp; Security &rsaquo; Local Network &rsaquo; ShoutAbout on. On a Mac with macOS 15 or later, the same switch is in System Settings.</li>
-            <li>Guest and office Wi-Fi often stop devices from seeing each other. Still nothing? Use <strong>Scan a code instead</strong> on the computer and in the app.</li>
+            <li>Still nothing? Use <strong>Scan a code instead</strong> on the computer and in the app.</li>
           </ul>
         </div>
         <div class="card tip">
           <h3>Nothing appears when I talk</h3>
           <ul>
-            <li>Is ShoutAbout paused? Click its mouth and choose Resume.</li>
+            <li>Is ShoutAbout paused? Choose <strong>Resume</strong> from its icon.</li>
             <li>Just installed? It says &ldquo;Getting ready&rdquo; while the speech model downloads.</li>
-            <li>Mac: System Settings &rsaquo; Privacy &amp; Security &rsaquo; Accessibility &rsaquo; ShoutAbout on. Without it ShoutAbout can't paste, and the text stays on your clipboard.</li>
-            <li>Windows: apps running as administrator don't accept pasting from ShoutAbout. The text is on your clipboard instead: press <span class="nowrap"><kbd>Ctrl</kbd>+<kbd>V</kbd></span>.</li>
+            <li>Mac: System Settings &rsaquo; Privacy &amp; Security &rsaquo; Accessibility &rsaquo; ShoutAbout on.</li>
+            <li>Windows: apps running as administrator don't accept pasting. Press <span class="nowrap"><kbd>Ctrl</kbd>+<kbd>V</kbd></span>: the text is on your clipboard.</li>
           </ul>
         </div>
         <div class="card tip">
           <h3>&ldquo;Windows protected your PC&rdquo;</h3>
-          <p>Click <strong>More info</strong>, then <strong>Run anyway</strong>. Windows asks this until the Microsoft Store version is ready.</p>
+          <p>Click <strong>More info</strong>, then <strong>Run anyway</strong>.</p>
         </div>
         <div class="card tip">
           <h3>It keeps spelling a name wrong</h3>
-          <p>Click the yellow mouth and choose <strong>Teach words</strong>. Add the name the way it should be written, and ShoutAbout prefers that spelling from then on.</p>
+          <p>Choose <strong>Teach words</strong> from ShoutAbout's icon and add the name the way it should be written.</p>
         </div>
       </div>
     </section>
@@ -170,9 +143,9 @@
       <div class="section-head">
         <h2 class="h2" id="contact-title">Still stuck?</h2>
       </div>
-      <p data-contact hidden>Email <a data-contact-link href="/support#contact">us</a>. Tell us what you see, and please don't send recordings or anything private.</p>
-      <p>Testing the iPhone beta? Send feedback straight from TestFlight: take a screenshot in ShoutAbout and tap <strong>Share Beta Feedback</strong>, or open TestFlight and tap <strong>Send Beta Feedback</strong>.</p>
-      <p class="muted" data-contact-none>ShoutAbout is made by one person, so there's no help desk or support email yet. These pages are kept up to date with the answers people need most.</p>
+      <p data-contact hidden>Email <a data-contact-link href="/support#contact">us</a> and tell us what you see.</p>
+      <p>Testing the iPhone beta? Send feedback from TestFlight.</p>
+      <p class="muted" data-contact-none>ShoutAbout is made by one person, so there's no help desk.</p>
     </section>
 
   </div>
