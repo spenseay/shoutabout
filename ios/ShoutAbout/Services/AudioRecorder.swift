@@ -89,9 +89,13 @@ final class AudioRecorder {
 
     /// Mixable, so a recording started in the background (the Action Button) or a keyboard
     /// session doesn't stop other audio: iOS refuses a session that would interrupt it there.
-    private static func activateSession() throws {
+    /// A keyboard session stays open for minutes, so it also lets other apps' sound stay on
+    /// Bluetooth headphones (A2DP) while the iPhone's microphone listens.
+    private static func activateSession(keepBluetoothOutput: Bool = false) throws {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .mixWithOthers])
+        var options: AVAudioSession.CategoryOptions = [.defaultToSpeaker, .mixWithOthers]
+        if keepBluetoothOutput { options.insert(.allowBluetoothA2DP) }
+        try session.setCategory(.playAndRecord, mode: .default, options: options)
         try? session.setAllowHapticsAndSystemSoundsDuringRecording(true)
         try session.setActive(true)
     }
@@ -177,7 +181,7 @@ final class AudioRecorder {
     func startLiveInput(onLost: @escaping @MainActor () -> Void) throws {
         guard live == nil else { return }
         guard recorder == nil else { throw RecorderError.couldNotStart }  // a recording has the microphone
-        try Self.activateSession()
+        try Self.activateSession(keepBluetoothOutput: true)
         do {
             live = try LiveInput { [weak self] in
                 self?.liveInputLost()
