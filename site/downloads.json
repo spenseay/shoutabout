@@ -3,10 +3,10 @@
   "contact_email": "hello@shoutabout.fyi",
   "releases_url": "https://github.com/spenseay/shoutabout/releases/latest",
   "windows": {
-    "live": false,
+    "live": true,
     "file": "ShoutAbout-Setup.exe",
     "url": "https://github.com/spenseay/shoutabout/releases/latest/download/ShoutAbout-Setup.exe",
-    "size_bytes": null
+    "size_bytes": 533185527
   },
   "mac": {
     "live": false,
