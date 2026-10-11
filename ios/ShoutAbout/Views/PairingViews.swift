@@ -23,9 +23,9 @@ struct PairingScannerSheet: View {
                         )
                 } else {
                     ContentUnavailableView(
-                        "Camera scanning unavailable",
+                        "Can't scan",
                         systemImage: "camera.metering.unknown",
-                        description: Text("Allow camera access in Settings, or copy the pairing code on the PC and use Paste below.")
+                        description: Text("Allow the camera in Settings, or paste the code.")
                     )
                 }
                 if let message {
@@ -70,7 +70,7 @@ struct PairingScannerSheet: View {
                     handled = false
                 }
             } message: {
-                Text("This QR only holds a hub token (from `token --qr`). The URLs stay as they are. For full pairing run `python -m shoutabout pair` on the PC.")
+                Text("This code only holds a hub token. The addresses stay as they are.")
             }
         }
         .sensoryFeedback(.success, trigger: paired)
@@ -182,7 +182,7 @@ struct ManualPairingView: View {
             } header: {
                 Text("LAN URL")
             } footer: {
-                Text("From `python -m shoutabout info` on the PC (lan_url). Optional if you only use the tunnel.")
+                Text("From `python -m shoutabout info`. Optional with a tunnel.")
             }
             Section {
                 TextField("https://dictate.example.com", text: $publicURL)
@@ -193,7 +193,7 @@ struct ManualPairingView: View {
             } header: {
                 Text("Public URL")
             } footer: {
-                Text("Your Cloudflare Tunnel hostname. Must be https.")
+                Text("Your Cloudflare Tunnel hostname (https).")
             }
             Section("Hub token") {
                 SecureField("43 characters", text: $token)

@@ -16,7 +16,7 @@ import WidgetKit
 struct DictateIntent: AudioRecordingIntent, LiveActivityIntent {
     static let title: LocalizedStringResource = "Dictate"
     static let description = IntentDescription(
-        "Starts recording without opening ShoutAbout: a little mouth shows in the Dynamic Island while it listens. Run it again to stop and send."
+        "Starts recording without opening ShoutAbout. Run it again to stop and send."
     )
     /// Background first; the app comes forward only when it has to (Live Activities off, or
     /// the microphone permission hasn't been asked yet).

@@ -417,9 +417,9 @@ private struct StatusBlock: View {
         switch model.phase {
         case .idle:
             if model.effectiveTarget == .pc {
-                return "Your words land where you're typing on \(model.computerDisplayName)."
+                return "Types on \(model.computerDisplayName)"
             }
-            return "Your words land on this iPhone's clipboard."
+            return "Copies to your clipboard"
         case .recording:
             return "Tap again to send"
         case .processing(let status):
@@ -427,9 +427,9 @@ private struct StatusBlock: View {
         case .done:
             guard let item = model.lastItem else { return nil }
             if item.text.isEmpty { return "Try again a little louder." }
-            if model.clipboardPending, !item.pasted { return "Tap the copy button to put it on your clipboard." }
+            if model.clipboardPending, !item.pasted { return "Tap copy to put it on your clipboard." }
             if let warning = item.warning { return warning }
-            return item.pasted ? "On \(model.computerDisplayName)." : "Paste it anywhere."
+            return item.pasted ? "On \(model.computerDisplayName)" : nil
         case .failed(let message):
             return message
         }
@@ -449,7 +449,7 @@ private struct ResultArea: View {
     }
 }
 
-/// The last result, compact: where it went and the first lines (History has the rest).
+/// The last result, compact: the first lines (History has the rest) and a copy button.
 struct ResultCard: View {
     @Environment(AppModel.self) private var model
     let item: HistoryItem
@@ -457,10 +457,6 @@ struct ResultCard: View {
     var body: some View {
         HStack(alignment: .top, spacing: Theme.Spacing.m) {
             VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                HStack(spacing: 6) {
-                    Chip(text: item.pasted ? "Pasted" : "Copied", filled: true)
-                    Chip(text: item.engine == nil ? "PC wrote it" : "iPhone wrote it", filled: false)
-                }
                 Text(item.text.isEmpty ? (item.warning ?? "No speech heard.") : item.text)
                     .font(Theme.Typography.body(16))
                     .foregroundStyle(Theme.Colors.cardInk)
@@ -490,25 +486,5 @@ struct ResultCard: View {
                 .stroke(Theme.Colors.ink, lineWidth: Theme.Size.borderWidth)
         )
         .accessibilityIdentifier("resultCard")
-    }
-}
-
-struct Chip: View {
-    var text: String
-    var filled: Bool
-
-    var body: some View {
-        Text(text)
-            .shoutLabel(10, color: filled ? Theme.Colors.pillOnInk : Theme.Colors.cardInk)
-            .padding(.horizontal, Theme.Spacing.s)
-            .padding(.vertical, Theme.Spacing.xs)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
-                    .fill(filled ? Theme.Colors.pillOn : Color.clear)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
-                    .stroke(Theme.Colors.cardInk, lineWidth: 1.5)
-            )
     }
 }

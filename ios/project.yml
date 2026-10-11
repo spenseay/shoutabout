@@ -76,10 +76,10 @@ targets:
           - Archivo-Bold.ttf
         # The mouth in the Dynamic Island / on the Lock Screen while dictating (ActivityKit).
         NSSupportsLiveActivities: true
-        NSMicrophoneUsageDescription: ShoutAbout listens only while you dictate. Your voice goes to your own computer, or stays on this iPhone.
-        NSSpeechRecognitionUsageDescription: ShoutAbout turns your voice into text right here on this iPhone.
-        NSCameraUsageDescription: Only used to scan the pairing code your computer shows.
-        NSLocalNetworkUsageDescription: ShoutAbout looks for your computer on your Wi-Fi so your words can land on it.
+        NSMicrophoneUsageDescription: ShoutAbout listens only while you dictate, to turn your voice into text.
+        NSSpeechRecognitionUsageDescription: ShoutAbout turns your voice into text on this iPhone.
+        NSCameraUsageDescription: Used only to scan your computer's pairing code.
+        NSLocalNetworkUsageDescription: ShoutAbout finds your computer on your Wi-Fi.
         # Bonjour service the PC advertises (DNS-SD, see the cross-device contract).
         NSBonjourServices:
           - _shoutabout._tcp

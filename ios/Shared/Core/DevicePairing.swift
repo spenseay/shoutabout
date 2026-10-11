@@ -40,7 +40,7 @@ struct DevicePairing: Sendable {
             }
             if hello.pairing == false {
                 return .failure(PairingProblem(
-                    message: "Pairing is turned off on \(hello.name ?? "that PC"). Turn it on in ShoutAbout's settings on the PC."
+                    message: "Pairing is turned off on \(hello.name ?? "that PC"). Turn it on in ShoutAbout there."
                 ))
             }
             return .success(hello)
@@ -89,7 +89,7 @@ struct DevicePairing: Sendable {
                 case .claimed:
                     return .failed("This request was already used. Try again.")
                 case .unknown(let status):
-                    return .failed("Your PC answered something this app doesn't understand (\(status)). Update ShoutAbout.")
+                    return .failed("Unexpected answer (\(status)). Update ShoutAbout.")
                 }
             } catch {
                 let failure = HubFailure.from(error)
@@ -109,15 +109,15 @@ struct DevicePairing: Sendable {
         let message: String
         switch failure {
         case .unreachable(let why):
-            message = "Couldn't reach that PC (\(why)). Is it on the same Wi-Fi as this iPhone?"
+            message = "Couldn't reach that PC (\(why)). Is it on the same Wi-Fi?"
         case .hub(let status, let detail), .gateway(let status, let detail):
             switch status {
             case 404, 405:
-                message = "That PC has an older ShoutAbout without quick pairing. Update it, or scan a code instead."
+                message = "Update ShoutAbout on that PC, or scan a code instead (More options)."
             case 403:
                 message = "That PC only pairs with phones on its home Wi-Fi."
             case 409:
-                message = "That PC is already asking about another device. Answer it on the PC, then try again."
+                message = "That PC is already asking about another device. Answer it, then try again."
             case 422:
                 message = "That PC didn't understand the request (\(detail))."
             case 429:
