@@ -557,21 +557,21 @@ def check_brand(ctx: Context) -> str:
 def check_overlay(ctx: Context) -> str:
     """The mouth pill's frames render (numpy + the brand rasterizer + GDI text): the first
     listening frame, a frame of the zip ("done"), the "Ready" pill and the "No mic" pill.
-    No window is shown."""
+    No window is shown. The words come from GDI on Windows and AppKit on a Mac."""
     from shoutabout import overlay
 
+    text_mask = overlay.gdi_text_mask
+    if sys.platform == "darwin":
+        from shoutabout.mac.overlay_mac import mac_text_mask as text_mask
+
     t0 = time.perf_counter()
-    first = overlay.bitmap(overlay.first_listening_look(), 1.0, overlay.gdi_text_mask)
+    first = overlay.bitmap(overlay.first_listening_look(), 1.0, text_mask)
     zipping = overlay.frame_at("done", 0.2).look
     if zipping is None or zipping.kind != "zip":
         raise RuntimeError("the pasted pill doesn't zip")
-    zipped = overlay.bitmap(zipping, 1.0, overlay.gdi_text_mask)
-    ready = overlay.render(
-        overlay.Look("text", text="Ready · Right Ctrl to talk"), 1.0, overlay.gdi_text_mask
-    )
-    no_mic = overlay.render(
-        overlay.Look("text", tone="red", text="No mic"), 1.0, overlay.gdi_text_mask
-    )
+    zipped = overlay.bitmap(zipping, 1.0, text_mask)
+    ready = overlay.render(overlay.Look("text", text="Ready · Right Ctrl to talk"), 1.0, text_mask)
+    no_mic = overlay.render(overlay.Look("text", tone="red", text="No mic"), 1.0, text_mask)
     pill_w = math.ceil(overlay.PILL_W + 2 * overlay.MARGIN)
     if (
         first.width != pill_w

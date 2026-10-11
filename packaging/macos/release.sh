@@ -144,8 +144,11 @@ sign_nested() {
   # Libraries don't contain each other: sign them in parallel (each codesign call asks
   # timestamp.apple.com), then retry any that failed one at a time.
   if ! "$PY" "$MACHO" list --kind lib -0 "$APP" \
-      | xargs -0 -n 16 -P 4 codesign --force --timestamp --sign "$IDENTITY" >"$WORK/sign.log" 2>&1; then
+      | xargs -0 -n 16 -P 4 codesign --force --timestamp --sign "$IDENTITY" >"$LOGS/sign.log" 2>&1; then
     echo "some libraries didn't sign in the parallel pass; retrying them one by one"
+    # codesign's messages, without the file names, most frequent first
+    grep -v "replacing existing signature" "$LOGS/sign.log" | sed -E 's#^/[^:]*: ##' \
+      | sort | uniq -c | sort -rn | head -n 8 || true
     "$PY" "$MACHO" list --kind lib "$APP" | while IFS= read -r lib; do
       if codesign --verify --strict "$lib" 2>/dev/null \
           && codesign -dvv "$lib" 2>&1 | grep -q '^Timestamp='; then

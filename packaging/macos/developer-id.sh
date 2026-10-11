@@ -145,11 +145,15 @@ Run the mac-signing-request workflow once, upload the file it makes to Apple
   keychain_path="$(security default-keychain | sed -e 's/^ *"//' -e 's/" *$//')"
   for ca in DeveloperIDG2CA.cer DeveloperIDCA.cer; do
     if curl -fsSL --retry 3 -o "$WORK/$ca" "https://www.apple.com/certificateauthority/$ca"; then
-      security import "$WORK/$ca" -k "$keychain_path" >/dev/null 2>&1 || true
+      # add-certificates takes DER .cer files as they are (import guesses the format).
+      security add-certificates -k "$keychain_path" "$WORK/$ca" 2>&1 \
+        | grep -v "already exists" || true
     else
       echo "(couldn't download $ca; relying on the machine's own copy)"
     fi
   done
+  security find-certificate -a -c "Developer ID Certification Authority" "$keychain_path" \
+    | awk -F'"' '/"labl"/ { print "  intermediate: " $4 }' || true
 
   local identity
   identity="$(security find-identity -v -p codesigning \
@@ -159,6 +163,20 @@ Run the mac-signing-request workflow once, upload the file it makes to Apple
     fail "the certificate is in the keychain but isn't a valid signing identity (see the list above)."
   fi
   security find-identity -v -p codesigning | grep -F "$identity" | sed 's/^ */  using /'
+
+  # Let codesign use the key without a prompt nobody can answer on a build machine (the
+  # usual cause of errSecInternalComponent). Codemagic's keychain has an empty password.
+  security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" "$keychain_path" \
+    >/dev/null 2>&1 || echo "(couldn't set the key's partition list; going on)"
+  # Sign a scratch copy of a system binary now, so a keychain problem fails here in seconds
+  # instead of after the 1-minute build, with codesign's own words in the log.
+  cp /usr/bin/true "$WORK/probe"
+  if ! codesign --force --timestamp --sign "$identity" "$WORK/probe" 2>"$WORK/probe.log"; then
+    cat "$WORK/probe.log" >&2
+    security list-keychains -d user >&2 || true
+    fail "codesign can't sign with the Developer ID identity (codesign's message is above)."
+  fi
+  echo "  test signature ok"
   if [ -n "${CM_ENV:-}" ]; then
     echo "MAC_SIGN_IDENTITY=$identity" >> "$CM_ENV"
   fi
