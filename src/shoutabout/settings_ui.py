@@ -1,7 +1,7 @@
 """The settings window (Tk): one short page over :class:`~shoutabout.settings_model.SettingsModel`.
 
-Sections: Talk to this PC, Phones, Quality, Clean up wording with AI, History (keep a
-history of what I dictate: off by default), This PC (name and start with Windows), and a
+Sections: Talk to this PC, Phones, Quality, AI cleanup (only when Ollama with a suitable
+model is there), History (off by default), This PC (name and start with Windows), and a
 footer (History…, Teach words…, version). Changes save as soon as they're made; the line at
 the bottom says "Saved." or "Restart ShoutAbout to apply".
 """
@@ -399,12 +399,13 @@ class SettingsWindow:
         elif v.quality_note:
             self._note(body, v.quality_note)
 
-        # Cleanup
-        body = self._section("Clean up wording with AI")
-        Segmented(
-            body, CLEANUP_CHOICES, v.cleanup, lambda c: self.apply(lambda: m.set_cleanup(c)), f
-        ).frame.pack(anchor="w")
-        self._note(body, CLEANUP_NOTE)
+        # AI cleanup: only when Ollama with a suitable model is there
+        if v.show_cleanup:
+            body = self._section("AI cleanup")
+            Segmented(
+                body, CLEANUP_CHOICES, v.cleanup, lambda c: self.apply(lambda: m.set_cleanup(c)), f
+            ).frame.pack(anchor="w")
+            self._note(body, CLEANUP_NOTE)
 
         # History (off by default; the hub applies it at once)
         body = self._section("History")
@@ -437,8 +438,7 @@ class SettingsWindow:
         entry.pack(side="left", padx=(round(8 * s), round(8 * s)), ipady=3)
         entry.bind("<Return>", lambda _e: self._rename(entry))
         kit.button(row, "Save", lambda: self._rename(entry), f).pack(side="left")
-        self._note(body, "Your iPhone lists this PC by this name.")
-        tk.Frame(body, bg=kit.YELLOW, height=round(8 * s)).pack()
+        tk.Frame(body, bg=kit.YELLOW, height=round(10 * s)).pack()
         self._switch_row(
             body,
             "Start with Windows",

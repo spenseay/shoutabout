@@ -91,6 +91,7 @@ def make_services(
     ensure_initialized(paths)
     overrides.setdefault("has_microphone", lambda: True)  # never ask the real PC
     overrides.setdefault("copy_text", lambda _text: None)  # never touch the clipboard
+    overrides.setdefault("cleanup_available", lambda _cfg: False)  # never ask a real Ollama
     devices = DeviceStore(paths.devices_file)
     clock = Clock()
     downloads = downloads or Downloads(ready={"large-v3-turbo"})

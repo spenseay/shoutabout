@@ -1,9 +1,8 @@
 """The first-run setup window (Tk): the view over :class:`~shoutabout.setup_flow.SetupFlow`.
 
-Big friendly type on Shout Yellow, very few words, one decision per screen. All logic,
-copy and background work live in :mod:`setup_flow`; this module only draws it and forwards
-clicks. It runs on the UI thread (:mod:`ui_host`) as a Toplevel, or as its own root for
-screenshots.
+Big type on Shout Yellow, very few words, one thing per screen. All logic, copy and
+background work live in :mod:`setup_flow`; this module only draws it and forwards clicks.
+It runs on the UI thread (:mod:`ui_host`) as a Toplevel, or as its own root for screenshots.
 """
 
 from __future__ import annotations
@@ -14,13 +13,13 @@ from collections.abc import Callable
 from typing import Any
 
 from shoutabout import ui_kit as kit
-from shoutabout.setup_flow import TRY_PHRASE, SetupFlow
+from shoutabout.setup_flow import PHONE_HOWTO, QR_NOTE, TRY_PHRASE, SetupFlow
 
 log = logging.getLogger(__name__)
 
 WINDOW_TITLE = "Set up ShoutAbout"
 POLL_MS = 100
-BASE_W, BASE_H = 780, 600
+BASE_W, BASE_H = 760, 540
 ARM_DELAY_MS = 800
 
 
@@ -58,7 +57,7 @@ class SetupWindow:
         w = min(round(BASE_W * self.scale), window.winfo_screenwidth() - 40)
         h = min(round(BASE_H * self.scale), window.winfo_screenheight() - 80)
         window.geometry(f"{w}x{h}")
-        window.minsize(min(w, round(640 * self.scale)), min(h, round(520 * self.scale)))
+        window.minsize(min(w, round(620 * self.scale)), min(h, round(480 * self.scale)))
         window.protocol("WM_DELETE_WINDOW", self.close)
         window.bind("<Escape>", lambda _e: self.close())
         try:  # cosmetic only
@@ -116,9 +115,9 @@ class SetupWindow:
     def _layout_key_now(self) -> tuple:
         f = self.flow
         if f.screen == "check":
-            return ("check", f.phase in ("ready", "unknown", "failed"), f.phase == "failed")
-        if f.screen == "use":
-            return ("use", f.pc_on, f.phone_on, f.prompt is not None, f.show_qr, f.pair_state)
+            return ("check", f.phase == "failed")
+        if f.screen == "phone":
+            return ("phone", f.prompt is not None, f.show_qr, f.pair_state)
         return (f.screen,)
 
     def render(self) -> None:
@@ -147,9 +146,6 @@ class SetupWindow:
         tk.Label(top, text="SHOUTABOUT", font=fonts.small_bold, bg=kit.YELLOW, fg=kit.BLACK).pack(
             side="left"
         )
-        tk.Label(top, text=f.step_label(), font=fonts.small_bold, bg=kit.YELLOW, fg=kit.MUTED).pack(
-            side="right"
-        )
         tk.Label(
             self.outer,
             text=f.title().upper(),
@@ -170,279 +166,71 @@ class SetupWindow:
         foot.pack(side="bottom", fill="x", pady=(0, round(24 * self.scale)))
         return foot
 
+    def _line(self, parent: Any, text: str, font: Any, *, fg: str = kit.BLACK, **pack: Any) -> Any:
+        import tkinter as tk
+
+        label = tk.Label(
+            parent,
+            text=text,
+            font=font,
+            bg=parent["bg"],
+            fg=fg,
+            justify="left",
+            anchor="w",
+            wraplength=pack.pop("wrap", round(470 * self.scale)),
+        )
+        label.pack(fill="x", **pack)
+        return label
+
     def _build(self) -> None:
         self._clear()
         self._header()
         getattr(self, f"_build_{self.flow.screen}")()
 
-    # --------------------------------------------------------- screen 1
+    # ------------------------------------------------- screen 1: getting ready
 
     def _build_check(self) -> None:
         import tkinter as tk
 
         f, fonts, s = self.flow, self.fonts, self.scale
-        foot = self._footer()
-        body = tk.Frame(self.outer, bg=kit.YELLOW)
-        body.pack(fill="both", expand=True)
-        row = tk.Frame(body, bg=kit.YELLOW)
-        row.pack(fill="x", expand=True)
+        if f.phase == "failed":
+            foot = self._footer()
+            kit.button(foot, "Try again", f.retry, fonts, big=True).pack(side="right")
+            kit.link(foot, "Skip for now", f.skip_download, fonts).pack(side="left")
+        row = tk.Frame(self.outer, bg=kit.YELLOW)
+        row.pack(fill="x")
         self._mouth = kit.Mouth(row, round(150 * s)).pack(side="left", padx=(0, round(24 * s)))
         text = tk.Frame(row, bg=kit.YELLOW)
         text.pack(side="left", fill="both", expand=True)
-        self._widgets["hw"] = tk.Label(
-            text,
-            text="",
-            font=fonts.big,
-            bg=kit.YELLOW,
-            fg=kit.BLACK,
-            justify="left",
-            anchor="w",
-            wraplength=round(470 * s),
+        self._widgets["status"] = self._line(
+            text, "", fonts.big, pady=(round(18 * s), round(14 * s))
         )
-        self._widgets["hw"].pack(fill="x", pady=(round(8 * s), round(18 * s)))
         bar = kit.ProgressBar(text, round(460 * s), round(16 * s))
         bar.canvas.pack(anchor="w")
         self._widgets["bar"] = bar
-        self._widgets["status"] = tk.Label(
-            text, text="", font=fonts.body, bg=kit.YELLOW, fg=kit.BLACK, anchor="w"
+        self._widgets["size"] = self._line(
+            text, "", fonts.body, fg=kit.MUTED, pady=(round(8 * s), 0)
         )
-        self._widgets["status"].pack(fill="x", pady=(round(8 * s), 0))
-
-        nxt = kit.button(foot, "Next", f.next, fonts, big=True)
-        nxt.pack(side="right")
-        self._widgets["next"] = nxt
-        if f.phase == "failed":
-            kit.button(foot, "Try again", f.retry, fonts, "light", big=True).pack(
-                side="right", padx=(0, round(10 * s))
-            )
-            kit.link(foot, "Skip for now", f.skip_download, fonts).pack(side="left")
-        tk.Label(
-            body,
-            text="Everything runs on this PC. Your voice never leaves it.",
-            font=fonts.small,
-            bg=kit.YELLOW,
-            fg=kit.MUTED,
-            anchor="w",
-        ).pack(side="bottom", fill="x", pady=(0, round(12 * s)))
 
     def _refresh_check(self) -> None:
-        f = self.flow
-        w = self._widgets
-        w["hw"].configure(text=f.hardware_text or "Checking this PC…")
-        w["bar"].set(f.progress_fraction())
+        f, w = self.flow, self._widgets
         w["status"].configure(text=f.status_line())
-        w["next"].configure(state="normal" if f.can_continue() else "disabled")
+        w["bar"].set(f.progress_fraction())
+        w["size"].configure(text=f.size_line())
         if self._mouth is not None:
             if f.phase in ("checking", "downloading"):
                 self._mouth.talk()
             else:
                 self._mouth.stop(open_mouth=f.phase == "ready")
 
-    # --------------------------------------------------------- screen 2
-
-    def _card(self, parent: Any, title: str, on: bool, toggle: Callable[[], None]) -> Any:
-        import tkinter as tk
-
-        s, fonts = self.scale, self.fonts
-        bg = kit.PAPER if on else kit.CARD_OFF
-        card = tk.Frame(
-            parent,
-            bg=bg,
-            highlightthickness=round(3 * s) if on else round(2 * s),
-            highlightbackground=kit.BLACK if on else kit.GREY,
-            padx=round(18 * s),
-            pady=round(16 * s),
-            cursor="hand2",
-        )
-        head = tk.Frame(card, bg=bg)
-        head.pack(fill="x")
-        label = tk.Label(head, text=title, font=fonts.subtitle, bg=bg, fg=kit.BLACK, anchor="w")
-        label.pack(side="left")
-        switch = kit.Switch(head, s, bg, on)
-        switch.canvas.pack(side="right")
-        for widget in (card, head, label, switch.canvas):
-            widget.bind("<Button-1>", lambda _e: toggle())
-        return card
-
-    def _build_use(self) -> None:
-        import tkinter as tk
-
-        f, fonts, s = self.flow, self.fonts, self.scale
-        foot = self._footer()
-        if f.mode == "phone":
-            kit.button(foot, "Done", self.close, fonts, big=True).pack(side="right")
-        else:
-            nxt = kit.button(foot, "Next", f.next, fonts, big=True)
-            nxt.pack(side="right")
-            self._widgets["next"] = nxt
-            kit.link(foot, "Back", f.back, fonts).pack(side="left")
-        if f.save_error:
-            tk.Label(foot, text=f.save_error, font=fonts.small_bold, bg=kit.RED, fg=kit.BLACK).pack(
-                side="left", padx=round(12 * s)
-            )
-
-        cards = tk.Frame(self.outer, bg=kit.YELLOW)
-        cards.pack(fill="both", expand=True, pady=(0, round(20 * s)))
-        cards.columnconfigure(0, weight=1, uniform="cards")
-        cards.columnconfigure(1, weight=1, uniform="cards")
-        cards.rowconfigure(0, weight=1)
-        wrap = round(270 * s)
-
-        if f.mode != "phone":
-            pc = self._card(cards, "Talk to this PC", f.pc_on, f.toggle_pc)
-            pc.grid(row=0, column=0, sticky="nsew", padx=(0, round(10 * s)))
-            bg = pc["bg"]
-            tk.Label(
-                pc,
-                text=f.pc_card_text(),
-                font=fonts.big if f.pc_on else fonts.body,
-                bg=bg,
-                fg=kit.BLACK if f.pc_on or f.no_mic else kit.MUTED,
-                justify="left",
-                anchor="w",
-                wraplength=wrap,
-            ).pack(fill="x", pady=(round(14 * s), 0))
-            if f.pc_card_note():
-                tk.Label(
-                    pc,
-                    text=f.pc_card_note(),
-                    font=fonts.body,
-                    bg=bg,
-                    fg=kit.MUTED,
-                    justify="left",
-                    anchor="w",
-                    wraplength=wrap,
-                ).pack(fill="x", pady=(round(8 * s), 0))
-
-        phone = self._card(cards, "Talk from my iPhone", f.phone_on, f.toggle_phone)
-        col = 1 if f.mode != "phone" else 0
-        span = 1 if f.mode != "phone" else 2
-        phone.grid(row=0, column=col, columnspan=span, sticky="nsew")
-        self._build_phone_card(phone, wrap if f.mode != "phone" else round(560 * s))
-
-    def _build_phone_card(self, card: Any, wrap: int) -> None:
-        import tkinter as tk
-
-        f, fonts, s = self.flow, self.fonts, self.scale
-        bg = card["bg"]
-        if not f.phone_on:
-            tk.Label(
-                card,
-                text="Off. Turn it on to use your iPhone as the microphone.",
-                font=fonts.body,
-                bg=bg,
-                fg=kit.MUTED,
-                justify="left",
-                anchor="w",
-                wraplength=wrap,
-            ).pack(fill="x", pady=(round(14 * s), 0))
-            return
-        if f.prompt is not None:  # inline approval
-            tk.Label(
-                card,
-                text=f.phone_line(),
-                font=fonts.big,
-                bg=bg,
-                fg=kit.BLACK,
-                justify="left",
-                anchor="w",
-                wraplength=wrap,
-            ).pack(fill="x", pady=(round(14 * s), round(6 * s)))
-            tk.Label(card, text="CODE", font=fonts.small_bold, bg=bg, fg=kit.MUTED).pack(anchor="w")
-            tk.Label(card, text=f.prompt.code, font=fonts.code, bg=bg, fg=kit.BLACK).pack(
-                anchor="w"
-            )
-            tk.Label(
-                card,
-                text="Allow it if your iPhone shows the same code.",
-                font=fonts.small,
-                bg=bg,
-                fg=kit.MUTED,
-                anchor="w",
-            ).pack(fill="x", pady=(0, round(10 * s)))
-            row = tk.Frame(card, bg=bg)
-            row.pack(fill="x")
-            allow = kit.button(row, "Allow", f.allow, fonts)
-            # Armed after a moment, so a click aimed at what was there before can't land on it.
-            allow.configure(state="disabled", takefocus=0)
-            allow.pack(side="left")
-            self.win.after(ARM_DELAY_MS, lambda: _arm(allow))
-            kit.button(row, "Don't allow", f.deny, fonts, "light").pack(
-                side="left", padx=(round(8 * s), 0)
-            )
-            return
-        if f.show_qr:
-            if f.qr_text:
-                try:
-                    self._qr = kit.qr_photo(self.win, f.qr_text, scale=max(3, round(3 * s)))
-                    tk.Label(card, image=self._qr, bg=kit.WHITE).pack(pady=(round(10 * s), 0))
-                except Exception:
-                    log.exception("couldn't draw the QR code")
-            tk.Label(
-                card,
-                text=f.qr_error
-                or "Scan it in the ShoutAbout app. It's a key to this PC: "
-                "show it only to your own phone.",
-                font=fonts.small,
-                bg=bg,
-                fg=kit.BLACK,
-                justify="left",
-                anchor="w",
-                wraplength=wrap,
-            ).pack(fill="x", pady=(round(6 * s), 0))
-            kit.link(card, "Hide the code", f.toggle_qr, fonts, bg).pack(
-                anchor="w", pady=(round(6 * s), 0)
-            )
-            return
-        tk.Label(
-            card,
-            text="Open ShoutAbout on your iPhone. It finds this PC by itself.",
-            font=fonts.body,
-            bg=bg,
-            fg=kit.BLACK,
-            justify="left",
-            anchor="w",
-            wraplength=wrap,
-        ).pack(fill="x", pady=(round(14 * s), round(12 * s)))
-        row = tk.Frame(card, bg=bg)
-        row.pack(fill="x")
-        waiting = f.pair_state in ("waiting", "denied", "expired")
-        if waiting:
-            self._mouth = kit.Mouth(row, round(36 * s), bg=bg).pack(side="left", padx=(0, 8))
-        tk.Label(
-            row,
-            text=f.phone_line(),
-            font=fonts.body_bold,
-            bg=bg,
-            fg=kit.BLACK,
-            justify="left",
-            anchor="w",
-            wraplength=wrap - round(50 * s),
-        ).pack(side="left", fill="x")
-        kit.link(card, "Scan a code instead", f.toggle_qr, fonts, bg).pack(
-            anchor="w", pady=(round(14 * s), 0)
-        )
-
-    def _refresh_use(self) -> None:
-        f = self.flow
-        nxt = self._widgets.get("next")
-        if nxt is not None:
-            nxt.configure(state="normal" if f.can_continue() else "disabled")
-        if self._mouth is not None:
-            if f.pair_state == "waiting":
-                self._mouth.talk()
-            else:
-                self._mouth.stop()
-
-    # --------------------------------------------------------- screen 3
+    # ------------------------------------------------------- screen 2: try it
 
     def _build_try(self) -> None:
         import tkinter as tk
 
         f, fonts, s = self.flow, self.fonts, self.scale
         foot = self._footer()
-        kit.link(foot, "Back", f.back, fonts).pack(side="left")
-        kit.link(foot, "Skip", f.next, fonts).pack(side="right")
+        kit.link(foot, "Skip", f.skip_try, fonts).pack(side="right")
         tk.Label(
             self.outer, text=f.try_instruction(), font=fonts.big, bg=kit.YELLOW, fg=kit.BLACK
         ).pack(anchor="w")
@@ -472,14 +260,6 @@ class SetupWindow:
         box.pack(fill="x")
         box.bind("<<Modified>>", self._on_text_modified)
         self._widgets["box"] = box
-        tk.Label(
-            self.outer,
-            text="Your words land here, as if you'd typed them.",
-            font=fonts.small,
-            bg=kit.YELLOW,
-            fg=kit.MUTED,
-            anchor="w",
-        ).pack(fill="x", pady=(round(8 * s), 0))
         self.win.after(50, lambda: self._focus_box())
 
     def _focus_box(self) -> None:
@@ -502,7 +282,7 @@ class SetupWindow:
     def _refresh_try(self) -> None:
         return
 
-    # --------------------------------------------------------- screen 4
+    # ------------------------------------------------------ screen 3: done
 
     def _build_done(self) -> None:
         import tkinter as tk
@@ -510,36 +290,103 @@ class SetupWindow:
         f, fonts, s = self.flow, self.fonts, self.scale
         foot = self._footer()
         kit.button(foot, "Done", self.close, fonts, big=True).pack(side="right")
+        kit.link(foot, "Connect your iPhone", f.connect_phone, fonts).pack(side="left")
         row = tk.Frame(self.outer, bg=kit.YELLOW)
         row.pack(fill="x")
         self._mouth = kit.Mouth(row, round(150 * s)).pack(side="left", padx=(0, round(24 * s)))
         text = tk.Frame(row, bg=kit.YELLOW)
         text.pack(side="left", fill="both", expand=True)
-        lines = []
-        if f.mode == "phone":
-            lines.append(f.phone_line() if f.pair_state == "paired" else "You can add it any time.")
-        else:
-            lines.append("ShoutAbout lives in your system tray.")
-            if f.pc_on:
-                lines.append(f.pc_line())
-            if f.phone_on:
-                lines.append("On your iPhone, tap Computer and talk.")
-        for i, line in enumerate(lines):
-            tk.Label(
-                text,
-                text=line,
-                font=fonts.big if i == 0 else fonts.body,
-                bg=kit.YELLOW,
-                fg=kit.BLACK,
-                justify="left",
-                anchor="w",
-                wraplength=round(470 * s),
-            ).pack(fill="x", pady=(round(8 * s) if i == 0 else round(6 * s), 0))
+        if f.done_line():
+            self._line(text, f.done_line(), fonts.big, pady=(round(18 * s), 0))
         self._mouth.talk()
         self.win.after(1600, lambda: self._mouth and self._mouth.stop(open_mouth=True))
 
     def _refresh_done(self) -> None:
         return
+
+    # ------------------------------------------------- screen 4: the iPhone
+
+    def _build_phone(self) -> None:
+        import tkinter as tk
+
+        f, fonts, s = self.flow, self.fonts, self.scale
+        foot = self._footer()
+        kit.button(foot, "Done", self.close, fonts, big=True).pack(side="right")
+        card = tk.Frame(
+            self.outer,
+            bg=kit.PAPER,
+            highlightthickness=round(3 * s),
+            highlightbackground=kit.BLACK,
+            padx=round(22 * s),
+            pady=round(18 * s),
+        )
+        card.pack(fill="both", expand=True, pady=(0, round(20 * s)))
+        wrap = round(600 * s)
+        if f.prompt is not None:  # inline approval
+            self._line(card, f.phone_line(), fonts.big, wrap=wrap, pady=(0, round(8 * s)))
+            tk.Label(card, text="CODE", font=fonts.small_bold, bg=kit.PAPER, fg=kit.MUTED).pack(
+                anchor="w"
+            )
+            tk.Label(card, text=f.prompt.code, font=fonts.code, bg=kit.PAPER, fg=kit.BLACK).pack(
+                anchor="w"
+            )
+            self._line(
+                card,
+                "Allow it if your iPhone shows the same code.",
+                fonts.small,
+                fg=kit.MUTED,
+                wrap=wrap,
+                pady=(0, round(10 * s)),
+            )
+            row = tk.Frame(card, bg=kit.PAPER)
+            row.pack(fill="x")
+            allow = kit.button(row, "Allow", f.allow, fonts)
+            # Armed after a moment, so a click aimed at what was there before can't land on it.
+            allow.configure(state="disabled", takefocus=0)
+            allow.pack(side="left")
+            self.win.after(ARM_DELAY_MS, lambda: _arm(allow))
+            kit.button(row, "Don't allow", f.deny, fonts, "light").pack(
+                side="left", padx=(round(8 * s), 0)
+            )
+            return
+        if f.show_qr:
+            if f.qr_text:
+                try:
+                    self._qr = kit.qr_photo(self.win, f.qr_text, scale=max(3, round(3 * s)))
+                    tk.Label(card, image=self._qr, bg=kit.WHITE).pack(anchor="w")
+                except Exception:
+                    log.exception("couldn't draw the QR code")
+            self._line(card, f.qr_error or QR_NOTE, fonts.small, wrap=wrap, pady=(round(8 * s), 0))
+            kit.link(card, "Hide the code", f.toggle_qr, fonts, kit.PAPER).pack(
+                anchor="w", pady=(round(6 * s), 0)
+            )
+            return
+        self._line(card, PHONE_HOWTO, fonts.big, wrap=wrap, pady=(0, round(12 * s)))
+        row = tk.Frame(card, bg=kit.PAPER)
+        row.pack(fill="x")
+        if f.pair_state in ("waiting", "denied", "expired"):
+            self._mouth = kit.Mouth(row, round(36 * s), bg=kit.PAPER).pack(side="left", padx=(0, 8))
+        tk.Label(
+            row,
+            text=f.phone_line(),
+            font=fonts.body_bold,
+            bg=kit.PAPER,
+            fg=kit.BLACK,
+            justify="left",
+            anchor="w",
+            wraplength=wrap - round(50 * s),
+        ).pack(side="left", fill="x")
+        if f.pair_state != "paired":
+            kit.link(card, "Scan a code instead", f.toggle_qr, fonts, kit.PAPER).pack(
+                anchor="w", pady=(round(14 * s), 0)
+            )
+
+    def _refresh_phone(self) -> None:
+        if self._mouth is not None:
+            if self.flow.pair_state == "waiting":
+                self._mouth.talk()
+            else:
+                self._mouth.stop()
 
     def _refresh(self) -> None:
         getattr(self, f"_refresh_{self.flow.screen}")()

@@ -5,8 +5,8 @@ It lists recent dictations from ``history.jsonl``, newest first: when, where it 
 that couldn't be written out (:mod:`failed_audio`) with **Try again** and **Delete**. A
 search box filters by words. **Clear history** deletes every record and kept recording
 (after a confirmation in the window). History is off by default (``[history] enabled =
-false``): then the window says so plainly and offers to turn it on (Settings has the same
-switch). Everything stays on this PC.
+false``): then the window says so in one line and offers to turn it on (Settings has the
+same switch). Everything stays on this PC.
 
 :mod:`history_ui` only draws this; tests drive it with fake services.
 """
@@ -26,21 +26,17 @@ READ_LIMIT = 2000  # history lines read (newest); older ones stay in the file
 SHOWN_LIMIT = 150  # cards drawn at once; searching reaches the rest of READ_LIMIT
 
 TITLE = "History"
-SUBTITLE = "What you said, newest first. It stays on this PC."
+SUBTITLE = "Saved only on this PC."
 OFF_TITLE = "History is off."
-OFF_TEXT = (
-    "It's off by default, so ShoutAbout doesn't keep what you dictate. Turn it on (here or "
-    "in Settings) to find your dictations in this window. They stay on this PC."
-)
-OFF_FAILED_NOTE = "Recordings that don't go through are kept to try again only while history is on."
-EMPTY_TEXT = "Nothing yet. What you dictate shows up here."
+# Turning it on also keeps recordings that fail (for Try again): say so, briefly.
+OFF_TEXT = "Turn it on to keep what you dictate, and recordings that fail, on this PC."
+EMPTY_TEXT = "Nothing yet."
 NO_MATCH_TEXT = "Nothing matches that search."
 CLEARED = "History cleared."
-COPIED = "Copied. Paste it wherever you like."
-RETRIED = "Got it. It's at the top of the list."
+COPIED = "Copied."
+RETRIED = "Done. It's at the top of the list."
 RETRY_NEEDS_HUB = "Start ShoutAbout first, then try again."
 FAILED_TITLE = "Couldn't write these out"
-FAILED_NOTE = "The recordings are kept on this PC so you can try again."
 
 
 # --------------------------------------------------------------------- pure copy

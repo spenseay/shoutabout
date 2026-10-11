@@ -122,6 +122,19 @@ def default_copy_text(text: str) -> None:
     clipboard.set_text(text, exclude_from_history=True)
 
 
+def default_cleanup_available(cfg: Any) -> bool:
+    """Is a local Ollama answering with a model the cleanup can use? Settings shows the
+    cleanup choice only then ("auto" turns it on by itself). Never raises."""
+    try:
+        from shoutabout import modelpick
+
+        pulled = modelpick.ollama_models(cfg.cleanup.ollama_url)
+        return modelpick.pick_cleanup_model(pulled, cfg.cleanup.model) is not None
+    except Exception:
+        log.debug("couldn't look for a cleanup model", exc_info=True)
+        return False
+
+
 def default_has_microphone() -> bool | None:
     """Is a microphone plugged in? (Windows' own count; nothing is opened.) None = unknown."""
     try:
@@ -158,7 +171,7 @@ def dictation_view(cfg: Any) -> DictationView:
 
 
 def talk_instruction(hotkey_label: str, mode: str) -> str:
-    """The one-line how-to on the "Talk to this PC" card."""
+    """The one-line how-to: "Press Right Ctrl, talk, press it again."."""
     if mode == "toggle":
         return f"Press {hotkey_label}, talk, press it again."
     return f"Hold {hotkey_label}, talk, let go."
@@ -198,6 +211,7 @@ class AppServices:
     copy_hub_token: Callable[[], None] | None = None
     open_history: Callable[[], None] | None = None  # the History window (needs the UI host)
     has_microphone: Callable[[], bool | None] = default_has_microphone
+    cleanup_available: Callable[[Any], bool] = default_cleanup_available  # Ollama + a model
     # History: the running hub hands over its log (so clearing takes the same lock as
     # writing) and the failed-recordings folder; standalone, the files are used directly.
     history_log: Any = None  # history.HistoryLog

@@ -290,8 +290,9 @@ def test_history_is_off_on_a_fresh_install_and_the_window_says_so(tmp_path):
     view = model.view()
     assert view.enabled is False and view.entries == []
     assert hm.OFF_TITLE == "History is off."
-    assert "off by default" in hm.OFF_TEXT and "Settings" in hm.OFF_TEXT
-    assert "only while history is on" in hm.OFF_FAILED_NOTE
+    # one line, and it says that recordings that fail are kept too once it's on
+    assert hm.OFF_TEXT.startswith("Turn it on") and "recordings that fail" in hm.OFF_TEXT
+    assert "this PC" in hm.OFF_TEXT and "this PC" in hm.SUBTITLE
     # and nothing that fails to go through is kept while it's off
     assert svc.failed_recordings().keep_samples(np.full(1600, 0.1, np.float32)) is None
     assert not svc.paths.failed_dir.exists()
@@ -567,7 +568,7 @@ def test_history_window_when_off_says_so_and_turns_on(tmp_path):
         win = HistoryWindow(top, hm.HistoryModel(svc), load_in_background=False)
         root.update()
         shown = texts(win.body)
-        assert hm.OFF_TITLE in shown and hm.OFF_TEXT in shown and hm.OFF_FAILED_NOTE in shown
+        assert hm.OFF_TITLE in shown and hm.OFF_TEXT in shown
         (button,) = [b for b in win.body.winfo_children() if b.cget("text") == "Turn history on"]
         button.invoke()
         end = time.monotonic() + 3

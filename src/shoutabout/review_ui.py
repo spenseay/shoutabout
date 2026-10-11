@@ -406,8 +406,7 @@ class TeachApp:
         )
         tk.Label(
             outer,
-            text="Words you say often. Taught words go to the top of your vocab, "
-            "so Whisper hears them first.",
+            text="Teach names and words so they're spelled right.",
             font=self.f_body,
             bg=SHOUT_YELLOW,
             fg=BLACK,
@@ -447,7 +446,7 @@ class TeachApp:
                 side="left"
             )
             self._button(foot, "Close", self.close, "light").pack(side="right")
-            self.set_status("Type a name or term the way it should be written, then press Enter.")
+            self.set_status("Type a word, then press Enter.")
             self.entry.focus_set()
             return
 
@@ -523,8 +522,7 @@ class TeachApp:
 
         tk.Label(
             outer,
-            text="Suggestions come from your dictation history and project folders. "
-            "They never leave this PC, and nothing is added until you say so.",
+            text="Suggestions come from your dictations and project folders, on this PC.",
             font=self.f_small,
             bg=SHOUT_YELLOW,
             fg=MUTED,
@@ -533,7 +531,7 @@ class TeachApp:
             wraplength=int(860 * scale),
         ).pack(fill="x", pady=(12, 0))
 
-        self.set_status("Type a word and press Enter, or pick suggestions below.")
+        self.set_status("Type a word, then press Enter.")
         self.reload()
 
     def _on_wheel(self, event: Any) -> None:
@@ -582,7 +580,7 @@ class TeachApp:
         if not suggestions:
             tk.Label(
                 self.sugg_inner,
-                text="No suggestions right now.\nKeep dictating, or press Rescan.",
+                text="No suggestions right now.",
                 font=self.f_body,
                 bg=PAPER,
                 fg=MUTED,

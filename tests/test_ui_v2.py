@@ -249,32 +249,56 @@ def test_setup_window_renders_every_screen(tmp_path, tk_root):
     closed = []
     win = SetupWindow(top, flow, on_close=lambda: closed.append(1))
     _pump(tk_root, 0.3)
-    assert flow.phase == "ready"
-    assert str(win._widgets["next"]["state"]) == "normal"
-    flow.next()
-    _pump(tk_root, 0.3)
-    flow.toggle_phone()  # on
-    _pump(tk_root, 0.2)
-    flow.toggle_phone()  # off
-    _pump(tk_root, 0.2)
-    flow.toggle_phone()  # on again
-    _pump(tk_root, 0.2)
-    prompt = svc.pairing.request("Sam's iPhone", PHONE, "192.168.1.5")
-    assert flow.offer(prompt)
-    _pump(tk_root, 0.3)
-    flow.deny()
-    flow.toggle_qr()
-    _pump(tk_root, 0.3)
-    flow.toggle_qr()
-    flow.next()
-    _pump(tk_root, 0.3)
+    # The model is already here: "Getting ready" moves on to "Try it" by itself.
+    assert flow.phase == "ready" and flow.screen == "try"
+    assert "TRY IT" in _texts(win.outer)
     box = win._widgets["box"]
     box.insert("1.0", "This is my first dictation.")
     _pump(tk_root, 0.3)
     assert flow.screen == "done"
+    texts = _texts(win.outer)
+    assert "Press Right Ctrl, talk, press it again." in texts
+    assert "Connect your iPhone" in texts and "Done" in texts
+    flow.connect_phone()
+    _pump(tk_root, 0.3)
+    assert "CONNECT YOUR IPHONE" in _texts(win.outer)
+    prompt = svc.pairing.request("Sam's iPhone", PHONE, "192.168.1.5")
+    assert flow.offer(prompt)
+    _pump(tk_root, 0.3)
+    assert "4821" in _texts(win.outer)
+    flow.deny()
+    flow.toggle_qr()
+    _pump(tk_root, 0.3)
+    flow.toggle_qr()
+    _pump(tk_root, 0.3)
+    every = " ".join(_texts(win.outer)).lower()
+    assert "tray" not in every and "clock" not in every and "yellow mouth" not in every
     win.close()
     assert closed == [1]
-    assert svc.paths.setup_flag_file.exists()
+    assert '"finished"' in svc.paths.setup_flag_file.read_text("utf-8")
+
+
+@pytest.mark.windows
+def test_setup_window_failed_download(tmp_path, tk_root):
+    import tkinter as tk
+
+    from shoutabout.setup_flow import SetupFlow
+    from shoutabout.setup_ui import SetupWindow
+    from v2_fakes import Downloads, inline_runner
+
+    svc = make_services(tmp_path, downloads=Downloads(fail=True))
+    flow = SetupFlow(svc, runner=inline_runner)
+    top = tk.Toplevel(tk_root)
+    top.withdraw()
+    win = SetupWindow(top, flow)
+    _pump(tk_root, 0.3)
+    assert (flow.phase, flow.screen) == ("failed", "check")
+    texts = _texts(win.outer)
+    assert "GETTING READY" in texts and "Try again" in texts and "Skip for now" in texts
+    flow.skip_download()
+    _pump(tk_root, 0.3)
+    assert flow.screen == "done" and "Done" in _texts(win.outer)
+    win.close()
 
 
 @pytest.mark.windows
@@ -307,12 +331,33 @@ def test_settings_window_renders_and_saves(tmp_path, tk_root):
 
     texts = _texts(win.outer)
     assert "HISTORY" in texts and HISTORY_NOTE in texts and win.view.history_on is False
+    # No Ollama here: the AI cleanup choice isn't shown at all.
+    assert "AI CLEANUP" not in texts and "Automatic" not in texts
+    assert not any("ollama" in t.lower() for t in texts)
     (label,) = [w for w in _widgets(win.outer) if _text(w) == HISTORY_LABEL]
     label.event_generate("<Button-1>")
     _pump(tk_root, 0.3)
     assert saved[-1] == {"history": {"enabled": True}}
     win._add_phone()
     assert added == [1]
+    win.close()
+
+
+@pytest.mark.windows
+def test_settings_window_shows_ai_cleanup_when_ollama_is_there(tmp_path, tk_root):
+    import tkinter as tk
+
+    from shoutabout.settings_model import CLEANUP_NOTE, SettingsModel
+    from shoutabout.settings_ui import SettingsWindow
+
+    svc = make_services(tmp_path, cleanup_available=lambda _cfg: True)
+    top = tk.Toplevel(tk_root)
+    top.withdraw()
+    win = SettingsWindow(top, SettingsModel(svc))
+    _pump(tk_root, 0.5)
+    texts = _texts(win.outer)
+    assert "AI CLEANUP" in texts and CLEANUP_NOTE in texts
+    assert {"Automatic", "On", "Off"} <= set(texts)
     win.close()
 
 

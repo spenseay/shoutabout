@@ -498,9 +498,8 @@ def test_refresh_and_notify_once(paths):
     assert n > 0
     assert notes.messages == [teach_notification(n)]
     title, message = notes.messages[0]
-    assert title == "Teach ShoutAbout"
-    assert message.startswith(f"{n} new words to teach")
-    assert "Teach ShoutAbout…" in message
+    assert title == "Teach words"  # the tray / menu bar item's name: where to look
+    assert message == f"{n} new words to teach."
     assert refresh_and_notify(paths, cfg, notes.notify) == 0
     assert len(notes.messages) == 1  # nothing new, no second notification
 

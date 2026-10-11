@@ -5,6 +5,9 @@ Every change is saved the moment it's made (no Save button): config values throu
 phones in devices.json, start-up in the Run key. The hub then hot-reloads what it can
 (dictation, cleanup, history, the name); for the rest the page says "Restart ShoutAbout to
 apply".
+
+The AI cleanup choice only shows when a local Ollama with a suitable model answers
+(:attr:`SettingsView.show_cleanup`); "auto" (the default) turns it on by itself then.
 """
 
 from __future__ import annotations
@@ -21,13 +24,10 @@ log = logging.getLogger(__name__)
 QUALITY_CHOICES = ("auto", "best", "balanced", "light")
 CLEANUP_CHOICES = {"auto": "Automatic", "on": "On", "off": "Off"}
 MODE_CHOICES = {"toggle": "Press to start and stop", "hold": "Hold to talk"}
-NO_MIC_NOTE = "No microphone found on this PC. Use your iPhone, or plug in a mic."
-CLEANUP_NOTE = "Fixes punctuation and filler words with a small AI model on this PC (Ollama)."
+NO_MIC_NOTE = "No microphone found."
+CLEANUP_NOTE = "Fixes punctuation and filler words, on this PC."
 HISTORY_LABEL = "Keep a history of what I dictate"
-HISTORY_NOTE = (
-    "Saved only on this PC, so you can look back, or try again when a recording doesn't go "
-    "through. Off by default."
-)
+HISTORY_NOTE = "Saved only on this PC."
 RESTART_NOTE = "Saved. Restart ShoutAbout to apply."
 SAVED_NOTE = "Saved."
 
@@ -120,6 +120,7 @@ class SettingsView:
     custom_label: str = ""
     quality_note: str = ""
     cleanup: str = "auto"
+    show_cleanup: bool = False  # only when Ollama with a suitable model is there
     history_on: bool = False
     name: str = ""
     startup_on: bool = False
@@ -136,6 +137,7 @@ class SettingsModel:
         self.auto: Any = None
         self.tiers: dict[str, Any] = {}
         self.startup_state: Any = None  # winstartup.StartupState, read off the UI thread
+        self.cleanup_found = False  # Ollama + a cleanup model, looked for off the UI thread
         self.message = ""
         self.error = False
 
@@ -165,6 +167,7 @@ class SettingsModel:
             mic_missing=self.mic_missing(),
             devices=devices,
             cleanup=cleanup_choice(getattr(cfg.cleanup, "enabled", "auto")),
+            show_cleanup=self.cleanup_found,
             history_on=bool(getattr(getattr(cfg, "history", None), "enabled", False)),
             name=ident.name,
             startup_on=bool(startup and startup.enabled),
@@ -177,8 +180,13 @@ class SettingsModel:
 
     def load_models(self) -> None:
         """The slow part (hardware detection, per-tier choices, the start-up state: it may
-        ask ``schtasks``). Call off the UI thread."""
+        ask ``schtasks``; is Ollama there?). Call off the UI thread."""
         self._read_startup()
+        try:
+            self.cleanup_found = bool(self.svc.cleanup_available(self.svc.config()))
+        except Exception:
+            log.exception("couldn't look for the cleanup model")
+            self.cleanup_found = False
         try:
             self.hw = self.svc.detect_hardware()
         except Exception as exc:
@@ -312,7 +320,7 @@ class SettingsModel:
         except OSError:
             self.message, self.error = "Couldn't remove that phone.", True
             return False
-        self.message, self.error = ("Removed. That phone can't dictate here any more.", False)
+        self.message, self.error = "Removed.", False
         return removed
 
     def set_startup(self, on: bool) -> bool:

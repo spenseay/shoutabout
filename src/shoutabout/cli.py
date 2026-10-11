@@ -1005,7 +1005,7 @@ def cmd_devices_list(args: argparse.Namespace) -> int:
         print(json.dumps({"devices": rows}, ensure_ascii=False))
         return 0
     if not devices:
-        print("No phones are paired. Pair one: tray > Set up… > Talk from my iPhone.")
+        print("No phones are paired. Pair one: Settings… > Add a phone.")
         return 0
     for d in devices:
         print(f"{d.key[:8]}  {d.name}  (paired {d.created or '?'}, last used {d.last_seen or '-'})")

@@ -161,7 +161,7 @@ def adapt_services(services: Any, paths: Paths, notify: Callable[[str, str], Non
         from shoutabout.mac.paste import CONCEALED, CocoaPasteboard
 
         CocoaPasteboard().write_text(load_token(paths), (CONCEALED,))
-        notify("Hub token copied", "Clipboard managers are asked not to keep it.")
+        notify("Hub token copied", "")
 
     services.hotkey_choices = lambda: dict(keys.MAC_HOTKEY_CHOICES)
     services.hint_text = keys.hint_text
