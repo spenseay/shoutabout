@@ -1,0 +1,9 @@
+*.ttf binary
+*.otf binary
+*.png binary
+*.swift text eol=lf
+*.yml text eol=lf
+*.xcconfig text eol=lf
+*.json text eol=lf
+*.xcprivacy text eol=lf
+*.sh text eol=lf

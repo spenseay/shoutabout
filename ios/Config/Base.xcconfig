@@ -1,0 +1,31 @@
+// ShoutAbout shared build settings (all targets, all configurations).
+//
+// Everything signing- or identity-related is derived from these values, so a fork or a new
+// Apple team only has to change them here or override them on the xcodebuild command line
+// (command-line settings win over this file):
+//
+//   xcodebuild ... BUNDLE_ID_PREFIX=com.example DEVELOPMENT_TEAM=ABCDE12345
+//
+// CI passes DEVELOPMENT_TEAM (from the APPLE_TEAM_ID secret) and CURRENT_PROJECT_VERSION
+// (from the run number) that way. Never commit a team ID or any other secret here.
+
+// Reverse-DNS prefix for every bundle ID:
+//   app      $(BUNDLE_ID_PREFIX).app
+//   widgets  $(BUNDLE_ID_PREFIX).app.widgets
+//   tests    $(BUNDLE_ID_PREFIX).app.tests
+BUNDLE_ID_PREFIX = fyi.shoutabout
+
+// App Group shared by the app and the widget extension (settings, pending commands).
+// The same identifier is used as the keychain access group for the hub secrets.
+APP_GROUP_ID = group.$(BUNDLE_ID_PREFIX).app
+
+// Apple Developer team. Empty on purpose: CI injects it, Xcode users pick it in the UI.
+DEVELOPMENT_TEAM =
+CODE_SIGN_STYLE = Automatic
+
+MARKETING_VERSION = 1.0.0
+CURRENT_PROJECT_VERSION = 1
+
+// Personal overrides for local builds (bundle prefix, team), written by
+// scripts/run-on-iphone.sh and never committed. Optional: missing is fine.
+#include? "Local.xcconfig"

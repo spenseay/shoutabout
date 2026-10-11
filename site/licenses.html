@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Open-source licenses | ShoutAbout</title>
+  <meta name="description" content="The open-source software and fonts ShoutAbout is built with, and their licenses.">
+  <link rel="canonical" href="https://shoutabout.fyi/licenses">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#FFE600" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0A0A0A" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="/favicon.ico" sizes="32x32">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/site.webmanifest">
+  <link rel="stylesheet" href="/assets/css/site.css">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="ShoutAbout">
+  <meta property="og:title" content="ShoutAbout open-source licenses">
+  <meta property="og:url" content="https://shoutabout.fyi/licenses">
+  <meta property="og:image" content="https://shoutabout.fyi/assets/img/og.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <script src="/assets/js/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<div class="tone-loud">
+  <header class="site-header">
+    <div class="wrap site-header__bar">
+      <a class="lockup" href="/" aria-label="ShoutAbout home">
+        <span class="lockup__row" aria-hidden="true"><span data-wm="SH"></span><span class="mouth"><span class="mouth__box"><span class="mouth__tongue"></span><span class="mouth__teeth"></span></span></span><span data-wm="UT"></span></span>
+        <span class="lockup__row" aria-hidden="true" data-wm="ABOUT"></span>
+      </a>
+      <nav class="site-nav" aria-label="Main">
+        <a href="/setup">Setup</a>
+        <a href="/support">Help</a>
+        <a class="btn btn--small" href="/download">Download</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="page-hero">
+    <div class="wrap">
+      <h1 class="h1">Built on great work.</h1>
+      <p class="lead">ShoutAbout is free and open source: its code is on <a href="https://github.com/spenseay/shoutabout">GitHub</a> under the MIT License. It stands on open-source software, models and fonts. Thank you to everyone who made them.</p>
+    </div>
+  </div>
+</div>
+
+<main id="main" class="tone-quiet section">
+  <div class="wrap prose">
+    <p><strong>Full licence texts</strong> come with the apps. On Windows: <code>THIRD-PARTY-NOTICES.txt</code> in the install folder (usually <code>C:\Program Files\ShoutAbout</code>), generated from exactly what each version ships. On iPhone: Settings &rsaquo; Font licenses.</p>
+
+    <h2 id="windows">ShoutAbout for Windows</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th scope="col">Component</th><th scope="col">What it does</th><th scope="col">Licence</th></tr></thead>
+        <tbody>
+          <tr><td>Whisper speech models (OpenAI), in CTranslate2 format</td><td>Turns speech into text. Downloaded on first run, not in the installer.</td><td>MIT</td></tr>
+          <tr><td>faster-whisper</td><td>Runs the Whisper models</td><td>MIT</td></tr>
+          <tr><td>CTranslate2</td><td>Fast model engine</td><td>MIT (Intel OpenMP runtime under Intel's redistribution terms)</td></tr>
+          <tr><td>Silero VAD</td><td>Finds where speech starts and stops</td><td>MIT</td></tr>
+          <tr><td>ONNX Runtime</td><td>Runs Silero VAD</td><td>MIT (includes Eigen, MPL-2.0)</td></tr>
+          <tr><td>NVIDIA cuBLAS and NVRTC</td><td>Speed on NVIDIA graphics cards</td><td>NVIDIA CUDA EULA (redistributable components)</td></tr>
+          <tr><td>NumPy</td><td>Audio maths</td><td>BSD-3-Clause and bundled runtime notices</td></tr>
+          <tr><td>sounddevice and PortAudio</td><td>The microphone</td><td>MIT</td></tr>
+          <tr><td>FastAPI, Starlette, Pydantic, Uvicorn, HTTPX</td><td>Talking to your iPhone</td><td>MIT and BSD-3-Clause</td></tr>
+          <tr><td>Hugging Face Hub, hf-xet, Tokenizers</td><td>Downloading the speech model</td><td>Apache-2.0</td></tr>
+          <tr><td>cryptography (with OpenSSL), PyJWT</td><td>Secure connections and the optional tunnel</td><td>Apache-2.0 / BSD-3-Clause, MIT</td></tr>
+          <tr><td>segno, psutil, tomlkit, PyYAML, protobuf, and their dependencies</td><td>QR codes, hardware checks, settings files</td><td>BSD-3-Clause, MIT</td></tr>
+          <tr><td>tqdm, certifi</td><td>Progress and trusted certificates</td><td>MPL-2.0 (and MIT), unmodified</td></tr>
+          <tr><td>Python and Tcl/Tk</td><td>The runtime and the setup window</td><td>PSF License, Tcl/Tk licence</td></tr>
+          <tr><td>PyInstaller bootloader, Inno Setup</td><td>Package the app and the installer</td><td>GPL-2.0 with the bootloader exception; Inno Setup licence</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>The optional &ldquo;Clean up wording with AI&rdquo; uses <a href="https://ollama.com">Ollama</a> if you've installed it yourself. ShoutAbout doesn't include Ollama or its models.</p>
+
+    <h2 id="mac">ShoutAbout for Mac</h2>
+    <p>The same speech, network and settings components as the Windows app, without NVIDIA's libraries, plus:</p>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th scope="col">Component</th><th scope="col">What it does</th><th scope="col">Licence</th></tr></thead>
+        <tbody>
+          <tr><td>PyObjC</td><td>The menu bar, the pop-up mouth, the key and pasting, through macOS's own frameworks</td><td>MIT</td></tr>
+          <tr><td>PyInstaller bootloader</td><td>Packages the app</td><td>GPL-2.0 with the bootloader exception</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Full licence texts are in <code>THIRD-PARTY-NOTICES.txt</code> inside the app.</p>
+
+    <h2 id="iphone">ShoutAbout for iPhone</h2>
+    <p>Built only with Apple's own frameworks, plus two fonts:</p>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th scope="col">Component</th><th scope="col">Licence</th></tr></thead>
+        <tbody>
+          <tr><td>Anton (The Anton Project Authors)</td><td>SIL Open Font License 1.1</td></tr>
+          <tr><td>Archivo (The Archivo Project Authors)</td><td>SIL Open Font License 1.1</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="website">This website</h2>
+    <p>Hand-written HTML, CSS and a little JavaScript, with no frameworks and nothing loaded from other sites. It uses Anton and Archivo, served from this site in a smaller (Latin-only) form, under the SIL Open Font License 1.1: <a href="/assets/fonts/OFL-Anton.txt">Anton licence</a>, <a href="/assets/fonts/OFL-Archivo.txt">Archivo licence</a>.</p>
+
+    <h2 id="brand">The ShoutAbout name and mouth</h2>
+    <p>The ShoutAbout name, the mouth logo and its animation are ours, and aren't covered by any of the licences above.</p>
+  </div>
+</main>
+
+<footer class="site-footer tone-ink">
+  <div class="wrap">
+    <div class="site-footer__grid">
+      <div>
+        <a class="lockup" href="/" aria-label="ShoutAbout home">
+          <span class="lockup__row" aria-hidden="true"><span data-wm="SH"></span><span class="mouth"><span class="mouth__box"><span class="mouth__tongue"></span><span class="mouth__teeth"></span></span></span><span data-wm="UT"></span></span>
+          <span class="lockup__row" aria-hidden="true" data-wm="ABOUT"></span>
+        </a>
+        <p>Private voice dictation for Windows, Mac and iPhone. Free.</p>
+      </div>
+      <nav aria-label="Footer">
+        <ul class="site-footer__links">
+          <li><a href="/download">Download</a></li>
+          <li><a href="/setup">Setup</a></li>
+          <li><a href="/support">Help</a></li>
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+          <li><a href="/licenses" aria-current="page">Licenses</a></li>
+          <li data-contact hidden><a data-contact-link href="/support#contact">Email</a></li>
+        </ul>
+      </nav>
+    </div>
+    <div class="site-footer__legal">
+      <p>&copy; 2026 ShoutAbout. Free software, provided as is.</p>
+      <p>Windows is a trademark of Microsoft. Apple, iPhone, Mac and TestFlight are trademarks of Apple Inc. ShoutAbout isn't affiliated with either.</p>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

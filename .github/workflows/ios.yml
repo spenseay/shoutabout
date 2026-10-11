@@ -1,0 +1,318 @@
+name: iOS
+
+# Builds the native iPhone app (ios/) on a GitHub-hosted Mac. No Mac needed locally.
+#   push / pull_request (ios/** only): generate the project, build app + widgets + tests for the
+#     iOS Simulator without code signing, run the unit tests.
+#   workflow_dispatch: archive with automatic (cloud) signing and upload to TestFlight, if the
+#     App Store Connect secrets exist. See docs/ios-app.md. With testflight off and screenshots
+#     on, the build job also runs the ShoutAboutUITests screenshot tour (Debug sample data,
+#     including the Dynamic Island / Lock Screen Live Activity) and uploads ios-screenshots.
+#
+# macOS minutes are billed at 10x on private repos: keep the triggers narrow.
+
+on:
+  push:
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios.yml"
+  pull_request:
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios.yml"
+  workflow_dispatch:
+    inputs:
+      testflight:
+        description: "Archive, sign and upload to TestFlight (needs the App Store Connect secrets)"
+        type: boolean
+        default: true
+      screenshots:
+        description: "With testflight off: simulator screenshots with sample data (artifact ios-screenshots)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && 'release' || 'ci' }}
+  # Cancel superseded CI runs, but never kill a TestFlight upload half way.
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+env:
+  # Newest GA Xcode on the GA macos-26 image (runner-images, macos-26-arm64 readme).
+  # Xcode 27 lives on the separate `xcode-27` image (preview): change runs-on + this together.
+  XCODE_VERSION: "26.6"
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+  HOMEBREW_NO_INSTALL_CLEANUP: "1"
+  HOMEBREW_NO_ENV_HINTS: "1"
+
+jobs:
+  build:
+    name: Build + unit tests (simulator, unsigned)
+    if: github.event_name != 'workflow_dispatch' || !inputs.testflight
+    runs-on: macos-26
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: ios
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Select Xcode ${{ env.XCODE_VERSION }}
+        run: |
+          sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app/Contents/Developer"
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: |
+          brew install xcodegen
+          xcodegen --version
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Pick an iPhone simulator
+        run: |
+          # Newest iOS 26+ runtime; prefer iPhone 17 Pro (Dynamic Island) for the screenshots.
+          UDID=$(xcrun simctl list devices available --json | jq -r '
+            [.devices | to_entries | sort_by(.key) | .[]
+              | select(.key | test("iOS-(2[6-9]|[3-9][0-9])"))
+              | .value[] | select(.name | startswith("iPhone"))]
+            | ((map(select(.name == "iPhone 17 Pro")) | last)
+               // (map(select(.name | test("Pro$"))) | last)
+               // last)
+            | .udid // empty')
+          if [ -n "$UDID" ]; then
+            echo "Using simulator $UDID"
+            xcrun simctl list devices | grep "$UDID" || true
+            echo "SIM_DESTINATION=id=$UDID" >> "$GITHUB_ENV"
+          else
+            echo "::warning::No iOS 26+ iPhone simulator found; building for the generic simulator, skipping tests."
+            echo "SIM_DESTINATION=generic/platform=iOS Simulator" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build app, widgets and tests (no signing)
+        run: |
+          set -o pipefail
+          xcodebuild build-for-testing \
+            -project ShoutAbout.xcodeproj \
+            -scheme ShoutAbout \
+            -configuration Debug \
+            -destination "$SIM_DESTINATION" \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            | xcbeautify --renderer github-actions
+
+      - name: Run unit tests
+        if: startsWith(env.SIM_DESTINATION, 'id=')
+        run: |
+          set -o pipefail
+          xcodebuild test-without-building \
+            -project ShoutAbout.xcodeproj \
+            -scheme ShoutAbout \
+            -destination "$SIM_DESTINATION" \
+            -derivedDataPath build/DerivedData \
+            -only-testing:ShoutAboutTests \
+            | xcbeautify --renderer github-actions
+
+      # The ShoutAboutUITests tour launches the Debug app in each `-ScreenshotScene` (made-up
+      # sample data: no hub, no keychain, nothing saved), presses Home / long-presses the
+      # Dynamic Island / locks the simulator for the Live Activity, and attaches
+      # XCUIScreen screenshots. They are exported from the .xcresult (Xcode 16.3+
+      # `xcresulttool export attachments`) and renamed to the attachment names.
+      - name: Take simulator screenshots (XCUITest)
+        if: github.event_name == 'workflow_dispatch' && inputs.screenshots && startsWith(env.SIM_DESTINATION, 'id=')
+        run: |
+          set -uo pipefail
+          UDID="${SIM_DESTINATION#id=}"
+          xcrun simctl boot "$UDID" 2>/dev/null || true
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl ui "$UDID" appearance light
+          xcrun simctl status_bar "$UDID" override --time 9:41 --dataNetwork wifi --wifiMode active \
+            --wifiBars 3 --cellularMode active --cellularBars 4 --batteryState charged --batteryLevel 100
+          rm -rf build/Screenshots.xcresult screenshots
+          mkdir -p screenshots/raw
+          xcodebuild test-without-building \
+            -project ShoutAbout.xcodeproj \
+            -scheme ShoutAbout \
+            -destination "$SIM_DESTINATION" \
+            -derivedDataPath build/DerivedData \
+            -only-testing:ShoutAboutUITests \
+            -resultBundlePath build/Screenshots.xcresult \
+            | xcbeautify --renderer github-actions
+          TEST_STATUS=${PIPESTATUS[0]}
+          [ "$TEST_STATUS" -eq 0 ] || echo "::warning::The screenshot tour reported failures (exit $TEST_STATUS); exporting what it captured."
+          xcrun xcresulttool export attachments --path build/Screenshots.xcresult --output-path screenshots/raw \
+            || echo "::warning::xcresulttool export attachments failed"
+          ls -la screenshots/raw | head -80
+          if [ -f screenshots/raw/manifest.json ]; then
+            head -c 1500 screenshots/raw/manifest.json; echo
+            jq -r '.. | objects | select(has("exportedFileName"))
+                   | [.exportedFileName, (.suggestedHumanReadableName // .exportedFileName)] | @tsv' \
+              screenshots/raw/manifest.json > screenshots/raw/names.tsv || true
+            while IFS=$'\t' read -r file nice; do
+              [ -n "$file" ] && [ -f "screenshots/raw/$file" ] || continue
+              base="${nice%%_*}"; base="${base%.*}"; ext="${file##*.}"
+              cp "screenshots/raw/$file" "screenshots/${base}.${ext}"
+            done < screenshots/raw/names.tsv
+          fi
+          ls -la screenshots
+          ls screenshots/*.png > /dev/null 2>&1 || { echo "::error::No screenshots were exported."; exit 1; }
+
+      - name: Upload screenshots
+        if: github.event_name == 'workflow_dispatch' && inputs.screenshots && startsWith(env.SIM_DESTINATION, 'id=')
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-screenshots
+          path: ios/screenshots/
+          if-no-files-found: error
+          retention-days: 14
+
+  secrets-check:
+    name: Check App Store Connect secrets
+    if: github.event_name == 'workflow_dispatch' && inputs.testflight
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      - id: check
+        env:
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          missing=""
+          [ -n "$KEY_ID" ] || missing="$missing APP_STORE_CONNECT_KEY_ID"
+          [ -n "$ISSUER_ID" ] || missing="$missing APP_STORE_CONNECT_ISSUER_ID"
+          [ -n "$KEY_P8" ] || missing="$missing APP_STORE_CONNECT_KEY_P8"
+          [ -n "$TEAM_ID" ] || missing="$missing APPLE_TEAM_ID"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets:$missing. See docs/ios-app.md (TestFlight without a Mac)."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+  testflight:
+    name: Archive + upload to TestFlight
+    needs: secrets-check
+    if: github.event_name == 'workflow_dispatch' && needs.secrets-check.outputs.ready == 'true'
+    runs-on: macos-26
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: ios
+    env:
+      KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+      ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      # Monotonic per workflow; ".attempt" keeps re-runs of the same run unique.
+      BUILD_NUMBER: ${{ github.run_number }}.${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Select Xcode ${{ env.XCODE_VERSION }}
+        run: |
+          sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app/Contents/Developer"
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Install the App Store Connect API key
+        env:
+          KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
+        run: |
+          # altool looks in ~/.appstoreconnect/private_keys; xcodebuild gets the path explicitly.
+          KEY_DIR="$HOME/.appstoreconnect/private_keys"
+          mkdir -p "$KEY_DIR"
+          KEY_PATH="$KEY_DIR/AuthKey_${KEY_ID}.p8"
+          # Accept base64 (documented) or the raw PEM text.
+          if printf '%s' "$KEY_P8" | grep -q "BEGIN PRIVATE KEY"; then
+            printf '%s\n' "$KEY_P8" > "$KEY_PATH"
+          else
+            printf '%s' "$KEY_P8" | base64 --decode > "$KEY_PATH"
+          fi
+          chmod 600 "$KEY_PATH"
+          grep -q "BEGIN PRIVATE KEY" "$KEY_PATH" || { echo "::error::APP_STORE_CONNECT_KEY_P8 is not a .p8 key (base64 of the file)."; exit 1; }
+          echo "KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
+
+      - name: Archive (automatic signing via the API key)
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project ShoutAbout.xcodeproj \
+            -scheme ShoutAbout \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "$RUNNER_TEMP/ShoutAbout.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$KEY_PATH" \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER_ID" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            CODE_SIGN_STYLE=Automatic \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            | xcbeautify --renderer github-actions
+
+      - name: Export for App Store Connect (cloud signing)
+        run: |
+          set -o pipefail
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>export</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>teamID</key><string>${TEAM_ID}</string>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/ShoutAbout.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$KEY_PATH" \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER_ID" \
+            | xcbeautify --renderer github-actions
+          ls -la "$RUNNER_TEMP/export"
+
+      - name: Upload to App Store Connect
+        run: |
+          IPA=$(ls "$RUNNER_TEMP"/export/*.ipa | head -n 1)
+          [ -n "$IPA" ] || { echo "::error::No .ipa was exported."; exit 1; }
+          if xcrun altool --upload-app --type ios --file "$IPA" \
+               --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID" --output-format normal; then
+            echo "Uploaded with altool."
+          else
+            # Fallback: let Xcode upload straight from the archive with the same API key.
+            echo "::warning::altool upload failed; retrying with xcodebuild -exportArchive (destination=upload)."
+            sed 's#<string>export</string>#<string>upload</string>#' \
+              "$RUNNER_TEMP/ExportOptions.plist" > "$RUNNER_TEMP/ExportOptions-upload.plist"
+            set -o pipefail
+            xcodebuild -exportArchive \
+              -archivePath "$RUNNER_TEMP/ShoutAbout.xcarchive" \
+              -exportOptionsPlist "$RUNNER_TEMP/ExportOptions-upload.plist" \
+              -exportPath "$RUNNER_TEMP/upload" \
+              -allowProvisioningUpdates \
+              -authenticationKeyPath "$KEY_PATH" \
+              -authenticationKeyID "$KEY_ID" \
+              -authenticationKeyIssuerID "$ISSUER_ID" \
+              | xcbeautify --renderer github-actions
+          fi
+          echo "Uploaded build $BUILD_NUMBER. It shows up in App Store Connect > TestFlight after processing (5-30 min)." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove the API key
+        if: always()
+        run: rm -rf "$HOME/.appstoreconnect"

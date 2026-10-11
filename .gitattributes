@@ -1,0 +1,16 @@
+* text=auto
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.png binary
+*.ico binary
+*.m4a binary
+*.wav binary
+*.webp binary
+*.woff2 binary
+# The website is deployed as-is from a checkout (wrangler / drag-and-drop): keep LF.
+site/** text eol=lf
+site/**/*.png binary
+site/**/*.ico binary
+site/**/*.webp binary
+site/**/*.woff2 binary

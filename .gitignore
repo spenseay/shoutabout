@@ -1,0 +1,69 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local runtime data / secrets: these belong in %APPDATA%\shoutabout, never the repo.
+config.toml
+hub_token.txt
+vocab.txt
+history.jsonl
+install-state.json
+devices.json
+identity.json
+setup_complete
+*.token
+.env
+.env.*
+
+# Scratch folders for local manual runs (SHOUTABOUT_HOME etc.)
+.tmp/
+
+# Generated test audio
+test-audio/
+
+# Generated iPhone shortcuts (`make-shortcuts`; they hold the Wi-Fi name and URLs)
+shortcuts-out/
+
+# Cloudflare credentials, if anything ever lands here
+.cloudflared/
+*.pem
+cert.json
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+
+# Claude Code local state
+.claude/worktrees/
+.claude/settings.local.json
+
+# Local dev runs and UI screenshots (scripts/capture_ui.py)
+.tmp/
+.screens/
+
+# Mac build output (packaging/macos/build.sh, release.sh)
+packaging/dist-mac/
+
+# Keys, certificates and pairing secrets: never commit (they normally live outside the repo).
+token.txt
+*.p8
+*.p12
+*.cer
+*.key
+*.mobileprovision
+*.certSigningRequest
+cert_key*
+*.shortcut
+ShoutAbout iPhone setup.html
+*phone secrets*

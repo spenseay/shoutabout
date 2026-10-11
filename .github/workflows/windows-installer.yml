@@ -1,0 +1,164 @@
+name: Windows installer
+
+# Builds ShoutAbout-Setup-<version>.exe on a GitHub-hosted Windows machine and proves it works:
+#   uv sync -> PyInstaller (packaging/shoutabout.spec) -> Inno Setup (packaging/installer.iss)
+#   -> packaging/smoke-test.ps1: silent install, ShoutAbout.exe --self-test, firewall rule,
+#      the installed hub transcribing a test sentence, silent upgrade, silent uninstall.
+# The installer is uploaded as a workflow artifact. A v* tag also attaches it to a DRAFT
+# GitHub release (published by hand). See docs/installer.md.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+    branches: ["main", "v2-*"]
+    # Ignored for tag pushes: every v* tag builds.
+    paths:
+      - "src/**"
+      - "packaging/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/windows-installer.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-installer-${{ github.ref }}
+  # Superseded branch builds are cancelled; tag (release) builds always finish.
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  installer:
+    name: Build + smoke test
+    runs-on: windows-latest
+    timeout-minutes: 75
+    outputs:
+      version: ${{ steps.build.outputs.version }}
+      installer_name: ${{ steps.build.outputs.installer_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # The python.org build (as end users' venvs use); PyInstaller bundles it.
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-suffix: installer
+
+      - name: Install the build venv
+        run: uv sync --locked --extra cuda --no-dev --group packaging --python "${{ steps.python.outputs.python-path }}"
+
+      - name: Tag matches the package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $version = (& .venv\Scripts\python.exe -c "import shoutabout; print(shoutabout.__version__)").Trim()
+          if ("v$version" -ne "${{ github.ref_name }}") {
+            throw "Tag ${{ github.ref_name }} doesn't match the package version $version (src/shoutabout/__init__.py)"
+          }
+
+      - name: Inno Setup 6
+        shell: pwsh
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw "choco install innosetup failed ($LASTEXITCODE)" }
+          }
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found at $iscc" }
+          "ISCC=$iscc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $v = (Get-Item $iscc).VersionInfo
+          "Inno Setup at ${iscc}: file version $($v.FileVersion), product version $($v.ProductVersion)"
+
+      # Seconds instead of a full build when installer.iss has a compile error.
+      - name: Compile check of installer.iss
+        shell: pwsh
+        run: |
+          $fake = Join-Path $env:RUNNER_TEMP 'iss-check'
+          New-Item -ItemType Directory -Force -Path "$fake\app\_internal", "$fake\out" | Out-Null
+          Copy-Item "$env:WINDIR\System32\whoami.exe" "$fake\app\ShoutAbout.exe"
+          Set-Content "$fake\app\_internal\placeholder.txt" 'placeholder'
+          & .venv\Scripts\python.exe packaging\make_assets.py --out "$fake\assets"
+          Set-Content "$fake\assets\THIRD-PARTY-NOTICES.txt" 'placeholder'
+          & $env:ISCC /Qp /DAppVersion=0.0.0 "/DSourceDir=$fake\app" "/DAssetsDir=$fake\assets" "/DOutputDir=$fake\out" packaging\installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "installer.iss doesn't compile ($LASTEXITCODE)" }
+
+      - name: Build ShoutAbout.exe and the installer
+        id: build
+        shell: pwsh
+        env:
+          SHOUTABOUT_SIGN_PFX_BASE64: ${{ secrets.SHOUTABOUT_SIGN_PFX_BASE64 }}
+          SHOUTABOUT_SIGN_PFX_PASSWORD: ${{ secrets.SHOUTABOUT_SIGN_PFX_PASSWORD }}
+          SHOUTABOUT_SIGN_TIMESTAMP_URL: ${{ vars.SHOUTABOUT_SIGN_TIMESTAMP_URL }}
+        # Windows PowerShell 5.1, which is what the people who run these scripts have.
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\packaging\build.ps1 -RequireInstaller
+
+      - name: Smoke test (silent install, self-test, run, upgrade, uninstall)
+        shell: pwsh
+        # Windows PowerShell 5.1: the test sentence uses System.Speech (.NET Framework).
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\packaging\smoke-test.ps1 -Installer "${{ steps.build.outputs.installer }}" -Version "${{ steps.build.outputs.version }}"
+
+      # The interactive wizard and the uninstall dialog, driven with the Enter key. Best effort:
+      # screenshots need the runner's desktop session.
+      - name: Wizard screenshots (interactive install, uninstall dialog)
+        continue-on-error: true
+        shell: pwsh
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\packaging\wizard-screenshots.ps1 -Installer "${{ steps.build.outputs.installer }}" -OutDir "${{ runner.temp }}\shoutabout-shots"
+
+      - name: Upload the screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-screenshots
+          path: ${{ runner.temp }}/shoutabout-shots/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upload the installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.build.outputs.installer_name }}
+          path: ${{ steps.build.outputs.installer }}
+          compression-level: 0
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload reports and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-reports
+          path: |
+            packaging/dist/size-report.txt
+            ${{ runner.temp }}/shoutabout-smoke/selftest.json
+            ${{ runner.temp }}/shoutabout-smoke/logs/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  release:
+    name: Draft release
+    needs: installer
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.installer.outputs.installer_name }}
+          path: dist
+
+      - name: Attach the installer to a draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.installer.outputs.version }}
+        run: |
+          notes="ShoutAbout $VERSION for Windows 10/11 (64-bit). Download ${{ needs.installer.outputs.installer_name }} and double-click it.
+          This build is not code-signed yet: if Windows SmartScreen says \"Windows protected your PC\", click More info, then Run anyway."
+          gh release create "$TAG" dist/* --repo "${{ github.repository }}" --draft --title "ShoutAbout $VERSION" --notes "$notes"

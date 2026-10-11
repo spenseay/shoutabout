@@ -1,0 +1,5 @@
+# ShoutAbout. Everything here is public, and nothing is tracked.
+User-agent: *
+Allow: /
+
+Sitemap: https://shoutabout.fyi/sitemap.xml

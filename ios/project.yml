@@ -1,0 +1,184 @@
+# XcodeGen spec for the ShoutAbout iPhone app. Generate the project with:
+#
+#   cd ios && xcodegen generate
+#
+# The generated ShoutAbout.xcodeproj, Info.plists and .entitlements are build outputs
+# (gitignored). Identity settings (bundle prefix, team, App Group, version) live in
+# Config/Base.xcconfig.
+name: ShoutAbout
+
+options:
+  bundleIdPrefix: fyi.shoutabout
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+  groupSortPosition: top
+
+configFiles:
+  Debug: Config/Base.xcconfig
+  Release: Config/Base.xcconfig
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    TARGETED_DEVICE_FAMILY: "1"
+    SUPPORTS_MACCATALYST: NO
+    SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+    SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: NO
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    DEAD_CODE_STRIPPING: YES
+    LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+
+targets:
+  ShoutAbout:
+    type: application
+    platform: iOS
+    sources:
+      - path: ShoutAbout
+      - path: Shared
+      - path: Privacy/App/PrivacyInfo.xcprivacy
+        buildPhase: resources
+    dependencies:
+      - target: ShoutAboutWidgets
+    settings:
+      base:
+        PRODUCT_NAME: ShoutAbout
+        PRODUCT_BUNDLE_IDENTIFIER: $(BUNDLE_ID_PREFIX).app
+        # iPhone only, here and not just above: XcodeGen's iOS target preset sets "1,2"
+        # (iPhone + iPad) at the target level, and an iPad app must allow every orientation
+        # (App Store Connect rejects the upload with error 90474). iPads run it as an iPhone app.
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: AppIcon-Alt
+        # App-only code paths in the shared sources (intents call straight into the app).
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SHOUTABOUT_APP
+    info:
+      path: Config/ShoutAbout-Info.plist
+      properties:
+        CFBundleDisplayName: ShoutAbout
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIBackgroundModes:
+          - audio
+        UIAppFonts:
+          - Anton-Regular.ttf
+          - Archivo-Medium.ttf
+          - Archivo-Bold.ttf
+        # The mouth in the Dynamic Island / on the Lock Screen while dictating (ActivityKit).
+        NSSupportsLiveActivities: true
+        NSMicrophoneUsageDescription: ShoutAbout listens only while you dictate. Your voice goes to your own computer, or stays on this iPhone.
+        NSSpeechRecognitionUsageDescription: ShoutAbout turns your voice into text right here on this iPhone.
+        NSCameraUsageDescription: Only used to scan the pairing code your computer shows.
+        NSLocalNetworkUsageDescription: ShoutAbout looks for your computer on your Wi-Fi so your words can land on it.
+        # Bonjour service the PC advertises (DNS-SD, see the cross-device contract).
+        NSBonjourServices:
+          - _shoutabout._tcp
+        NSAppTransportSecurity:
+          # Plain HTTP only to local-network addresses (the PC on the LAN). The public URL is HTTPS.
+          NSAllowsLocalNetworking: true
+        CFBundleURLTypes:
+          - CFBundleURLName: $(PRODUCT_BUNDLE_IDENTIFIER)
+            CFBundleURLSchemes:
+              - shoutabout
+        ShoutAboutAppGroup: $(APP_GROUP_ID)
+    entitlements:
+      path: Config/ShoutAbout.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - $(APP_GROUP_ID)
+
+  ShoutAboutWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ShoutAboutWidgets
+      - path: Shared
+      - path: Privacy/Widgets/PrivacyInfo.xcprivacy
+        buildPhase: resources
+      # Anton for the Live Activity's headline (the OFL licence ships next to it).
+      - path: ShoutAbout/Resources/Fonts/Anton-Regular.ttf
+        buildPhase: resources
+      - path: ShoutAbout/Resources/Fonts/OFL-Anton.txt
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_NAME: ShoutAboutWidgets
+        PRODUCT_BUNDLE_IDENTIFIER: $(BUNDLE_ID_PREFIX).app.widgets
+        TARGETED_DEVICE_FAMILY: "1"  # must match the app (see above)
+        SKIP_INSTALL: YES
+        APPLICATION_EXTENSION_API_ONLY: YES
+    info:
+      path: Config/ShoutAboutWidgets-Info.plist
+      properties:
+        CFBundleDisplayName: ShoutAbout
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+        UIAppFonts:
+          - Anton-Regular.ttf
+        ShoutAboutAppGroup: $(APP_GROUP_ID)
+    entitlements:
+      path: Config/ShoutAboutWidgets.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - $(APP_GROUP_ID)
+
+  # Logic tests (no host app): the pure Foundation code in Shared/Core is compiled straight
+  # into the test bundle, so the tests run without launching the app or any entitlement.
+  ShoutAboutTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: ShoutAboutTests
+      - path: Shared/Core
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(BUNDLE_ID_PREFIX).app.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+  # Screenshot tour (CI's `screenshots` run): launches the Debug app in each
+  # `-ScreenshotScene` and attaches XCUIScreen screenshots, exported from the .xcresult.
+  ShoutAboutUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: ShoutAboutUITests
+    dependencies:
+      - target: ShoutAbout
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(BUNDLE_ID_PREFIX).app.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: ShoutAbout
+        # XCTest's UI APIs are main-actor bound; the tour is simple sequential code.
+        SWIFT_VERSION: "5.0"
+        SWIFT_STRICT_CONCURRENCY: minimal
+
+schemes:
+  ShoutAbout:
+    build:
+      targets:
+        ShoutAbout: all
+        ShoutAboutTests: [test]
+        ShoutAboutUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - ShoutAboutTests
+        - ShoutAboutUITests
+    archive:
+      config: Release

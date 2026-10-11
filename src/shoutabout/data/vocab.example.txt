@@ -1,0 +1,10 @@
+# ShoutAbout vocabulary: one term or phrase per line.
+# Lines starting with # are comments. Order = priority: if the list is too long
+# for Whisper's prompt budget, terms at the top win. Changes apply without a restart.
+Better Shell
+Claude Code
+Claude
+Anthropic
+GitHub
+Cloudflare
+ShoutAbout

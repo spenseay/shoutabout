@@ -1,0 +1,22 @@
+{
+  "_readme": "The site's go-live switches; every page reads this file when it loads (docs/launch/hosting.md). A platform's buttons link to its file only when its live flag is true; until then they say 'Coming soon', so the site can go online first. Flip windows.live / mac.live once the file is on the latest GitHub release of the public spenseay/shoutabout repo (the URLs never change: stable file names, releases/latest), and iphone.live once testflight_url (later app_store_url) is filled in. contact_email: empty = no email anywhere on the site; set it (for example a free Cloudflare Email Routing address) to show it in the footer, on /support and in the privacy policy and terms. size_bytes is optional (shown as 'about N MB').",
+  "contact_email": "hello@shoutabout.fyi",
+  "releases_url": "https://github.com/spenseay/shoutabout/releases/latest",
+  "windows": {
+    "live": false,
+    "file": "ShoutAbout-Setup.exe",
+    "url": "https://github.com/spenseay/shoutabout/releases/latest/download/ShoutAbout-Setup.exe",
+    "size_bytes": null
+  },
+  "mac": {
+    "live": false,
+    "file": "ShoutAbout.dmg",
+    "url": "https://github.com/spenseay/shoutabout/releases/latest/download/ShoutAbout.dmg",
+    "size_bytes": null
+  },
+  "iphone": {
+    "live": false,
+    "testflight_url": "",
+    "app_store_url": ""
+  }
+}

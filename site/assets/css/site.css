@@ -1,0 +1,1406 @@
+/* ShoutAbout website. Plain CSS, no build step. Brand: docs/brand.md.
+   Kept deliberately plain: one accent (Shout Yellow), black, paper, and the red only in the
+   tongue and a few small marks. Tones: every section picks one. "loud" = yellow, "ink" =
+   black, "quiet" = paper. In dark mode loud and ink swap, and quiet turns to night. */
+
+@font-face {
+  font-family: "Anton";
+  src: url("/assets/fonts/anton.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Archivo";
+  src: url("/assets/fonts/archivo-500.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Archivo";
+  src: url("/assets/fonts/archivo-700.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --yellow: #ffe600;
+  --ink: #0a0a0a;
+  --red: #ff1a1a;
+  --white: #ffffff;
+  --paper: #faf9f5;
+  --night: #161616;
+  --night-2: #222222;
+
+  --display: "Anton", "Impact", "Haettenschweiler", "Arial Narrow Bold", sans-serif;
+  --text: "Archivo", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+
+  --gutter: clamp(20px, 5vw, 48px);
+  --max: 1160px;
+  --radius: 28px;
+  --border: 3px;
+  --section-y: clamp(80px, 12vw, 160px);
+
+  color-scheme: light;
+}
+
+/* ------------------------------------------------------------------ tones */
+
+.tone-loud {
+  --bg: var(--yellow);
+  --fg: var(--ink);
+  --o-tile: 0; /* 1 on dark grounds: the wordmark mouth sits on a yellow tile (never a ring) */
+  --muted: #4a4300;
+  --line: var(--ink);
+  --btn-bg: var(--ink);
+  --btn-fg: var(--yellow);
+  --card: var(--paper);
+  --card-fg: var(--ink);
+  --card-muted: #5b5850;
+  --panel: var(--ink);
+  --chip-bg: var(--ink);
+  --chip-fg: var(--yellow);
+}
+.tone-ink {
+  --bg: var(--ink);
+  --fg: var(--yellow);
+  --o-tile: 1;
+  --muted: #d8cfa0;
+  --line: var(--yellow);
+  --btn-bg: var(--yellow);
+  --btn-fg: var(--ink);
+  --card: #1b1b1b;
+  --card-fg: #f5f3ec;
+  --card-muted: #b9b5aa;
+  --panel: var(--yellow);
+  --chip-bg: var(--yellow);
+  --chip-fg: var(--ink);
+}
+.tone-quiet {
+  --bg: var(--paper);
+  --fg: var(--ink);
+  --o-tile: 0;
+  --muted: #55524a;
+  --line: var(--ink);
+  --btn-bg: var(--ink);
+  --btn-fg: var(--yellow);
+  --card: var(--white);
+  --card-fg: var(--ink);
+  --card-muted: #5b5850;
+  --panel: var(--yellow);
+  --chip-bg: var(--yellow);
+  --chip-fg: var(--ink);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+  }
+  .tone-loud {
+    --bg: var(--ink);
+    --fg: var(--yellow);
+    --o-tile: 1;
+    --muted: #d8cfa0;
+    --line: var(--yellow);
+    --btn-bg: var(--yellow);
+    --btn-fg: var(--ink);
+    --card: #1b1b1b;
+    --card-fg: #f5f3ec;
+    --card-muted: #b9b5aa;
+    --panel: var(--yellow);
+    --chip-bg: var(--yellow);
+    --chip-fg: var(--ink);
+  }
+  .tone-ink {
+    --bg: var(--yellow);
+    --fg: var(--ink);
+    --o-tile: 0;
+    --muted: #4a4300;
+    --line: var(--ink);
+    --btn-bg: var(--ink);
+    --btn-fg: var(--yellow);
+    --card: var(--paper);
+    --card-fg: var(--ink);
+    --card-muted: #5b5850;
+    --panel: var(--ink);
+    --chip-bg: var(--ink);
+    --chip-fg: var(--yellow);
+  }
+  .tone-quiet {
+    --bg: var(--night);
+    --fg: #f5f3ec;
+    --o-tile: 1;
+    --muted: #bdb9ae;
+    --line: #f5f3ec;
+    --btn-bg: var(--yellow);
+    --btn-fg: var(--ink);
+    --card: var(--night-2);
+    --card-fg: #f5f3ec;
+    --card-muted: #bdb9ae;
+    --panel: var(--yellow);
+    --chip-bg: var(--yellow);
+    --chip-fg: var(--ink);
+  }
+}
+
+.tone-loud,
+.tone-ink,
+.tone-quiet {
+  background: var(--bg);
+  color: var(--fg);
+}
+
+/* ------------------------------------------------------------------- base */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--ink);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  scroll-behavior: smooth;
+  scroll-padding-top: 24px;
+}
+
+body {
+  margin: 0;
+  background: var(--yellow);
+  color: var(--ink);
+  font-family: var(--text);
+  font-weight: 500;
+  font-size: 1.0625rem;
+  line-height: 1.55;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+@media (prefers-color-scheme: dark) {
+  body {
+    background: var(--ink);
+    color: var(--yellow);
+  }
+}
+@media (min-width: 720px) {
+  body {
+    font-size: 1.125rem;
+  }
+}
+
+img,
+svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+a {
+  color: inherit;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.18em;
+}
+a:hover {
+  text-decoration-thickness: 3px;
+}
+
+:focus-visible {
+  outline: 3px solid var(--fg, var(--ink));
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+p {
+  margin: 0 0 1em;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+}
+
+strong,
+b {
+  font-weight: 700;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.wrap {
+  width: 100%;
+  max-width: calc(var(--max) + 2 * var(--gutter));
+  margin: 0 auto;
+  padding: 0 var(--gutter);
+}
+
+.section {
+  padding: var(--section-y) 0;
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: absolute;
+  left: 12px;
+  top: -100px;
+  z-index: 100;
+  padding: 12px 18px;
+  background: var(--ink);
+  color: var(--yellow);
+  font-weight: 700;
+  border-radius: 999px;
+  text-decoration: none;
+}
+.skip-link:focus {
+  top: 12px;
+}
+
+/* ------------------------------------------------------------------- type */
+
+.h1,
+.h2 {
+  font-family: var(--display);
+  font-weight: 400;
+  text-transform: uppercase;
+  line-height: 0.9;
+  letter-spacing: -0.01em;
+}
+.h1 {
+  font-size: clamp(3.25rem, 12vw, 7rem);
+}
+.h2 {
+  font-size: clamp(2.5rem, 8vw, 4.75rem);
+}
+.h3 {
+  font-family: var(--display);
+  font-weight: 400;
+  text-transform: uppercase;
+  font-size: clamp(1.625rem, 4.4vw, 2.125rem);
+  line-height: 0.95;
+  letter-spacing: 0;
+}
+.lead {
+  font-size: clamp(1.1875rem, 2.4vw, 1.4375rem);
+  line-height: 1.45;
+  max-width: 36ch;
+}
+.muted {
+  color: var(--muted);
+}
+.chip {
+  display: inline-block;
+  padding: 5px 12px 4px;
+  border-radius: 999px;
+  background: var(--chip-bg);
+  color: var(--chip-fg);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.chip--outline {
+  background: transparent;
+  color: inherit;
+  box-shadow: inset 0 0 0 2px currentColor;
+}
+
+/* ---------------------------------------------------------------- buttons */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 14px 28px;
+  border: var(--border) solid var(--line);
+  border-radius: 999px;
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  font-family: var(--text);
+  font-size: 1.0625rem;
+  font-weight: 700;
+  line-height: 1.15;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.btn:hover {
+  transform: translate(-3px, -3px);
+  box-shadow: 4px 4px 0 var(--line);
+}
+.btn:active {
+  transform: none;
+  box-shadow: none;
+}
+.btn--ghost {
+  background: transparent;
+  color: var(--fg);
+}
+.btn--small {
+  min-height: 44px;
+  padding: 8px 18px;
+  font-size: 0.9375rem;
+}
+/* A download that isn't live yet: an <a> without href, reading "Coming soon". */
+.btn--soon {
+  background: transparent;
+  color: var(--card-muted, var(--muted));
+  border-color: currentColor;
+  border-style: dashed;
+  cursor: default;
+}
+.btn--soon:hover {
+  transform: none;
+  box-shadow: none;
+}
+.btn .btn__icon {
+  width: 22px;
+  height: 22px;
+  flex: none;
+}
+.btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+}
+
+/* -------------------------------------------------------------- the mouth */
+/* Geometry from shoutabout.brand: a box W x H (H = W * opening / 170). Outline = top
+   half of an ellipse (ry .42H) on the bottom half of another (ry .58H). Teeth: a band
+   26/170 W deep (at most 55 % of H). Tongue: ellipse at (.5W, .93H), rx .22W, ry .31H,
+   clipped by the outline. The site only ever shows the mouth OPEN, tongue out: the
+   talking loop moves between open states (never below 86/170), so the red tongue is
+   visible in every frame. */
+
+.mouth {
+  --w: 170px;
+  --throat: var(--ink);
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--w);
+  height: calc(var(--w) * 130 / 170);
+  flex: none;
+}
+.mouth__box {
+  position: relative;
+  width: var(--w);
+  height: calc(var(--w) * 130 / 170);
+  border-radius: 50% / 42% 42% 58% 58%;
+  background: var(--throat);
+  overflow: hidden;
+  isolation: isolate;
+}
+.mouth__teeth {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: min(calc(var(--w) * 26 / 170), 55%);
+  background: var(--white);
+}
+.mouth__tongue {
+  position: absolute;
+  left: 28%;
+  width: 44%;
+  top: 62%;
+  height: 62%;
+  border-radius: 50%;
+  background: var(--red);
+}
+/* The app icon: the mouth on a yellow rounded tile, 78 % of its width. This is how the
+   mouth appears on anything dark: never with a ring or outline around it. */
+.icon-tile {
+  --t: 120px;
+  display: grid;
+  place-items: center;
+  width: var(--t);
+  height: var(--t);
+  border-radius: 22.5%;
+  background: var(--yellow);
+  flex: none;
+}
+.icon-tile .mouth {
+  --w: calc(var(--t) * 0.78);
+}
+/* The wordmark talks for 1.7 s (saTalk's rhythm, every closed keyframe lifted to an
+   open-with-tongue height), then rests wide open for 1.7 s. */
+.mouth.is-chatting .mouth__box {
+  animation: sa-chat 3.4s cubic-bezier(0.42, 0, 0.58, 1) infinite;
+}
+.mouth.is-chatting {
+  animation: sa-chat-punch 3.4s cubic-bezier(0, 0, 0.58, 1) infinite;
+}
+.mouth.is-paused,
+.mouth.is-paused .mouth__box {
+  animation-play-state: paused;
+}
+
+@keyframes sa-chat {
+  0% {
+    height: calc(var(--w) * 130 / 170);
+  }
+  6% {
+    height: calc(var(--w) * 92 / 170);
+  }
+  13% {
+    height: calc(var(--w) * 124 / 170);
+  }
+  19% {
+    height: calc(var(--w) * 86 / 170);
+  }
+  26% {
+    height: calc(var(--w) * 130 / 170);
+  }
+  32% {
+    height: calc(var(--w) * 102 / 170);
+  }
+  38% {
+    height: calc(var(--w) * 126 / 170);
+  }
+  44% {
+    height: calc(var(--w) * 92 / 170);
+  }
+  50%,
+  100% {
+    height: calc(var(--w) * 130 / 170);
+  }
+}
+@keyframes sa-chat-punch {
+  0%,
+  22% {
+    transform: scale(1);
+  }
+  26% {
+    transform: scale(1.06) rotate(-2deg);
+  }
+  30% {
+    transform: scale(0.98) rotate(1deg);
+  }
+  36%,
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+/* ------------------------------------------------------- wordmark & logo */
+/* SH[mouth]UT over ABOUT in Anton, like the app's LockupView: the mouth is 0.78 em wide
+   and stands in for the O. Rows are centred on each other. */
+
+.lockup,
+.wordmark {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.06em;
+  font-family: var(--display);
+  font-weight: 400;
+  text-transform: uppercase;
+  line-height: 0.86;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+}
+.lockup__row,
+.wordmark__row {
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+}
+/* The letters are drawn by CSS, so the page text (and what search engines and
+   copy-paste see) is just "ShoutAbout", never "SH UT ABOUT". */
+[data-wm]::before {
+  content: attr(data-wm);
+}
+/* On yellow or paper the mouth is the O as it is. On a dark ground (--o-tile: 1, set by
+   the tone) it sits on a small yellow tile, like the app icon: 0.8 em square, the mouth
+   0.6 em wide. */
+.lockup .mouth,
+.wordmark .mouth {
+  --w: calc(0.78em - var(--o-tile, 0) * 0.18em);
+  width: calc(0.78em + var(--o-tile, 0) * 0.02em);
+  height: calc(0.78em * 130 / 170 + var(--o-tile, 0) * (0.8em - 0.78em * 130 / 170));
+  margin: 0 0.03em;
+  border-radius: 0.16em;
+  background: rgb(255 230 0 / var(--o-tile, 0));
+}
+
+.lockup {
+  font-size: 1.375rem;
+  text-decoration: none;
+}
+
+/* ---------------------------------------------------------------- header */
+
+.site-header {
+  position: relative;
+  z-index: 10;
+}
+.site-header__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 84px;
+  padding-top: 14px;
+  padding-bottom: 14px;
+}
+.site-header__bar--end {
+  justify-content: flex-end;
+}
+.site-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.site-nav a:not(.btn) {
+  padding: 10px 10px;
+  font-weight: 700;
+  text-decoration: none;
+  border-radius: 999px;
+}
+.site-nav a:not(.btn):hover,
+.site-nav a:not(.btn)[aria-current="page"] {
+  text-decoration: underline;
+}
+.site-nav .btn {
+  margin-left: 8px;
+}
+@media (max-width: 380px) {
+  .site-nav a:not(.btn) {
+    padding: 10px 6px;
+  }
+}
+
+/* ------------------------------------------------------------------ hero */
+
+.hero {
+  padding: clamp(16px, 4vw, 40px) 0 var(--section-y);
+  text-align: center;
+}
+.hero .wordmark {
+  font-size: clamp(5rem, 30vw, 15rem);
+}
+.hero__sub {
+  max-width: 30ch;
+  margin: clamp(32px, 5vw, 52px) auto 0;
+  font-size: clamp(1.25rem, 2.6vw, 1.625rem);
+  font-weight: 700;
+  line-height: 1.35;
+}
+.hero .btn-row {
+  justify-content: center;
+  margin-top: 36px;
+}
+
+/* ---------------------------------------------------------- section head */
+
+.section-head {
+  max-width: 760px;
+  margin-bottom: clamp(44px, 6vw, 80px);
+}
+.section-head .lead {
+  margin-top: 22px;
+}
+.section-head--center {
+  margin-left: auto;
+  margin-right: auto;
+  text-align: center;
+}
+.section-head--center .lead {
+  margin-left: auto;
+  margin-right: auto;
+}
+.section-foot {
+  margin-top: clamp(40px, 6vw, 64px);
+}
+.section-foot--center {
+  text-align: center;
+}
+
+/* ------------------------------------------------------- the three ways */
+
+.ways {
+  display: grid;
+  gap: 56px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+@media (min-width: 900px) {
+  .ways {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 32px;
+  }
+}
+.way__visual {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  height: 340px;
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+.way__visual .iphone {
+  margin-top: 34px;
+}
+.way__visual--pc {
+  justify-content: center;
+  gap: 30px;
+}
+.way__pill {
+  width: 230px;
+}
+.keys {
+  display: flex;
+  gap: 14px;
+}
+.keycap {
+  display: inline-flex;
+  align-items: flex-end;
+  min-width: 112px;
+  height: 64px;
+  padding: 10px 14px;
+  border: 3px solid var(--ink);
+  border-radius: 14px;
+  background: var(--white);
+  color: var(--ink);
+  box-shadow: 0 5px 0 var(--ink);
+  font-weight: 700;
+  font-size: 1rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+.way .h3 {
+  margin: 26px 0 10px;
+}
+.way p {
+  margin: 0;
+  max-width: 38ch;
+}
+
+/* ------------------------------------------------------------- devices */
+
+/* A drawn iPhone instead of app screenshots (the app's record button shows the mouth with
+   a ring, which the marketing never uses): a plain outline, the Dynamic Island, the
+   Computer | Phone switch, and the mouth on its yellow app-icon tile. */
+.iphone {
+  --screen: var(--white);
+  --screen-fg: var(--ink);
+  --screen-muted: #5b5850;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 216px;
+  aspect-ratio: 9 / 19;
+  padding: 12px 16px 12px;
+  border: 7px solid var(--ink);
+  border-radius: 40px;
+  background: var(--screen);
+  color: var(--screen-fg);
+  text-align: center;
+  flex: none;
+}
+.iphone::after {
+  content: "";
+  width: 36%;
+  height: 5px;
+  margin-top: auto;
+  border-radius: 3px;
+  background: currentColor;
+  opacity: 0.35;
+}
+@media (prefers-color-scheme: dark) {
+  .iphone {
+    --screen: #141414;
+    --screen-fg: #f5f3ec;
+    --screen-muted: #bdb9ae;
+  }
+}
+.iphone__body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  margin-top: 22px;
+}
+.iphone .iphone__body .icon-tile {
+  --t: 104px;
+  margin: 4px 0 2px;
+}
+.iphone__word {
+  font-family: var(--display);
+  font-size: 1.625rem;
+  line-height: 1;
+  text-transform: uppercase;
+}
+.iphone__note {
+  max-width: 14em;
+  margin-top: -6px;
+  color: var(--screen-muted);
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+.seg {
+  display: inline-flex;
+  padding: 3px;
+  border: 2px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1;
+}
+.seg span {
+  padding: 6px 11px;
+  border-radius: 999px;
+}
+.seg .is-on {
+  background: var(--screen-fg);
+  color: var(--screen);
+}
+
+/* The Dynamic Island: a black pill; while ShoutAbout listens it holds the mouth on its
+   yellow tile and a timer. */
+.island {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 84px;
+  height: 30px;
+  padding: 0 12px 0 5px;
+  border-radius: 999px;
+  background: #000;
+  color: var(--yellow);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+.island:empty {
+  padding: 0;
+}
+.island .icon-tile {
+  --t: 21px;
+  border-radius: 6px;
+}
+.island__time {
+  margin-left: auto;
+}
+.island--big {
+  gap: 16px;
+  min-width: min(100%, 320px);
+  height: 72px;
+  padding: 0 26px 0 12px;
+  font-size: 1.375rem;
+}
+.island--big .icon-tile {
+  --t: 50px;
+  border-radius: 13px;
+}
+.island__label {
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 1.5rem;
+  text-transform: uppercase;
+}
+
+.phone {
+  position: relative;
+  width: 260px;
+  max-width: 100%;
+  aspect-ratio: 1206 / 2622;
+  border: 7px solid var(--ink);
+  border-radius: 13% / 6%;
+  background: var(--ink);
+  overflow: hidden;
+}
+.phone img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 11.5% / 5.3%;
+}
+@media (prefers-color-scheme: dark) {
+  .phone {
+    border-color: #2a2a2a;
+    box-shadow: 0 0 0 2px #3a3a3a;
+  }
+}
+
+.window {
+  border: var(--border) solid var(--card-fg, var(--ink));
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--white);
+}
+.window img {
+  width: 100%;
+}
+
+figure {
+  margin: 0;
+}
+
+/* -------------------------------------------------------------- privacy */
+
+.promises {
+  display: grid;
+  gap: 28px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+@media (min-width: 800px) {
+  .promises {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 40px;
+  }
+}
+.promise__big {
+  display: block;
+  margin-bottom: 8px;
+  font-family: var(--display);
+  font-size: clamp(2.25rem, 5vw, 3rem);
+  line-height: 0.95;
+  text-transform: uppercase;
+}
+.promise p {
+  margin: 0;
+  max-width: 30ch;
+}
+.fineprint {
+  max-width: 64ch;
+  margin: clamp(40px, 6vw, 64px) 0 0;
+  font-size: 1rem;
+  color: var(--muted);
+}
+
+/* ------------------------------------------------------------------ faq */
+
+.faq {
+  max-width: 820px;
+  margin: 0 auto;
+  border-top: 2px solid var(--line);
+}
+.faq details {
+  border-bottom: 2px solid var(--line);
+}
+.faq summary {
+  position: relative;
+  display: block;
+  padding: 22px 56px 22px 0;
+  font-weight: 700;
+  font-size: clamp(1.125rem, 2.4vw, 1.3125rem);
+  line-height: 1.3;
+  cursor: pointer;
+  list-style: none;
+}
+.faq summary::-webkit-details-marker {
+  display: none;
+}
+.faq summary::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  width: 32px;
+  height: 32px;
+  margin-top: -16px;
+  border-radius: 50%;
+  background:
+    linear-gradient(var(--btn-fg), var(--btn-fg)) center / 13px 3px no-repeat,
+    linear-gradient(var(--btn-fg), var(--btn-fg)) center / 3px 13px no-repeat,
+    var(--btn-bg);
+  transition: transform 0.2s ease;
+}
+.faq details[open] summary::after {
+  transform: rotate(45deg);
+}
+.faq__answer {
+  max-width: 66ch;
+  padding: 0 0 24px;
+}
+.faq__answer p:last-child,
+.faq__answer ul:last-child {
+  margin-bottom: 0;
+}
+.faq__answer ul {
+  padding-left: 1.2em;
+}
+
+/* --------------------------------------------------------------- footer */
+
+.site-footer {
+  padding: 64px 0 40px;
+  font-size: 0.9375rem;
+}
+@media (prefers-color-scheme: dark) {
+  .site-footer.tone-ink {
+    --bg: var(--ink);
+    --fg: #f5f3ec;
+    --o-tile: 1;
+    --muted: #b9b5aa;
+    --line: #3a3a3a;
+    border-top: 1px solid #2c2c2c;
+  }
+}
+.site-footer__grid {
+  display: grid;
+  gap: 32px;
+  align-items: start;
+}
+@media (min-width: 760px) {
+  .site-footer__grid {
+    grid-template-columns: 1fr auto;
+  }
+}
+.site-footer__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.site-footer a {
+  text-decoration: none;
+}
+.site-footer a:hover,
+.site-footer a[aria-current="page"] {
+  text-decoration: underline;
+}
+.site-footer .lockup {
+  font-size: 1.875rem;
+  margin-bottom: 14px;
+}
+.site-footer__legal {
+  margin-top: 44px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+.site-footer__legal p {
+  margin: 0 0 6px;
+}
+
+/* --------------------------------------------------------- inner pages */
+
+.page-hero {
+  padding: clamp(24px, 5vw, 56px) 0 clamp(56px, 8vw, 96px);
+}
+.page-hero .lead {
+  max-width: 46ch;
+  margin-top: 22px;
+}
+
+.toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 30px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.toc a {
+  display: inline-block;
+  padding: 10px 18px;
+  border: 2px solid var(--line);
+  border-radius: 999px;
+  font-weight: 700;
+  text-decoration: none;
+}
+.toc a:hover {
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+}
+
+.card {
+  border: 2px solid color-mix(in srgb, var(--card-fg) 14%, transparent);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--card-fg);
+}
+.card .muted {
+  color: var(--card-muted);
+}
+
+/* Download page */
+.platforms {
+  display: grid;
+  gap: 28px;
+}
+.platform {
+  display: grid;
+  gap: 22px;
+  padding: clamp(24px, 4vw, 44px);
+  scroll-margin-top: 24px;
+}
+@media (min-width: 960px) {
+  .platform {
+    grid-template-columns: 1.1fr 0.9fr;
+    gap: 56px;
+  }
+}
+.platform__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  margin-bottom: 14px;
+}
+.platform .h2 {
+  font-size: clamp(2.75rem, 8vw, 4.25rem);
+}
+.platform .btn-row {
+  margin: 26px 0 0;
+}
+.platform__meta {
+  margin: 12px 0 0;
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  color: var(--card-muted);
+  overflow-wrap: anywhere;
+}
+.reqs {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.reqs li {
+  padding: 12px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--card-fg) 16%, transparent);
+}
+.reqs li:last-child {
+  border-bottom: 0;
+}
+.reqs strong {
+  display: block;
+}
+.callout {
+  margin-top: 24px;
+  padding: 20px 22px;
+  border-radius: 18px;
+  background: var(--yellow);
+  color: var(--ink);
+}
+.callout p:last-child {
+  margin-bottom: 0;
+}
+.callout h3 {
+  margin: 0 0 6px;
+  font-size: 1.0625rem;
+  font-weight: 700;
+}
+.callout--plain {
+  background: transparent;
+  color: inherit;
+  border: 2px solid color-mix(in srgb, var(--card-fg) 22%, transparent);
+}
+kbd {
+  display: inline-block;
+  padding: 1px 8px;
+  border: 2px solid currentColor;
+  border-bottom-width: 4px;
+  border-radius: 7px;
+  font-family: var(--text);
+  font-weight: 700;
+  font-size: 0.9em;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+code {
+  font-family: var(--mono);
+  font-size: 0.875em;
+  overflow-wrap: anywhere;
+}
+
+/* Setup guide */
+.guide {
+  display: grid;
+  gap: clamp(64px, 9vw, 112px);
+}
+.guide-block {
+  scroll-margin-top: 24px;
+}
+.guide-block .section-head {
+  margin-bottom: 36px;
+}
+.guide-steps {
+  display: grid;
+  gap: 24px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.guide-step {
+  display: grid;
+  gap: 22px;
+  padding: clamp(22px, 3.5vw, 36px);
+}
+@media (min-width: 900px) {
+  .guide-step {
+    grid-template-columns: 1fr 1fr;
+    align-items: center;
+    gap: 44px;
+  }
+  .guide-step--text {
+    grid-template-columns: 1fr;
+  }
+  .guide-step--pair {
+    align-items: start;
+  }
+}
+.guide-step__label {
+  margin-bottom: 14px;
+}
+.guide-step .h3 {
+  margin-bottom: 14px;
+}
+.guide-step p:last-child {
+  margin-bottom: 0;
+}
+.guide-step figure {
+  justify-self: center;
+  width: 100%;
+}
+.guide-step figure.is-phone {
+  width: auto;
+}
+.guide-step .phone {
+  width: 230px;
+}
+.guide-step .iphone {
+  width: 200px;
+}
+.guide-step .iphone__body {
+  margin-block: auto;
+}
+.guide-step figure.is-island {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+.guide-step .way__pill {
+  width: 260px;
+  margin: 0 auto;
+}
+.quote {
+  display: block;
+  margin: 10px 0 14px;
+  font-family: var(--display);
+  font-size: clamp(1.75rem, 4.5vw, 2.5rem);
+  line-height: 1;
+  text-transform: uppercase;
+}
+.nowrap {
+  white-space: nowrap;
+}
+
+/* Support page */
+.help {
+  display: grid;
+  gap: clamp(64px, 9vw, 112px);
+}
+.help > section {
+  scroll-margin-top: 24px;
+}
+.tips {
+  display: grid;
+  gap: 20px;
+}
+@media (min-width: 860px) {
+  .tips {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.tip {
+  padding: 26px 26px 28px;
+}
+.tip h3 {
+  margin: 0 0 10px;
+  font-size: 1.1875rem;
+  font-weight: 700;
+}
+.tip p:last-child,
+.tip ul:last-child {
+  margin-bottom: 0;
+}
+.tip ul {
+  padding-left: 1.2em;
+}
+.contact {
+  max-width: 64ch;
+}
+.contact p {
+  font-size: 1.125rem;
+}
+
+/* Legal pages */
+.prose {
+  max-width: 72ch;
+}
+.prose h2 {
+  margin: 2.2em 0 0.6em;
+  font-family: var(--display);
+  font-weight: 400;
+  text-transform: uppercase;
+  font-size: clamp(1.75rem, 4.4vw, 2.375rem);
+  line-height: 0.95;
+}
+.prose h3 {
+  margin: 1.6em 0 0.5em;
+  font-size: 1.1875rem;
+  font-weight: 700;
+}
+.prose ul,
+.prose ol {
+  padding-left: 1.3em;
+  margin: 0 0 1em;
+}
+.prose li + li {
+  margin-top: 0.4em;
+}
+.prose table {
+  width: 100%;
+  margin: 0 0 1.4em;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+}
+.prose th,
+.prose td {
+  padding: 10px 12px 10px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
+  text-align: left;
+  vertical-align: top;
+}
+.prose th {
+  font-weight: 700;
+}
+.table-scroll {
+  overflow-x: auto;
+}
+.draft-note {
+  max-width: 72ch;
+  margin: 0 0 36px;
+  padding: 16px 20px;
+  border: 2px dashed var(--red);
+  border-radius: 14px;
+  font-size: 0.9375rem;
+}
+.draft-note strong {
+  color: var(--red);
+}
+@media (prefers-color-scheme: dark) {
+  .draft-note strong {
+    color: #ff6b6b;
+  }
+}
+.updated {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.summary-box {
+  max-width: 72ch;
+  margin: 0 0 12px;
+  padding: 24px 26px;
+}
+.prose .summary-box h2 {
+  margin: 0 0 14px;
+}
+.summary-box ul {
+  margin: 0;
+  padding-left: 1.2em;
+}
+.summary-box li + li {
+  margin-top: 6px;
+}
+
+/* 404 */
+.lost {
+  min-height: 70vh;
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  padding-top: clamp(32px, 6vw, 72px);
+  padding-bottom: var(--section-y);
+}
+.lost .icon-tile {
+  --t: 150px;
+  margin-bottom: 40px;
+}
+.lost .lead {
+  margin-top: 22px;
+}
+.lost .btn-row {
+  margin-top: 32px;
+}
+
+/* -------------------------------------------------------- reduced motion */
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .mouth,
+  .mouth .mouth__box {
+    animation: none !important;
+  }
+  .btn:hover {
+    transform: none;
+  }
+}
+
+@media print {
+  .site-header,
+  .site-footer,
+  .skip-link {
+    display: none;
+  }
+  .tone-loud,
+  .tone-ink,
+  .tone-quiet {
+    background: #fff;
+    color: #000;
+  }
+}

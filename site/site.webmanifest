@@ -1,0 +1,14 @@
+{
+  "name": "ShoutAbout",
+  "short_name": "ShoutAbout",
+  "description": "Private voice dictation for Windows, Mac and iPhone. Free.",
+  "start_url": "/",
+  "display": "browser",
+  "background_color": "#FFE600",
+  "theme_color": "#FFE600",
+  "icons": [
+    { "src": "/favicon.svg", "type": "image/svg+xml", "sizes": "any" },
+    { "src": "/apple-touch-icon.png", "type": "image/png", "sizes": "180x180" },
+    { "src": "/icon-512.png", "type": "image/png", "sizes": "512x512" }
+  ]
+}

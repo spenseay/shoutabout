@@ -1,0 +1,161 @@
+# Codemagic builds for ShoutAbout's Apple apps (https://codemagic.io, free personal plan:
+# 500 macOS M2 minutes a month, one build at a time). Set-up, first run and fixes:
+# docs/release/codemagic.md.
+#
+#   ios-testflight       the iPhone app, signed for the App Store, uploaded to TestFlight
+#                        (internal testers get it without Apple's beta review)
+#   mac-signing-request  once, about 2 minutes: the file Apple needs to make the Mac app's
+#                        Developer ID certificate (only the Account Holder can, on the website)
+#   mac-release          the Mac app, Developer ID signed + notarized + stapled:
+#                        ShoutAbout.dmg, ShoutAbout-mac.zip (and a logs zip) under Artifacts
+#
+# Start them in Codemagic with "Start new build", or push a tag named release-<anything>
+# (e.g. release-1.0.0) to build both apps.
+#
+# Secrets are never in this file. They live in the Codemagic environment group
+# "app_store_credentials" (app settings > Environment variables, all marked Secret):
+#   APP_STORE_CONNECT_ISSUER_ID       App Store Connect > Users and Access > Integrations
+#   APP_STORE_CONNECT_KEY_IDENTIFIER  the API key's Key ID (same page)
+#   APP_STORE_CONNECT_PRIVATE_KEY     the whole text of the AuthKey_<KeyID>.p8 file
+#   CERTIFICATE_PRIVATE_KEY           a 2048-bit RSA key in PEM, made once on your PC; the
+#                                     signing certificates (iPhone and Mac) are made for it
+#
+# No dependency cache on purpose: Codemagic's cache can't hold symbolic links, and uv's
+# cache and Python installs are built from them; uv's own advice is that re-downloading
+# pre-built wheels is about as fast as restoring them (every macOS dependency here is a
+# wheel). The Mac build downloads about 150 MB in well under a minute.
+
+definitions:
+  environment: &apple_environment
+    groups:
+      - app_store_credentials
+    # Pinned, and it picks the machine pool: Xcode 26.5 on Codemagic's Mac mini M2. Not the
+    # newest (26.6, Codemagic's default): its pool was overloaded in October 2026 and builds
+    # sat "queued" for hours (codemagic-ci-cd discussion #3570; Codemagic's advice was 26.5).
+    # (Quoted: a bare 26.10 would be read as the number 26.1.)
+    xcode: "26.5"
+  release_tag: &release_tag
+    events:
+      - tag
+    tag_patterns:
+      - pattern: "release-*"
+        include: true
+    cancel_previous_builds: false
+  check_credentials: &check_credentials
+    name: Check the App Store Connect settings
+    script: |
+      #!/bin/bash
+      missing=""
+      for name in APP_STORE_CONNECT_ISSUER_ID APP_STORE_CONNECT_KEY_IDENTIFIER \
+                  APP_STORE_CONNECT_PRIVATE_KEY CERTIFICATE_PRIVATE_KEY; do
+        [ -n "${!name:-}" ] || missing="$missing $name"
+      done
+      if [ -n "$missing" ]; then
+        echo "Missing in the environment group app_store_credentials:$missing"
+        echo "See docs/release/codemagic.md, part C."
+        exit 1
+      fi
+      echo "All four App Store Connect settings are there."
+
+workflows:
+  ios-testflight:
+    name: iPhone app to TestFlight
+    instance_type: mac_mini_m2
+    max_build_duration: 45
+    environment:
+      <<: *apple_environment
+      vars:
+        BUNDLE_ID: fyi.shoutabout.app
+        XCODE_PROJECT: ios/ShoutAbout.xcodeproj
+        XCODE_SCHEME: ShoutAbout
+    triggering: *release_tag
+    scripts:
+      - *check_credentials
+      - name: Install XcodeGen (pinned) and generate the Xcode project
+        script: |
+          #!/bin/bash
+          set -euo pipefail
+          XCODEGEN="$(bash ios/scripts/install-xcodegen.sh "$HOME/xcodegen" | tail -n 1)"
+          cd ios
+          "$XCODEGEN" generate
+      - name: Signing files from Apple (App Store distribution, app + widgets)
+        script: |
+          #!/bin/bash
+          set -euo pipefail
+          keychain initialize
+          # Provisioning profiles for fyi.shoutabout.app and every bundle ID under it (the
+          # widgets), and the Apple Distribution certificate for CERTIFICATE_PRIVATE_KEY:
+          # fetched, or created if Apple has none yet.
+          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
+          keychain add-certificates
+          # Manual signing with those profiles for both targets, and the export options.
+          xcode-project use-profiles --project "$XCODE_PROJECT" \
+            --custom-export-options '{"manageAppVersionAndBuildNumber": false}'
+      - name: Build number (newest TestFlight build + 1)
+        script: |
+          #!/bin/bash
+          set -euo pipefail
+          number="$(bash ios/scripts/next-build-number.sh "$BUNDLE_ID")"
+          # An upload Apple rejected while processing isn't a TestFlight build, but its number
+          # still counts as used: never go below Codemagic's own build counter for this workflow.
+          if [ "${BUILD_NUMBER:-0}" -gt "$number" ]; then number="$BUILD_NUMBER"; fi
+          echo "IOS_BUILD_NUMBER=$number" >> "$CM_ENV"
+          echo "Building $(grep '^MARKETING_VERSION' ios/Config/Base.xcconfig), build $number"
+      - name: Build the .ipa (Release)
+        script: |
+          #!/bin/bash
+          set -euo pipefail
+          xcode-project build-ipa \
+            --project "$XCODE_PROJECT" \
+            --scheme "$XCODE_SCHEME" \
+            --config Release \
+            --archive-flags "-destination 'generic/platform=iOS'" \
+            --archive-xcargs "COMPILER_INDEX_STORE_ENABLE=NO CURRENT_PROJECT_VERSION=$IOS_BUILD_NUMBER"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        api_key: $APP_STORE_CONNECT_PRIVATE_KEY
+        key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
+        issuer_id: $APP_STORE_CONNECT_ISSUER_ID
+        # Upload only. submit_to_testflight is Apple's beta review, which only EXTERNAL
+        # testers need (Codemagic CLI docs: "Enable submission of an app for Testflight beta
+        # app review to allow external testing"). Internal testers (the team's own App Store
+        # Connect users) get every processed build through the internal group's automatic
+        # distribution. Set it to true once external testers are invited.
+        submit_to_testflight: false
+
+  mac-signing-request:
+    name: Mac signing request (once)
+    instance_type: mac_mini_m2
+    max_build_duration: 10
+    environment:
+      <<: *apple_environment
+    scripts:
+      - *check_credentials
+      - name: Developer ID certificate request
+        script: bash packaging/macos/developer-id.sh request
+    artifacts:
+      - packaging/dist-mac/signing-request/*
+
+  mac-release:
+    name: Mac app (signed, notarized .dmg)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      <<: *apple_environment
+    triggering: *release_tag
+    scripts:
+      - *check_credentials
+      # First, so a missing certificate fails in a minute instead of after the build.
+      - name: Developer ID certificate into a temporary keychain
+        script: bash packaging/macos/developer-id.sh install
+      - name: Build ShoutAbout.app (uv, Python 3.12, PyInstaller)
+        script: bash packaging/macos/build.sh --ci
+      - name: Sign, self-test, notarize, staple and pack
+        script: bash packaging/macos/release.sh
+    artifacts:
+      - packaging/dist-mac/release/ShoutAbout.dmg
+      - packaging/dist-mac/release/ShoutAbout-mac.zip
+      - packaging/dist-mac/release/ShoutAbout-mac-logs.zip

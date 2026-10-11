@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- The ShoutAbout mouth on a Shout Yellow tile (geometry: src/shoutabout/brand.py) -->
+  <defs>
+    <clipPath id="m"><path d="M7 28.95A25 16.05 0 0 1 57 28.95A25 22.16 0 0 1 7 28.95Z"/></clipPath>
+  </defs>
+  <rect width="64" height="64" rx="14.72" fill="#FFE600"/>
+  <path d="M7 28.95A25 16.05 0 0 1 57 28.95A25 22.16 0 0 1 7 28.95Z" fill="#0A0A0A"/>
+  <g clip-path="url(#m)">
+    <ellipse cx="32" cy="48.43" rx="11" ry="11.84" fill="#FF1A1A"/>
+    <rect x="0" y="0" width="64" height="20.55" fill="#FFFFFF"/>
+  </g>
+</svg>

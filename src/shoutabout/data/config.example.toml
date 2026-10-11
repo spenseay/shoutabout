@@ -1,0 +1,104 @@
+# ShoutAbout hub configuration.
+# Lives in %APPDATA%\shoutabout\config.toml (or $SHOUTABOUT_HOME). Restart the hub
+# (tray > Quit, then run the "ShoutAbout Hub" scheduled task or log off/on) after editing.
+# vocab.txt is separate and reloads automatically.
+
+[server]
+# 0.0.0.0 listens on loopback (for cloudflared) and the LAN. 127.0.0.1 = no LAN access.
+host = "0.0.0.0"
+# On the very first run a busy port is swapped for the next free one (and saved here).
+# The iPhone app finds the PC by itself, so the port never needs typing.
+port = 47821
+# Source address ranges accepted as the "lan" route. Only private ranges are allowed.
+lan_networks = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+# Set if the tray/doctor show the wrong LAN IP (e.g. "192.168.1.50").
+# advertise_host = "192.168.1.50"
+# Announce this PC on the home network so the iPhone app finds it (no secrets announced).
+discovery = true
+max_upload_mb = 25
+max_audio_seconds = 600
+rate_limit_per_minute = 30
+max_auth_failures = 10
+
+[stt]
+engine = "faster-whisper"
+# "auto" picks the model, device and precision from this PC's hardware (see docs/models.md).
+# Or set them yourself, e.g. model = "large-v3-turbo", device = "cuda", compute_type = "float16".
+model = "auto"
+device = "auto"            # "auto", "cuda" or "cpu"
+compute_type = "auto"
+tier = "auto"              # or "best", "balanced", "light" to override the automatic choice
+cpu_fallback = false       # true = use the CPU (slow) if CUDA fails to load ("auto" always does)
+cpu_compute_type = "int8"
+language = "en"
+beam_size = 5
+vad_filter = true
+vad_min_silence_ms = 500
+prompt_mode = "both"       # "both", "hotwords", "initial_prompt" or "none"
+max_prompt_tokens = 200
+
+[cleanup]
+# "auto" = tidy the text only if this PC can afford it and a suitable model is already
+# installed in Ollama (nothing is downloaded). true / false force it on or off.
+enabled = "auto"
+ollama_url = "http://127.0.0.1:11434"
+model = "qwen3:4b-instruct-2507-q4_K_M"
+timeout_s = 2.0
+keep_alive = -1            # keep the model loaded in VRAM
+think = false
+num_ctx = 4096
+warm_interval_s = 300
+# Safety guard: fall back to the raw transcript if the LLM changed too much.
+# max_change_ratio = share of words it may change beyond the allowed fixes (filler removal,
+# vocab spelling, punctuation/case). 0 = none. Negation words ("not", "don't") may never change.
+max_change_ratio = 0.0
+min_similarity = 0.6
+min_length_ratio = 0.6
+max_length_ratio = 1.25
+
+[paste]
+enabled = true
+trailing_space = false     # add a space after the pasted text
+restore_clipboard = true
+restore_delay_ms = 500
+exclude_from_history = true
+# Apps that paste with Shift+Insert instead of Ctrl+V (Git Bash/mintty, PuTTY).
+shift_insert_processes = ["mintty.exe", "putty.exe", "kitty.exe"]
+
+[access]
+# Cloudflare Access JWT validation for requests arriving through the tunnel.
+# team_domain = "yourteam.cloudflareaccess.com"
+# aud = ["<Application Audience (AUD) tag>"]
+team_domain = ""
+aud = []
+# Optional: only accept this service token's Client ID.
+allowed_client_ids = []
+
+[history]
+# Keep what you dictate in history.jsonl on this PC (tray > History...). If writing out a
+# recording fails, it is kept too (the last few, in the "failed" folder) so you can try again.
+# Off by default. Turn it on in Settings or in the History window.
+enabled = false
+keep_audio = false
+
+[learn]
+# Suggest words to teach ShoutAbout (tray > Teach ShoutAbout...). Suggestions come from your
+# dictation history (only while history is on) and project folders, stay on this PC, and are
+# never added without you.
+enabled = true
+seed_projects = true       # also suggest project/repo names from your project folders
+# Folders scanned 2 levels deep; empty = ~/Documents, ~/source/repos, ~/repos, ~/code, ~/projects
+project_roots = []
+notify = true              # one tray notification when new suggestions are waiting
+
+[dictation]
+# Talk to this PC: press the hotkey, speak, press it again; the text is pasted where you're typing.
+enabled = true
+# right_ctrl, right_alt, f8, f9, f10, scroll_lock or pause
+hotkey = "right_ctrl"
+mode = "toggle"            # "toggle" (press to start, press again to stop) or "hold" (hold to talk)
+overlay = true             # the small mouth at the top of the screen
+max_seconds = 600          # stop listening after this long (at most 600)
+
+[logging]
+level = "INFO"
