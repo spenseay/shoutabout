@@ -279,7 +279,7 @@ While it's on, the history feeds **word suggestions**:
 - `learn.py` mines it for recurring names, mixed-case terms and words the cleanup re-cased. With
   history off, only project folders are scanned (the tray's daily refresh, **Rescan** and
   `vocab suggest` all leave `history.jsonl` alone).
-- **Teach ShoutAbout…** (in the tray) shows the suggestions, and you approve each one before it
+- **Teach words…** (in the tray) shows the suggestions, and you approve each one before it
   joins `vocab.txt` ([vocab.md](vocab.md)).
 
 A fuller correction tool is still planned. It would:

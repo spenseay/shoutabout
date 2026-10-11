@@ -50,7 +50,7 @@ log = logging.getLogger(__name__)
 TITLE = "ShoutAbout"
 MIC_TITLE = "ShoutAbout can't hear you"
 MIN_SECONDS = 0.35  # shorter than this is a slip of the finger, not a dictation
-KEPT_NOTE = "Your recording is saved: open History from the tray menu to try again."
+KEPT_NOTE = "Your recording is saved in History."
 
 Notify = Callable[[str, str], None]
 

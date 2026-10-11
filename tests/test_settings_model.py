@@ -109,6 +109,7 @@ def test_view_reads_everything(tmp_path):
     assert [(d.name, d.last_used) for d in view.devices] == [("Sam's iPhone", "Not used yet")]
     assert view.name == "DESK-1" and view.version == "0.2.0"
     assert view.cleanup == "on"  # the example config says enabled = true
+    assert view.show_cleanup is False  # ...but no Ollama here: the choice stays hidden
     assert view.history_on is False  # history is off by default
     assert (view.startup_on, view.startup_editable) == (True, False)
     assert "setup script" in view.startup_note
@@ -187,7 +188,49 @@ def test_changes_are_saved_with_the_right_values(tmp_path):
 
 def test_history_switch_copy():
     assert HISTORY_LABEL == "Keep a history of what I dictate"
-    assert "only on this PC" in HISTORY_NOTE and HISTORY_NOTE.endswith("Off by default.")
+    assert HISTORY_NOTE == "Saved only on this PC."
+
+
+def test_ai_cleanup_shows_only_when_ollama_has_a_model(tmp_path):
+    asked = []
+    model, svc, saved = model_for(tmp_path)
+    svc.cleanup_available = lambda cfg: asked.append(cfg) or False
+    assert model.view().show_cleanup is False  # not looked for yet (off the UI thread)
+    model.load_models()
+    assert model.view().show_cleanup is False and len(asked) == 1
+    svc.cleanup_available = lambda _cfg: True
+    model.load_models()
+    view = model.view()
+    assert view.show_cleanup is True and view.cleanup == "on"
+    assert model.set_cleanup("auto") and saved[-1] == {"cleanup": {"enabled": "auto"}}
+
+    def broken(_cfg):
+        raise RuntimeError("boom")
+
+    svc.cleanup_available = broken
+    model.load_models()
+    assert model.view().show_cleanup is False
+
+
+def test_default_cleanup_available_asks_ollama(monkeypatch):
+    from shoutabout import modelpick
+
+    cfg = Config()
+    urls = []
+
+    def tags(url, timeout=1.0):
+        urls.append(url)
+        return pulled
+
+    monkeypatch.setattr(modelpick, "ollama_models", tags)
+    pulled = None  # Ollama isn't running
+    assert app_services.default_cleanup_available(cfg) is False
+    assert urls == [cfg.cleanup.ollama_url]
+    pulled = ["llama3.2:1b-made-up"]  # running, but no model the cleanup knows
+    assert app_services.default_cleanup_available(cfg) is False
+    pulled = [cfg.cleanup.model]
+    assert app_services.default_cleanup_available(cfg) is True
+    assert app_services.default_cleanup_available(SimpleNamespace()) is False  # never raises
 
 
 def test_history_switch_saves_to_config_and_applies_live(tmp_path):

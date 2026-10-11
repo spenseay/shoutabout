@@ -80,6 +80,7 @@ def fake_services(home: Path) -> AppServices:
         hotkey_choices=lambda: dict(HOTKEYS),
         hint_text=lambda _cfg: "Press Right Ctrl to talk, and again to stop.",
         has_microphone=lambda: True,
+        cleanup_available=lambda _cfg: False,  # never ask a real Ollama
         copy_text=lambda _text: None,  # never the real clipboard
         open_history=lambda: None,
         version="0.2.0",
@@ -170,31 +171,27 @@ def setup_shot(name: str, svc: AppServices, root) -> None:
     from shoutabout.setup_ui import SetupWindow
 
     mode = "phone" if name == "setup-add-phone" else "full"
-    if name == "setup-2-no-mic":
+    if name == "setup-3-done-no-mic":
         svc.has_microphone = lambda: False
     flow = SetupFlow(svc, mode=mode, runner=no_run)
-    flow.hw, flow.choice = HW, TIERS["best"]
-    flow.hardware_text = "Your NVIDIA GeForce RTX 4080 SUPER can run our most accurate model."
+    flow.choice = TIERS["best"]
+    flow.phase = "ready"
     if name == "setup-1-downloading":
         flow.phase, flow.done_bytes, flow.total_bytes = "downloading", 672_000_000, 1_600_000_000
-    elif name == "setup-1-ready":
-        flow.phase = "ready"
-    else:
-        flow.phase = "ready"
-        flow.screen = "use"
-        flow.pc_on = True
-        flow.phone_on = True
-    if name == "setup-2-no-mic":
-        flow.pc_on = False
-    if name == "setup-2-approve":
+    elif name == "setup-1-failed":
+        flow.phase = "failed"
+    elif name == "setup-2-try":
+        flow.screen = "try"
+    elif name.startswith("setup-3-done"):
+        flow.screen = "done"
+    elif name.startswith("setup-4-phone"):
+        flow.screen = "done"
+        flow.connect_phone()
+    if name == "setup-4-phone-approve":
         prompt = svc.pairing.request("Sam's iPhone", PHONE_ID, "192.168.1.23")
         flow.offer(prompt)
-    elif name == "setup-2-qr":
+    elif name == "setup-4-phone-qr":
         flow.toggle_qr()
-    elif name == "setup-3-try":
-        flow.screen = "try"
-    elif name == "setup-4-done":
-        flow.screen = "done"
     flow.version += 1
     SetupWindow(root, flow)
 
@@ -334,15 +331,16 @@ def main() -> int:
     out_dir = Path(sys.argv[1])
     wanted = sys.argv[2:] or [
         "setup-1-downloading",
-        "setup-1-ready",
-        "setup-2-use",
-        "setup-2-no-mic",
-        "setup-2-approve",
-        "setup-2-qr",
-        "setup-3-try",
-        "setup-4-done",
+        "setup-1-failed",
+        "setup-2-try",
+        "setup-3-done",
+        "setup-3-done-no-mic",
+        "setup-4-phone",
+        "setup-4-phone-approve",
+        "setup-4-phone-qr",
         "setup-add-phone",
         "settings",
+        "settings-ai-cleanup",
         "history",
         "approval-prompt",
         "overlay-top",
@@ -362,9 +360,12 @@ def main() -> int:
             root.withdraw()
             if name.startswith("setup"):
                 setup_shot(name, svc, root)
-            elif name == "settings":
+            elif name.startswith("settings"):
                 from shoutabout.settings_model import SettingsModel
                 from shoutabout.settings_ui import SettingsWindow
+
+                # Only with Ollama and a cleanup model does Settings show AI cleanup.
+                svc.cleanup_available = lambda _cfg, on=name == "settings-ai-cleanup": on
 
                 svc.devices.add("Sam's iPhone", "6f1c2a8e-0b7d-4a43-9d5e-2c1b0a9f8e7d")
                 svc.devices.add("Work iPhone", "0d5e9b1a-7c3f-4e2d-8a6b-1f0e9d8c7b6a")

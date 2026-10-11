@@ -34,7 +34,7 @@ the file.
 | Where | How | Best for |
 |---|---|---|
 | iPhone | The **Teach ShoutAbout** shortcut: say or type the word | A name you just noticed was wrong |
-| PC tray | Right-click the tray icon, then **Teach ShoutAbout…** | Reviewing suggestions and the whole list |
+| PC tray | Right-click the tray icon, then **Teach words…** | Reviewing suggestions and the whole list |
 | CLI | `vocab add Chameleon CV` | Scripts and quick fixes |
 | Editor | Tray > **Open vocab file**, then edit `vocab.txt` | Reordering and bulk edits |
 
@@ -58,7 +58,7 @@ shows the `reason` instead. See [the API reference](#api-reference) and
 
 ### 2. The Teach ShoutAbout window
 
-Open it from the tray menu with **Teach ShoutAbout…**, or with `vocab review`.
+Open it from the tray menu with **Teach words…**, or with `vocab review`.
 - **Top:** a box plus an **Add word** button. Press Enter to add.
 - **Left:** pending suggestions, grouped as "From your dictations" and "From your projects",
   each with the reason it was suggested. Tick some, then choose:
@@ -147,8 +147,8 @@ might see "+10 more folders". Variant folders such as `app-review`, `app-src` or
 ### When suggestions are refreshed
 
 - **The hub:** 90 seconds after it starts, then every 24 hours. When a refresh finds **new**
-  suggestions, the tray shows one notification, "N new words to teach — right-click the tray
-  icon → Teach ShoutAbout…". It doesn't nag about the same words again.
+  suggestions, the tray shows one notification, **Teach words**: "N new words to teach." (the
+  title is the menu item's name). It doesn't nag about the same words again.
 - **Rescan** in the window, `vocab suggest` and `vocab seed` refresh whenever you run them.
 
 Settings in `config.toml` take effect after a hub restart:

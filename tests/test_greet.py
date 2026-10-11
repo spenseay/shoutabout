@@ -59,7 +59,7 @@ def test_talk_to_this_pc_off_gets_a_notification_instead():
     state.set_status(HubStatus.IDLE)
     result, notes = run(state, FakeVoice(None))
     assert result == "notified"
-    assert notes and notes[0][0] == "ShoutAbout is running" and "yellow mouth" in notes[0][1]
+    assert notes == [("ShoutAbout is running", "")]  # no tour of the tray / menu bar
     result, _ = run(state, FakeVoice(FakeDictation(DictationState.OFF)))
     assert result == "notified"
 

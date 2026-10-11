@@ -104,13 +104,13 @@ Name: "en"; MessagesFile: "compiler:Default.isl"
 [Messages]
 SetupWindowTitle=%1 Setup
 WelcomeLabel1=Set up [name]
-WelcomeLabel2=Private voice dictation for this PC. Talk, and clean text lands where you're working.%n%nWhat you say never leaves your own devices: no cloud, no account.
+WelcomeLabel2=Private voice dictation. Nothing leaves your devices.
 WizardSelectTasks=Starting ShoutAbout
-SelectTasksDesc=One choice, then you're done.
-SelectTasksLabel2=ShoutAbout lives in the notification area, next to the clock.
+SelectTasksDesc=
+SelectTasksLabel2=
 FinishedHeadingLabel=[name] is ready
-FinishedLabelNoIcons=Look for the yellow mouth next to the clock. You can change everything later in its settings.
-FinishedLabel=Look for the yellow mouth next to the clock. You can change everything later in its settings.
+FinishedLabelNoIcons=
+FinishedLabel=
 ConfirmUninstall=Remove %1 from this PC?
 UninstalledAll=%1 was removed from this PC.
 
@@ -290,8 +290,7 @@ begin
   if IsUpgrade then begin
     WizardForm.WelcomeLabel1.Caption := 'Update {#AppName}';
     WizardForm.WelcomeLabel2.Caption :=
-      'This updates ShoutAbout to version {#AppVersion}.' + #13#10#13#10 +
-      'Your settings, vocabulary and history are kept.';
+      'Version {#AppVersion}. Your settings, vocabulary and history are kept.';
   end;
 end;
 
@@ -335,16 +334,16 @@ end;
 function AskUninstallOptions(var RemoveData: Boolean): Boolean;
 var
   Form: TSetupForm;
-  Info, Hint: TNewStaticText;
+  Info: TNewStaticText;
   Box: TNewCheckBox;
   OkButton, CancelButton: TNewButton;
 begin
 #if Ver >= EncodeVer(6, 6, 0)
-  Form := CreateCustomForm(ScaleX(420), ScaleY(150), False, False);
+  Form := CreateCustomForm(ScaleX(420), ScaleY(130), False, False);
 #else
   Form := CreateCustomForm;
   Form.ClientWidth := ScaleX(420);
-  Form.ClientHeight := ScaleY(150);
+  Form.ClientHeight := ScaleY(130);
 #endif
   try
     Form.Caption := 'Uninstall {#AppName}';
@@ -364,13 +363,6 @@ begin
     Box.Height := ScaleY(20);
     Box.Caption := 'Also remove my settings, vocabulary and history';
     Box.Checked := False;
-
-    Hint := TNewStaticText.Create(Form);
-    Hint.Parent := Form;
-    Hint.Left := ScaleX(38);
-    Hint.Top := ScaleY(70);
-    Hint.Caption := 'Leave it unticked to keep them for next time.';
-    Hint.Font.Color := $00707070;
 
     OkButton := TNewButton.Create(Form);
     OkButton.Parent := Form;

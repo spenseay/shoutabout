@@ -2,17 +2,18 @@
 
 Screens (docs/setup-experience.md):
 
-1. ``check`` "Let's get you talking": look at the PC, say in one line what it can run,
-   download the speech model with a progress bar (skipped when it's already there).
-2. ``use`` "How will you use ShoutAbout?": two cards, "Talk to this PC" (the hotkey) and
-   "Talk from my iPhone" (waits for the phone, approves it inline, or shows the old QR code).
-   On a PC with no microphone at all, "Talk to this PC" starts off and says so.
-3. ``try`` "Try it": a text box with focus; the real hotkey dictation pastes into it.
-4. ``done`` "You're all set!".
+1. ``check`` "Getting ready": download the speech model with a progress bar. The model is
+   picked automatically; when it's already here (or the download is done) the flow moves on
+   by itself.
+2. ``try`` "Try it": a text box with focus; the real hotkey dictation pastes into it. Skipped
+   when Talk to this PC is off or there's no microphone.
+3. ``done`` "You're all set": how to talk, **Done**, and an optional "Connect your iPhone".
+4. ``phone`` "Connect your iPhone" (optional): waits for the phone, approves it inline, or
+   shows the old QR code.
 
 The Tk view (:mod:`setup_ui`) polls :attr:`SetupFlow.version` and redraws when it moves;
 worker threads and pairing callbacks only change state under the lock. Settings > "Add a
-phone" opens the same flow in ``mode="phone"`` (just the phone card, then Done).
+phone" opens the same flow in ``mode="phone"`` (just the phone screen).
 """
 
 from __future__ import annotations
@@ -22,20 +23,19 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
-from shoutabout.app_services import AppServices, dictation_view, gpu_name, talk_instruction
+from shoutabout.app_services import AppServices, dictation_view, talk_instruction
 from shoutabout.text import normalize_whitespace
 
 log = logging.getLogger(__name__)
 
-SCREENS = ("check", "use", "try", "done")
+SCREENS = ("check", "try", "done", "phone")
 TRY_PHRASE = "This is my first dictation."
 
 TITLES = {
-    "check": "Let's get you talking",
-    "use": "How will you use ShoutAbout?",
+    "check": "Getting ready",
     "try": "Try it",
-    "done": "You're all set!",
-    "phone": "Add your iPhone",
+    "done": "You're all set",
+    "phone": "Connect your iPhone",
 }
 
 Runner = Callable[[Callable[[], None], str], None]
@@ -48,48 +48,36 @@ def thread_runner(work: Callable[[], None], name: str) -> None:
 # ------------------------------------------------------------------- copy
 
 
-def hardware_line(hw: Any, choice: Any) -> str:
-    """One plain sentence about what this PC can run."""
-    tier = getattr(choice, "tier", None)
-    gpu = gpu_name(hw)
-    if tier == "best" and gpu:
-        return f"Your {gpu} can run our most accurate model."
-    if tier == "balanced" and gpu:
-        return f"Your {gpu} runs our balanced model: quick and accurate."
-    if tier == "balanced":
-        return "This PC runs our balanced model: quick and accurate."
-    if tier == "light":
-        return "We picked our lightest model, so it stays quick on this PC."
-    if tier == "best":
-        return "This PC can run our most accurate model."
-    return "We'll pick the best model for this PC."
-
-
 def _mb(n_bytes: float) -> str:
     return f"{n_bytes / 1_000_000:,.0f} MB"
 
 
 def download_line(phase: str, done: int, total: int) -> str:
+    """The one line on the "Getting ready" screen."""
     if phase == "checking":
-        return "Checking this PC…"
+        return "One moment…"
     if phase == "downloading":
         if total > 0:
-            pct = int(100 * done / total)
-            return f"Getting the speech model… {pct}% ({_mb(done)} of {_mb(total)})"
-        return "Getting the speech model…"
+            return f"Downloading the speech model… {int(100 * done / total)}%"
+        return "Downloading the speech model…"
     if phase == "ready":
-        return "Speech model ready."
+        return "Ready."
     if phase == "failed":
         return "Couldn't download the speech model. Check your internet, then try again."
-    if phase == "unknown":
-        return "ShoutAbout gets the speech model ready when it starts."
     return ""
 
 
-NO_MIC_LINE = "No microphone found on this PC. Use your iPhone, or plug in a mic."
-PC_OFF_LINE = "Off. Turn it on to dictate with a key."
+def size_line(phase: str, done: int, total: int) -> str:
+    """The small line under the progress bar: "672 MB of 1,600 MB"."""
+    if phase == "downloading" and total > 0:
+        return f"{_mb(done)} of {_mb(total)}"
+    return ""
+
+
+NO_MIC_LINE = "No microphone found. Plug one in, or connect your iPhone."
+PHONE_HOWTO = "Open ShoutAbout on your iPhone."
 PHONE_WAITING = "Waiting for your iPhone…"
-PHONE_HOWTO = "Open ShoutAbout on your iPhone. It finds this PC by itself."
+QR_NOTE = "Scan it in the ShoutAbout app. Show it only to your own phone."
 
 
 def phone_status_line(state: str, name: str | None) -> str:
@@ -99,7 +87,7 @@ def phone_status_line(state: str, name: str | None) -> str:
         "asking": f"{who} wants to dictate to this PC.",
         "connecting": f"Connecting {who}…",
         "paired": f"{who} is connected.",
-        "denied": "Okay, not that one. Still waiting for your iPhone…",
+        "denied": "Okay, not that one. Still waiting…",
         "expired": "That took too long. Try again on your iPhone.",
         "error": "Couldn't save that phone. Try again.",
         "unavailable": "Start ShoutAbout first, then open this again.",
@@ -123,38 +111,31 @@ class SetupFlow:
         self._lock = threading.RLock()
         self.version = 0
         self.closed = False
-        self.screen = "use" if mode == "phone" else "check"
-        # screen 1
+        self.screen = "phone" if mode == "phone" else "check"
+        # getting ready
         self.phase = "idle"  # idle|checking|downloading|ready|failed|unknown
-        self.hw: Any = None
         self.choice: Any = None
-        self.hardware_text = ""
         self.done_bytes = 0
         self.total_bytes = 0
         self._cancel = threading.Event()
-        # screen 2
-        cfg = services.config()
-        view = dictation_view(cfg)
-        # No microphone at all (Windows says so; nothing is opened): the card starts off and
-        # says why; leaving this screen saves that, unless the person switched it on.
-        try:
+        # talk to this PC (set in Settings; setup only reads it)
+        view = dictation_view(services.config())
+        try:  # Windows' own count of microphones; nothing is opened
             mic = services.has_microphone() if mode != "phone" else None
         except Exception:
             mic = None
         self.no_mic = mic is False
         self.pc_on = view.enabled and mode != "phone" and not self.no_mic
-        self._save_pc_off = self.no_mic and view.enabled and mode != "phone"
         self.hotkey_label = services.hotkey_choices().get(view.hotkey, view.hotkey)
         self.talk_mode = view.mode
-        self.phone_on = mode == "phone"
-        self.save_error: str | None = None
+        # the iPhone
         self.pair_state = "waiting" if services.pairing is not None else "unavailable"
         self.prompt: Any = None  # the PairPrompt being shown inline
         self.paired_name: str | None = None
         self.show_qr = False
         self.qr_text: str | None = None
         self.qr_error: str | None = None
-        # screen 3
+        # try it
         self.got_text = False
 
     # ------------------------------------------------------------ plumbing
@@ -163,16 +144,9 @@ class SetupFlow:
         self.version += 1
 
     def title(self) -> str:
-        if self.mode == "phone":
-            return TITLES["phone"]
         return TITLES[self.screen]
 
-    def step_label(self) -> str:
-        if self.mode == "phone" or self.screen == "done":
-            return ""
-        return f"STEP {SCREENS.index(self.screen) + 1} OF 3"
-
-    # ------------------------------------------------------- screen 1: check
+    # ------------------------------------------------- screen 1: getting ready
 
     def start(self) -> None:
         if self.screen == "check" and self.phase == "idle":
@@ -196,9 +170,7 @@ class SetupFlow:
         except Exception as exc:
             log.warning("couldn't pick a speech model: %s", exc)
         with self._lock:
-            self.hw, self.choice = hw, choice
-            self.hardware_text = hardware_line(hw, choice)
-            self._bump()
+            self.choice = choice
         model = getattr(choice, "stt_model", None)
         if not model:
             self._set_phase("unknown")
@@ -242,8 +214,12 @@ class SetupFlow:
             self._set_phase("ready")
 
     def _set_phase(self, phase: str) -> None:
+        """A new phase; "ready" (or "unknown": the hub gets the model ready when it starts)
+        moves on to the next screen by itself."""
         with self._lock:
             self.phase = phase
+            if phase in ("ready", "unknown") and self.screen == "check" and not self.closed:
+                self.screen = "try" if self.pc_on else "done"
             self._bump()
 
     def retry(self) -> None:
@@ -256,8 +232,19 @@ class SetupFlow:
             else:
                 self._start_check()
 
+    def skip_download(self) -> None:
+        """ "Skip for now" after a failed download: the hub retries when it starts."""
+        with self._lock:
+            self._cancel.set()
+            self.phase = "unknown"
+            self.screen = "done"
+            self._bump()
+
     def status_line(self) -> str:
         return download_line(self.phase, self.done_bytes, self.total_bytes)
+
+    def size_line(self) -> str:
+        return size_line(self.phase, self.done_bytes, self.total_bytes)
 
     def progress_fraction(self) -> float | None:
         if self.phase == "ready":
@@ -266,89 +253,57 @@ class SetupFlow:
             return min(1.0, self.done_bytes / self.total_bytes)
         return None
 
-    def can_continue(self) -> bool:
-        if self.screen == "check":
-            return self.phase in ("ready", "unknown")
-        if self.screen == "use":
-            return self.prompt is None
-        return True
+    # ------------------------------------------------------- screen 2: try it
 
-    # ------------------------------------------------------- navigation
+    def try_instruction(self) -> str:
+        if self.talk_mode == "toggle":
+            return f"Press {self.hotkey_label}, say this, then press it again:"
+        return f"Hold {self.hotkey_label} and say:"
 
-    def next(self) -> None:
-        if self.screen == "use" and self._save_pc_off:
-            self._persist_pc_off()
-        with self._lock:
-            if self.mode == "phone":
-                self.screen = "done"
-            elif self.screen == "check":
-                self.screen = "use"
-            elif self.screen == "use":
-                self.screen = "try" if (self.pc_on or self.phone_on) else "done"
-            elif self.screen == "try":
-                self.screen = "done"
-            self._bump()
-
-    def back(self) -> None:
-        with self._lock:
-            if self.mode != "phone" and self.screen in ("use", "try"):
-                self.screen = SCREENS[SCREENS.index(self.screen) - 1]
-                self._bump()
-
-    def skip_download(self) -> None:
-        """ "Skip for now" after a failed download: the hub retries when it starts."""
-        with self._lock:
-            self._cancel.set()
-            self.phase = "unknown"
-            self.screen = "use"
-            self._bump()
-
-    # ------------------------------------------------------- screen 2: use
-
-    def _persist_pc_off(self) -> None:
-        """Save the no-microphone default (the card showed "off"). Best effort."""
-        from shoutabout.config_edit import ConfigEditError
-
-        self._save_pc_off = False
-        try:
-            self.svc.save_settings({"dictation": {"enabled": False}})
-        except (ConfigEditError, OSError) as exc:
-            log.warning("couldn't save dictation.enabled: %s", exc)
-
-    def toggle_pc(self) -> None:
-        from shoutabout.config_edit import ConfigEditError
-
-        self._save_pc_off = False  # the person decided
-        new = not self.pc_on
-        try:
-            self.svc.save_settings({"dictation": {"enabled": new}})
-        except (ConfigEditError, OSError) as exc:
-            log.warning("couldn't save dictation.enabled: %s", exc)
+    def text_changed(self, text: str) -> None:
+        if normalize_whitespace(text) and not self.got_text:
             with self._lock:
-                self.save_error = "Couldn't save that setting."
+                self.got_text = True
+                if self.screen == "try":
+                    self.screen = "done"
                 self._bump()
-            return
-        with self._lock:
-            self.pc_on = new
-            self.save_error = None
-            self._bump()
 
-    def toggle_phone(self) -> None:
+    def skip_try(self) -> None:
         with self._lock:
-            self.phone_on = not self.phone_on
-            if not self.phone_on:
-                self.show_qr = False
+            if self.screen == "try":
+                self.screen = "done"
+                self._bump()
+
+    # ------------------------------------------------------ screen 3: done
+
+    def pc_line(self) -> str:
+        return talk_instruction(self.hotkey_label, self.talk_mode)
+
+    def done_line(self) -> str:
+        if self.pc_on:
+            return self.pc_line()
+        if self.no_mic:
+            return NO_MIC_LINE
+        return ""
+
+    # ------------------------------------------------- screen 4: the iPhone
+
+    def connect_phone(self) -> None:
+        """ "Connect your iPhone": show the phone screen (and a request already waiting)."""
+        with self._lock:
+            if self.closed or self.screen == "phone":
+                return
+            self.screen = "phone"
             self._bump()
-        if self.phone_on:
-            pairing = self.svc.pairing
-            pending = pairing.pending() if pairing is not None else None
-            if pending is not None:
-                self.offer(pending)
+        pairing = self.svc.pairing
+        pending = pairing.pending() if pairing is not None else None
+        if pending is not None:
+            self.offer(pending)
 
     def offer(self, prompt: Any) -> bool:
         """A pairing request arrived. True if it's shown here (else the hub pops a prompt)."""
         with self._lock:
-            if self.closed or not self.phone_on or self.screen != "use":
+            if self.closed or self.screen != "phone":
                 return False
             self.prompt = prompt
             self.pair_state = "asking"
@@ -415,39 +370,6 @@ class SetupFlow:
                     self.qr_error = "Couldn't make a code right now."
             self._bump()
 
-    def pc_line(self) -> str:
-        return talk_instruction(self.hotkey_label, self.talk_mode)
-
-    def pc_card_text(self) -> str:
-        """The main line on the "Talk to this PC" card."""
-        if self.pc_on:
-            return self.pc_line()
-        return NO_MIC_LINE if self.no_mic else PC_OFF_LINE
-
-    def pc_card_note(self) -> str:
-        """The smaller line under it (empty = none)."""
-        if not self.pc_on:
-            return ""
-        if self.no_mic:
-            return "No microphone found yet: plug one in first."
-        return "The words appear wherever you're typing."
-
-    # ------------------------------------------------------- screen 3: try
-
-    def try_instruction(self) -> str:
-        if self.pc_on:
-            if self.talk_mode == "toggle":
-                return f"Press {self.hotkey_label}, say this, then press it again:"
-            return f"Hold {self.hotkey_label} and say:"
-        return "Tap Computer on your iPhone, then say:"
-
-    def text_changed(self, text: str) -> None:
-        if normalize_whitespace(text) and not self.got_text:
-            with self._lock:
-                self.got_text = True
-                self.screen = "done"
-                self._bump()
-
     # ------------------------------------------------------------ the end
 
     def finish(self, remember: bool = True) -> None:
@@ -464,4 +386,5 @@ class SetupFlow:
         if pending is not None and self.svc.pairing is not None:
             self.svc.pairing.deny(pending.request_id)  # closing the window says no
         if self.mode == "full" and remember:
-            mark_setup_complete(self.svc.paths, "finished" if self.screen == "done" else "skipped")
+            done = self.screen in ("done", "phone")
+            mark_setup_complete(self.svc.paths, "finished" if done else "skipped")

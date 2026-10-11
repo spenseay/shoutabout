@@ -69,19 +69,17 @@ build there) comes from Codemagic: [docs/release/codemagic.md](docs/release/code
 
 With the Windows installer there is nothing to configure by hand:
 
-1. **Run the installer.** ShoutAbout starts and a yellow window says **Let's get you
-   talking**. It looks at your PC (for example "Your NVIDIA GeForce RTX 4080 SUPER can run
-   our most accurate model.") and downloads the speech model with a progress bar.
-2. **How will you use ShoutAbout?** Leave **Talk to this PC** on to dictate with a key: press
-   Right Ctrl, talk, press it again. Turn on **Talk from my iPhone**, open the ShoutAbout app on the
-   phone (same Wi-Fi): it finds the PC by itself. The PC asks "Sam's iPhone wants to dictate
-   to this PC. Code 4821"; if the phone shows the same code, click **Allow**.
-3. **Try it.** Press Right Ctrl, say "This is my first dictation.", press it again. It appears
+1. **Run the installer.** ShoutAbout starts and a yellow window says **Getting ready**: it
+   picks the right speech model for your PC and downloads it.
+2. **Try it.** Press Right Ctrl, say "This is my first dictation.", press it again. It appears
    in the box.
-   **You're all set!** ShoutAbout lives in your system tray.
+3. **You're all set.** Click **Done**. Optional: **Connect your iPhone**, open the ShoutAbout
+   app on the phone (same Wi-Fi): it finds the PC by itself. The PC asks "Sam's iPhone wants
+   to dictate to this PC. Code 4821"; if the phone shows the same code, click **Allow**.
 
-Later: tray > **Settings…** (hotkey, phones, quality, AI clean-up, history (off by default),
-the PC's name, start with Windows) and tray > **Set up…** to run the steps again. Details:
+Later: tray > **Settings…** (hotkey, phones, quality, history (off by default), the PC's name,
+start with Windows; AI clean-up too, when a local Ollama is there) and tray > **Set up…** to
+run the steps again. Details:
 [docs/setup-experience.md](docs/setup-experience.md). Everything stays on your devices: no
 accounts, no cloud speech or AI.
 

@@ -54,7 +54,7 @@ ACCESS_NOT_CONFIGURED_WARNING = (
 SERVER_JOIN_TIMEOUT_S = 10.0
 LEARN_FIRST_DELAY_S = 90.0  # let Whisper and the cleanup model load first
 LEARN_INTERVAL_S = 24 * 3600.0
-TEACH_TITLE = "Teach ShoutAbout"
+TEACH_TITLE = "Teach words"  # the tray / menu bar item, so the notification says where
 CLEANUP_RETRY_S = 30.0  # "auto" cleanup: how often to look for Ollama until it answers
 GREET_WAIT_S = 30 * 60.0  # "Ready" after a launch waits this long at most (model download)
 
@@ -63,7 +63,7 @@ GREET_WAIT_S = 30 * 60.0  # "Ready" after a launch waits this long at most (mode
 
 
 def open_teach_window(paths: Paths) -> None:
-    """Tray action "Teach ShoutAbout…": add words, review suggestions, edit the vocab."""
+    """Tray action "Teach words…": add words, review suggestions, edit the vocab."""
     from shoutabout.review_ui import open_review_window
 
     open_review_window(paths)
@@ -79,10 +79,7 @@ def open_add_word(paths: Paths) -> None:
 def teach_notification(new: int) -> tuple[str, str]:
     """(title, message) for the tray when ``new`` suggestions are waiting."""
     words = "word" if new == 1 else "words"
-    return (
-        TEACH_TITLE,
-        f"{new} new {words} to teach — right-click the tray icon → Teach ShoutAbout…",
-    )
+    return (TEACH_TITLE, f"{new} new {words} to teach.")
 
 
 def refresh_and_notify(
@@ -635,8 +632,7 @@ def greet_when_ready(
     dictation = getattr(voice, "dictation", None)
     if dictation is not None and dictation.state != DictationState.OFF:
         return "pill" if dictation.greet() else "busy"
-    where = "in the menu bar" if sys.platform == "darwin" else "next to the clock"
-    notify("ShoutAbout is running", f"Find the yellow mouth {where}.")
+    notify("ShoutAbout is running", "")
     return "notified"
 
 

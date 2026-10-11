@@ -184,7 +184,7 @@ def start(
         from shoutabout.inject import clipboard
 
         clipboard.set_text(load_token(paths), exclude_from_history=True)
-        notify("Hub token copied", "Excluded from clipboard history.")
+        notify("Hub token copied", "")
 
     services = AppServices(
         paths=paths,

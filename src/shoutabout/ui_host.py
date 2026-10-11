@@ -7,8 +7,8 @@ window with :meth:`open_setup`, :meth:`open_settings`, :meth:`open_history` or (
 pairing manager) a prompt: requests are queued and picked up by the Tk thread within 100 ms.
 When the last window closes the thread ends (and starts again on the next request).
 
-Pairing requests go to the setup window when it's showing the iPhone card (approved inline
-there), otherwise to a small always-on-top prompt.
+Pairing requests go to the setup window when it's showing "Connect your iPhone" (approved
+inline there), otherwise to a small always-on-top prompt.
 """
 
 from __future__ import annotations

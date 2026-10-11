@@ -17,9 +17,7 @@ from typing import Any
 
 from shoutabout import ui_kit as kit
 from shoutabout.history_model import (
-    FAILED_NOTE,
     FAILED_TITLE,
-    OFF_FAILED_NOTE,
     OFF_TEXT,
     OFF_TITLE,
     SUBTITLE,
@@ -222,16 +220,6 @@ class HistoryWindow:
             justify="left",
             wraplength=round(540 * s),
         ).pack(fill="x")
-        tk.Label(
-            self.body,
-            text=OFF_FAILED_NOTE,
-            font=f.small,
-            bg=kit.YELLOW,
-            fg=kit.MUTED,
-            anchor="w",
-            justify="left",
-            wraplength=round(540 * s),
-        ).pack(fill="x", pady=(round(8 * s), 0))
         kit.button(self.body, "Turn history on", self._turn_on, f).pack(
             anchor="w", pady=(round(14 * s), 0)
         )
@@ -324,9 +312,6 @@ class HistoryWindow:
                 fg=kit.BLACK,
                 anchor="w",
             ).pack(fill="x", padx=pad, pady=(round(10 * s), 0))
-            tk.Label(
-                box, text=FAILED_NOTE, font=f.small, bg=kit.WHITE, fg=kit.MUTED, anchor="w"
-            ).pack(fill="x", padx=pad)
             for item in view.failed:
                 row = tk.Frame(box, bg=kit.WHITE)
                 row.pack(fill="x", padx=pad, pady=(round(8 * s), round(4 * s)))
@@ -434,7 +419,7 @@ class HistoryWindow:
     def _retry(self, item_id: str) -> None:
         model = self.model
         model.busy.add(item_id)
-        model.message, model.error = "Writing it out… (this can take a moment)", False
+        model.message, model.error = "Writing it out…", False
         self.render()
         self.run_async(lambda: model.retry(item_id), lambda _r, _e: self.reload())
 
