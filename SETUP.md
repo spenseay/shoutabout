@@ -602,29 +602,29 @@ appears only when something needs a look. To build the shortcuts by hand instead
 
 ## 9. End-to-end tests
 
-To see what the hub did last (history is off by default: turn it on first in tray >
-**Settings…** > **Keep a history of what I dictate**):
+To see what the hub did last, read the last `transcribe` line in `hub.log` (it has no text;
+tray > **Recent…** has the text of the last 3 dictations):
 
 ```powershell
-Get-Content "$env:APPDATA\shoutabout\history.jsonl" -Encoding UTF8 -Tail 1 | ConvertFrom-Json | Select-Object ts, route, target, pasted, cleanup, warning, text
+Select-String "$env:APPDATA\shoutabout\logs\hub.log" -Pattern 'transcribe id=' | Select-Object -Last 1 | ForEach-Object Line
 ```
 
 | # | Test | Do | Expected |
 |---|---|---|---|
-| 1 | **PC mode → Notepad** | Run **Dictation Target** until it says **Dictation → PC**. Open Notepad and click into it. On home Wi-Fi, press the Action Button, say "Testing ShoutAbout with Better Shell", and tap stop. | The text appears in Notepad about a second after you tap stop. The tray icon turns blue, then green. The phone has the text on its clipboard and shows no notification (success is silent). History: `route lan`, `target pc`, `pasted True`. |
+| 1 | **PC mode → Notepad** | Run **Dictation Target** until it says **Dictation → PC**. Open Notepad and click into it. On home Wi-Fi, press the Action Button, say "Testing ShoutAbout with Better Shell", and tap stop. | The text appears in Notepad about a second after you tap stop. The tray icon turns blue, then green. The phone has the text on its clipboard and shows no notification (success is silent). `hub.log`: `route=lan target=pc pasted=true`. |
 | 2 | **Claude Code in Windows Terminal** | Start `claude` in Windows Terminal, click into its prompt, and dictate a request. | The text appears at the prompt and **nothing is submitted**. The hub sends only Ctrl+V, never Enter. Review it and press Enter yourself. Long dictation (over 800 characters or 3 lines) shows as `[Pasted text #1 …]`, which is normal. |
-| 3 | **Phone mode → Notes** | In Control Center, run **Dictation Target** until it says **Dictation → Phone**. Dictate, then open Notes and paste. | Nothing is pasted on the PC. The note gets the text. History: `target phone`, `pasted False`. Switch back to PC afterwards. |
-| 4 | **Cellular** | Turn Wi-Fi off in Settings, then dictate. The first time, approve the connection to `dictate.shoutabout.fyi` with **Always Allow** **(verify on your phone)**. | It works like test 1. History: **`route tunnel`**. |
+| 3 | **Phone mode → Notes** | In Control Center, run **Dictation Target** until it says **Dictation → Phone**. Dictate, then open Notes and paste. | Nothing is pasted on the PC. The note gets the text. `hub.log`: `target=phone pasted=false`. Switch back to PC afterwards. |
+| 4 | **Cellular** | Turn Wi-Fi off in Settings, then dictate. The first time, approve the connection to `dictate.shoutabout.fyi` with **Always Allow** **(verify on your phone)**. | It works like test 1. `hub.log`: **`route=tunnel`**. |
 | 5 | **Pause** | Tray > **Pause** (the icon turns amber). Dictate in PC mode. | Nothing is pasted. The phone shows a **Dictation problem** notification, "Check the PC. Hub is paused — not pasted on the PC.", and the text is on the phone clipboard. Tray > **Resume** afterwards. |
 | 6 | **Admin window** (optional) | Focus an elevated PowerShell window and dictate in PC mode. | Not pasted. The PC shows a toast, the text is left on the PC clipboard (press Ctrl+V yourself), and the phone shows a **Dictation problem** notification. |
 
 **Compare timings** across the last few requests:
 
 ```powershell
-Get-Content "$env:APPDATA\shoutabout\history.jsonl" -Encoding UTF8 -Tail 10 | ConvertFrom-Json | Format-Table ts, route, target, audio_seconds, @{n='stt';e={$_.timings_ms.stt}}, @{n='cleanup';e={$_.timings_ms.cleanup}}, @{n='total';e={$_.timings_ms.total}} -AutoSize
+Select-String "$env:APPDATA\shoutabout\logs\hub.log" -Pattern 'transcribe id=' | Select-Object -Last 10 | ForEach-Object Line
 ```
 
-`timings_ms` covers only the work on the PC: decode, STT, cleanup and paste. The difference you
+The timings cover only the work on the PC: decode, STT, cleanup and paste. The difference you
 feel between `lan` and `tunnel` is upload time over the network, which isn't recorded.
 
 ## 10. Customizing
@@ -641,7 +641,7 @@ To restart: tray > **Quit**, then:
 Start-ScheduledTask -TaskName 'ShoutAbout Hub'
 ```
 
-**Vocabulary.** Open it from the tray (**Open vocab file**) or with:
+**Vocabulary.** Open it from tray > **Teach words…** > **Open vocab.txt**, or with:
 
 ```powershell
 notepad "$env:APPDATA\shoutabout\vocab.txt"
@@ -679,10 +679,6 @@ than `timeout_s` (2.0 s).
 **Trailing space.** Set `[paste] trailing_space = true` to paste a space after each dictation,
 which is handy when you dictate sentence by sentence.
 
-**Keep audio.** With history on, set `[history] keep_audio = true` to save every upload under
-`%APPDATA%\shoutabout\audio\`. That folder grows without limit, so delete old files yourself.
-The default is off.
-
 **Run in a console for debugging.** Tray > **Quit**, then:
 
 ```powershell
@@ -694,7 +690,7 @@ Ctrl+C stops it. Afterwards, run `Start-ScheduledTask -TaskName 'ShoutAbout Hub'
 ## 11. Troubleshooting
 
 Start with `doctor`. Every failed check prints a `fix:` hint. The log is at
-`%APPDATA%\shoutabout\logs\hub.log`; tray > **Open log folder**, or:
+`%APPDATA%\shoutabout\logs\hub.log`; tray > **Settings…** > **Open log folder**, or:
 
 ```powershell
 .\.venv\Scripts\python.exe -m shoutabout doctor
@@ -706,7 +702,7 @@ Get-Content "$env:APPDATA\shoutabout\logs\hub.log" -Tail 50
 | Tray is red, or doctor's **CUDA** check fails with errors about `cublas64_12.dll` | The cuBLAS wheel is missing. Run `uv sync --locked --extra cuda`, or re-run `setup.ps1`. A plain `uv sync` **removes** it. Update the NVIDIA driver if `nvidia-smi` shows CUDA below 12. No CUDA toolkit or cuDNN is needed. |
 | The phone times out at home, but the PC tests in step 7 pass | The network is **Public** (§2.4); a **Python block rule** exists (below); the firewall rule is missing (re-run `setup.ps1`); the Shortcut's LAN URL has the wrong port (compare with `lan_url` from `info`); the phone is on a guest network or isolated Wi-Fi; or the PC is asleep. |
 | The "allow Python" prompt was cancelled, or doctor shows **Python block rules** | List them with the first command below. In an **admin** PowerShell, remove them with the second, or re-run `setup.ps1` and answer `y`. |
-| At home, history shows `route tunnel` | The Shortcut didn't see your Wi-Fi name: grant Location to Shortcuts, or check that the name given to `make-shortcuts --ssid` matches exactly (rebuild if not). See [ios-shortcuts.md §8](docs/ios-shortcuts.md#8-first-runs-and-permissions). |
+| At home, `hub.log` shows `route=tunnel` | The Shortcut didn't see your Wi-Fi name: grant Location to Shortcuts, or check that the name given to `make-shortcuts --ssid` matches exactly (rebuild if not). See [ios-shortcuts.md §8](docs/ios-shortcuts.md#8-first-runs-and-permissions). |
 | Public URL gives 302, 401 or 403 | See the response table in [cloudflare.md §8](docs/cloudflare.md#8-verify-with-curlexe). A 302/401 from Access means a bad or missing service token. A JSON 403 from the hub means a JWT problem: check `team_domain` and `aud`. A challenge page means Bot Fight Mode or the WAF ([§10](docs/cloudflare.md#10-gotchas)). |
 | The Shortcut shows an error or a "Dictation problem" notification | See [ios-shortcuts.md §13](docs/ios-shortcuts.md#13-phone-side-troubleshooting). |
 | `hub is starting` (503) | Whisper is still loading, which takes a few seconds after logon plus the task's 15 s delay. If it persists, hover the tray icon or read `hub.log`. |
@@ -746,7 +742,7 @@ prompt). Add options to remove more:
 
 | Option | Also removes |
 |---|---|
-| `-RemoveData` | `%APPDATA%\shoutabout`: config, vocab, hub token, history, logs and saved audio |
+| `-RemoveData` | `%APPDATA%\shoutabout`: config, vocab, hub token and logs |
 | `-RemoveTunnel` | Tunnel pieces that setup *created*. Nothing on this PC, because the existing tunnel was reused. |
 | `-RemoveModels` | The Whisper model in the Hugging Face cache, and the Ollama cleanup model |
 | `-RemoveVenv` | `.venv` |

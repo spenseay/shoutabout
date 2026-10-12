@@ -6,12 +6,11 @@ listening, and stays while it thinks.
 
 It uses exactly the same steps as dictating from the iPhone in "Computer" mode: your vocabulary,
 the optional text tidying with its safety guard, one paragraph, the same paste rules (Ctrl+V, or
-Shift+Insert in terminals, never Enter), Pause, and the history file. Audio and text never leave
-the PC.
+Shift+Insert in terminals, never Enter), Pause, and Recent. Audio and text never leave the PC.
 
 Code: [`local_dictation.py`](../src/shoutabout/local_dictation.py) (the controller),
 [`hotkey.py`](../src/shoutabout/hotkey.py), [`mic.py`](../src/shoutabout/mic.py),
-[`overlay.py`](../src/shoutabout/overlay.py), [`failed_audio.py`](../src/shoutabout/failed_audio.py).
+[`overlay.py`](../src/shoutabout/overlay.py), [`recent.py`](../src/shoutabout/recent.py).
 
 ## Using it
 
@@ -52,8 +51,8 @@ The mouth means:
 | Yellow, "Getting ready… 42%" | The speech model is still downloading or loading |
 | Yellow, "Ready · Right Ctrl to talk" | You just opened ShoutAbout (Start menu, the installer's last page) and it's ready. Starting at sign-in stays quiet. |
 | Red, "No mic" | This PC has no microphone. A notification explains, once per session. |
-| Red, a few words ("Mic blocked", "Admin window", "PC is locked", "Not pasted") | A problem. When the text wasn't pasted it is on the clipboard (and in History, if it's on), and a notification explains. |
-| Red, "Not working" | Transcription failed. With history on, the recording is kept: **History > Try again**. |
+| Red, a few words ("Mic blocked", "Admin window", "PC is locked", "Not pasted") | A problem. When the text wasn't pasted it is on the clipboard (and in **Recent**), and a notification explains. |
+| Red, "Not working" | Transcription failed. The recording is kept in memory: **Recent > Try again**. |
 
 **The zip** (the owner's "Paddle pull" design, scaled into the little pill; nothing grows outside
 it). Timings from the moment the text is pasted:
@@ -84,8 +83,8 @@ takes the keyboard focus (so the text lands in your window), and clicks go throu
 | `overlay` | `true` | `false` hides the mouth pill. |
 | `max_seconds` | `600` | Stop listening after this long (5–600; 600 is the hub's own limit for a phone recording). |
 
-Pause (tray) turns the hotkey off until you resume. The settings window applies changes without a
-restart (`VoiceRuntime.reload_dictation`).
+Pause (tray) turns the hotkey off until you resume. Settings applies changes without a restart
+(`VoiceRuntime.reload_dictation`).
 
 **Upgrading:** a config.toml that an earlier version generated says `mode = "hold"` and
 `max_seconds = 120` with the generated comment after them. Those two exact lines are switched to
@@ -111,16 +110,13 @@ Hotkey notes:
   indicator then) and closed as soon as it stops. Nothing opens it for a key press that turns out
   to be a shortcut. Whether a microphone exists at all is asked of Windows (`waveInGetNumDevs`),
   which opens nothing.
-- The recording stays in memory. It is written to disk only if transcribing it **fails** and
-  history is on (so it can be tried again): then it is kept in `failed\` in the config folder,
-  at most the 5 newest (and 120 MB), deleted by a successful **Try again**, by **Delete**, or by
-  **Clear history**. History is off by default (`[history] enabled = false`): then nothing is
-  kept. (`history.keep_audio` keeps only phone uploads.)
+- The recording stays in memory and is never written to disk. If transcribing it **fails**, it
+  is kept (in memory, the last 3) for **Recent > Try again**, until it's written out, deleted,
+  or ShoutAbout quits.
 - The keyboard listener sees key-down/key-up events to recognise the hotkey. It keeps nothing,
   logs nothing about keys, and passes every key on unchanged. Keys typed by programs (including
   ShoutAbout's own Ctrl+V) are ignored.
-- With history on, it records these dictations with `"route": "local"`
-  ([history.md](history.md)).
+- Recent keeps the last 3 dictations in memory only ([history.md](history.md)).
 
 ## Problems
 
@@ -129,9 +125,9 @@ Hotkey notes:
 | "No mic" + one notification | No microphone is plugged in (or Windows doesn't see one). Plug one in, or pick one in **Settings > System > Sound > Input**, or use your iPhone. The next press uses it (ShoutAbout re-reads the device list when the number of microphones changes). |
 | "Mic blocked" + a notification | Windows is blocking desktop apps from the microphone. Open **Settings > Privacy & security > Microphone** and turn on **Microphone access** and **Let desktop apps access your microphone**. ShoutAbout reads these switches to tell you which one is off. |
 | "Mic is silent" | The microphone sent pure silence: it's muted (a hardware switch or the Sound settings), or it's the wrong input. |
-| "Not working" | The speech engine failed. The notification says why; with history on, the recording is in **History** with **Try again**. |
+| "Not working" | The speech engine failed. The notification says why; the recording is in **Recent** with **Try again**. |
 | Nothing happens when you press the key | Is the hub paused? Is `[dictation] enabled = true`? Did you hold it longer than half a second (toggle mode wants a tap)? Is an **admin** window focused (Windows doesn't let normal apps see keys typed into admin windows, and ShoutAbout couldn't paste there anyway)? `hub.log` says "listening for the dictation hotkey" when it's on. |
-| "Admin window" | The text is on the clipboard: paste it yourself (Windows blocks typing into apps running as administrator). With history on, it's in History too. |
+| "Admin window" | The text is on the clipboard: paste it yourself (Windows blocks typing into apps running as administrator). It's in Recent too. |
 | "Getting ready…" | The speech model is downloading or loading; see [models.md](models.md). |
 | The first word is cut off | Start talking when the mouth appears. |
 
@@ -148,7 +144,7 @@ LocalDictation                          START: overlay "listening" FIRST, then o
    |                                           worker thread -> Pipeline.process_audio(...)
    v                                     CANCEL: drop the recording
 Pipeline (same as /transcribe)          holds HubState.busy: phone requests and local dictation
-                                        take turns; STT -> cleanup -> paste -> history
+                                        take turns; STT -> cleanup -> paste -> Recent
 overlay thread ("overlay")              layered window, created at start; ~30 fps while visible
 overlay-warm / mic-warm (at start)      pre-render the pill's frames for every monitor's DPI;
                                         start PortAudio (lists devices, opens nothing)
@@ -214,7 +210,7 @@ every overlay frame and its timeline (no fade-in, no glow or clock; the zip: the
 right, the zipped line with its teeth where it passed, no tongue once sealed, all inside the
 pill, pre-rendered), the placement
 maths (top-centre, top-docked taskbar, other monitors), the controller end to end with the real
-pipeline (paste, history when pasting fails, pause, busy lock, errors, "No mic" once per session,
+pipeline (paste, Recent when pasting fails, pause, busy lock, errors, "No mic" once per session,
 failed recordings kept), and that a Right Ctrl + C never calls the overlay at all. The real
 overlay window was shown (under a second) at the top of this PC's screen: it appeared within
 0.1 s of being asked, didn't take the focus, and sat at the top of the work area.

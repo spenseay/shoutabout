@@ -132,14 +132,13 @@ APP_ICON_VARIANTS = ("primary", "dark", "alt", "bleed")
 # state -> (tile colour, mouth): "shut" pill, "ajar" (no tongue), "open" (tongue out)
 TRAY_LOOKS: dict[str, tuple[RGB, str]] = {
     "starting": (GREY, "shut"),
-    "idle": (YELLOW, "ajar"),
+    "idle": (YELLOW, "open"),  # the mark itself: wide open, tongue out (never teeth only)
     "transcribing": (YELLOW, "open"),
     "paused": (YELLOW, "shut"),
     "error": (RED, "ajar"),
 }
-# The macOS menu bar rests on the mark itself (the app icon's mouth: wide open, tongue out);
-# a teeth-only mouth reads oddly up there. Every other state is the tray's.
-MENUBAR_LOOKS: dict[str, tuple[RGB, str]] = {**TRAY_LOOKS, "idle": (YELLOW, "open")}
+# The macOS menu bar uses the tray's looks (both rest on the mark, tongue out).
+MENUBAR_LOOKS: dict[str, tuple[RGB, str]] = dict(TRAY_LOOKS)
 
 
 # ---------------------------------------------------------------------------- easing

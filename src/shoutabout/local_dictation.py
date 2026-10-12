@@ -3,7 +3,7 @@
 Tap the hotkey (Right Ctrl by default), speak, tap it again (or, in hold mode, hold it while
 you speak): the recording goes through exactly the pipeline ``POST /transcribe?target=pc``
 uses (vocabulary hints, the cleanup and its guard, single-paragraph text, the paste rules,
-history, pause), and the text is pasted into the window that has focus. The mouth pill
+Recent, pause), and the text is pasted into the window that has focus. The mouth pill
 (:mod:`shoutabout.overlay`) shows what's happening; it never takes focus, so the paste lands
 where you were typing.
 
@@ -17,8 +17,8 @@ Phone requests and local dictation take turns through the hub's busy lock
 (``HubState.busy``, which the pipeline holds while it works). A new recording may start
 while the previous one is still being transcribed; it simply waits its turn.
 
-When transcription fails after recording, the audio is kept (:mod:`failed_audio`) and the
-History window offers "Try again", so a long dictation is never lost.
+When transcription fails after recording, the audio is kept in memory (:mod:`recent`) and
+the Recent page offers "Try again", so a long dictation is never lost.
 
 Threads: hotkey events arrive on the hotkey worker thread, the time limit on a short-lived
 thread from the microphone, and each transcription runs on its own worker thread. All
@@ -50,7 +50,7 @@ log = logging.getLogger(__name__)
 TITLE = "ShoutAbout"
 MIC_TITLE = "ShoutAbout can't hear you"
 MIN_SECONDS = 0.35  # shorter than this is a slip of the finger, not a dictation
-KEPT_NOTE = "Your recording is saved in History."
+KEPT_NOTE = "Your recording is kept in Recent."
 
 Notify = Callable[[str, str], None]
 
@@ -106,7 +106,7 @@ class LocalDictation:
         listener_factory: Callable[..., Any] | None = None,
         recorder_factory: Callable[..., Any] | None = None,
         overlay_factory: Callable[[bool], OverlayLike] | None = None,
-        failed: Any = None,
+        recent: Any = None,
         mic_present: Callable[[], bool | None] | None = None,
         warm_mic: Callable[[], None] | None = None,
     ) -> None:
@@ -118,7 +118,7 @@ class LocalDictation:
         real_mic = recorder_factory is None
         self._recorder_factory = recorder_factory or MicRecorder
         self._overlay_factory = overlay_factory or create_overlay
-        self._failed = failed  # failed_audio.FailedRecordings (None = never kept)
+        self._recent = recent  # recent.Recent: failed recordings kept in memory (None = never)
         # Is any microphone plugged in? (asked of Windows; with fake recorders: unknown)
         self._mic_present = mic_present or (has_input_device if real_mic else lambda: None)
         self._warm_mic = warm_mic if warm_mic is not None else (warm_up if real_mic else None)
@@ -365,11 +365,11 @@ class LocalDictation:
             self._settle()
 
     def _keep(self, audio: np.ndarray, error: str) -> bool:
-        """Keep a recording whose transcription failed (History > Try again)."""
-        if self._failed is None:
+        """Keep a recording whose transcription failed (Recent > Try again)."""
+        if self._recent is None:
             return False
         try:
-            return self._failed.keep_samples(audio, route="local", error=error) is not None
+            return self._recent.keep_failed(audio, route="local", error=error) is not None
         except Exception:
             log.exception("couldn't keep the failed recording")
             return False

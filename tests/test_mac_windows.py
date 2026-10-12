@@ -14,7 +14,13 @@ import pytest
 
 from shoutabout.mac import uilink
 from shoutabout.mac.ui_bridge import Downloads, MacUiBridge, child_command
-from shoutabout.mac.ui_child import ChildUiHost, RemotePairing, remote_download
+from shoutabout.mac.ui_child import (
+    ChildUiHost,
+    RemotePairing,
+    RemoteRecent,
+    remote_download,
+    remote_retry,
+)
 from shoutabout.mac.uilink import Link, LinkClosed, RemoteError
 from shoutabout.pair_requests import PairPrompt
 
@@ -153,7 +159,7 @@ class FakeChild:
         return None
 
 
-def make_bridge(tmp_path, *, pump: bool = True, **kw):
+def make_bridge(tmp_path, *, pump: bool = True, recent=None, **kw):
     pairing = FakePairing()
     children: list[FakeChild] = []
 
@@ -168,6 +174,9 @@ def make_bridge(tmp_path, *, pump: bool = True, **kw):
         pairing=pairing,
         identity=SimpleNamespace(reload=lambda: saved.append("reload")),
         on_settings_saved=lambda keys: {k for k in keys if k.startswith("stt.")},
+        recent=recent,
+        retry_failed=None,
+        hub_status=lambda: {"phase": "preparing", "percent": 42, "missing": ["microphone"]},
     )
     bridge = MacUiBridge(services, spawn=spawn, **kw)
     return bridge, pairing, children, saved
@@ -184,9 +193,19 @@ def test_bridge_starts_the_window_process_on_demand(tmp_path):
     bridge.open_settings()
     assert len(children) == 1
     msg = children[0].next("open")
-    assert msg["kind"] == "settings" and msg["seq"] == 1
+    assert (msg["kind"], msg["arg"], msg["seq"]) == ("main", "settings", 1)
     bridge.open_setup("phone")
     assert children[0].next("open")["arg"] == "phone"
+    # The menu items and opening the app again: the one window, on a page.
+    bridge.open_window()
+    bridge.open_teach()
+    bridge.open_recent()
+    pages = [children[0].next("open") for _ in range(3)]
+    assert [(m["kind"], m["arg"]) for m in pages] == [
+        ("main", "home"),
+        ("main", "teach"),
+        ("main", "recent"),
+    ]
     assert len(children) == 1  # reused
     bridge.shutdown(0.1)
 
@@ -373,9 +392,10 @@ def test_remote_download_polls_the_hub():
 def test_child_host_queues_hub_messages_and_acks_pairing():
     link = FakeLink()
     pairing = RemotePairing(link)
-    services = SimpleNamespace(pairing=pairing)
+    recent = RemoteRecent(link)
+    services = SimpleNamespace(pairing=pairing, recent=recent)
     host = ChildUiHost(services, link, pairing)
-    host.on_event({"t": "open", "kind": "settings", "seq": 1})
+    host.on_event({"t": "open", "kind": "main", "arg": "settings", "seq": 1})
     host.on_event({"t": "open", "kind": "setup", "arg": "phone", "seq": 2})
     host.on_event(
         {
@@ -388,15 +408,76 @@ def test_child_host_queues_hub_messages_and_acks_pairing():
         }
     )
     host.on_event({"t": "pair-done", "request_id": "r", "status": "denied", "seq": 4})
+    host.on_event({"t": "recent", "version": 9})  # a dictation finished: the page reloads
     host.on_event({"t": "quit", "seq": 5})
     queued = []
     while not host._requests.empty():
         queued.append(host._requests.get_nowait())
     kinds = [k for k, _ in queued]
-    assert kinds == ["settings", "setup", "pair", "pair-done", "quit"]
-    assert queued[1][1] == "phone"
+    assert kinds == ["main", "setup", "pair", "pair-done", "quit"]
+    assert queued[0][1] == "settings" and queued[1][1] == "phone"
+    assert recent.version == 1
     assert queued[2][1].code == "1234"
     assert link.sent == [{"t": "ack", "request_id": "r"}]
     assert host._last_seq == 5
     host.on_link_closed()
     assert host._requests.get_nowait() == ("quit", None)
+
+
+def test_bridge_shares_recent_with_the_window_process(tmp_path):
+    """Recent lives in the hub's memory: the window process asks for it, is told when it
+    changes, and has the hub write a failed recording out again."""
+    import numpy as np
+
+    from shoutabout.models import CleanupResult, Timings, TranscribeResult
+    from shoutabout.recent import Recent, items_from
+
+    recent = Recent()
+    bridge, _pairing, children, _ = make_bridge(tmp_path, pump=False, recent=recent)
+    bridge.open_settings()
+    child = children[0]
+    events: queue.Queue = queue.Queue()
+    link = Link(child.read, child.write, on_event=events.put)
+    link.start()
+    try:
+        assert events.get(timeout=2)["t"] == "open"
+        text = "Landed in the wrong spot."
+        recent.add(
+            TranscribeResult(
+                text=text,
+                raw_text=text,
+                target="pc",
+                route="local",
+                pasted=True,
+                warning=None,
+                cleanup=CleanupResult(text=text, status="disabled"),
+                timings=Timings(),
+            )
+        )
+        assert events.get(timeout=2) == {"t": "recent", "version": 1, "seq": 2}
+        items, _failed = items_from(link.call("recent"))
+        assert [i.text for i in items] == [text]
+        assert link.call("hub_status") == {
+            "phase": "preparing",
+            "percent": 42,
+            "missing": ["microphone"],
+        }
+        item = recent.keep_failed(np.ones(1600, np.float32), error="boom")
+        assert events.get(timeout=2)["t"] == "recent"
+        bridge.svc.retry_failed = lambda item_id: f"text of {item_id}"
+        retry = remote_retry(link, poll_s=0.02)
+        assert retry(item.id) == f"text of {item.id}"
+        assert link.call("remove_failed", id=item.id) is True
+        assert recent.failed() == []
+    finally:
+        link.close()
+        bridge.shutdown(0.1)
+    assert bridge._on_recent_changed not in recent._listeners
+
+
+def test_remote_retry_reports_failures():
+    statuses = iter([{"state": "running"}, {"state": "failed", "error": "CUDA again"}])
+    link = FakeLink({"retry_status": lambda args: next(statuses)})
+    with pytest.raises(RuntimeError, match="CUDA again"):
+        remote_retry(link, poll_s=0)("f1")
+    assert link.calls[0] == ("retry", {"id": "f1"})

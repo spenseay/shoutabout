@@ -2,8 +2,8 @@
 
 Whisper gets everyday English right. It gets names wrong: your projects, your colleagues,
 product names, jargon. `vocab.txt` is the list of words you want spelled your way. This page
-covers how the list is used, the four ways to add to it, the automatic suggestions, and the
-`/vocab` API.
+covers how the list is used, the four ways to add to it, word suggestions, and the `/vocab`
+API.
 
 Run the CLI as `.\.venv\Scripts\python.exe -m shoutabout ...` from the repo folder.
 
@@ -36,7 +36,7 @@ the file.
 | iPhone | The **Teach ShoutAbout** shortcut: say or type the word | A name you just noticed was wrong |
 | PC tray | Right-click the tray icon, then **Teach words…** | Reviewing suggestions and the whole list |
 | CLI | `vocab add Chameleon CV` | Scripts and quick fixes |
-| Editor | Tray > **Open vocab file**, then edit `vocab.txt` | Reordering and bulk edits |
+| Editor | Teach words > **Open vocab.txt**, then edit it | Reordering and bulk edits |
 
 All four write the same file. The phone, tray and CLI clean up what you give them:
 - They trim whitespace, surrounding quotes and brackets, and trailing punctuation, so
@@ -56,21 +56,18 @@ and token as Dictate. It shows the reply's `message`. If the reply's `status` is
 shows the `reason` instead. See [the API reference](#api-reference) and
 [ios-shortcuts.md](ios-shortcuts.md).
 
-### 2. The Teach ShoutAbout window
+### 2. Teach words
 
-Open it from the tray menu with **Teach words…**, or with `vocab review`.
-- **Top:** a box plus an **Add word** button. Press Enter to add.
-- **Left:** pending suggestions, grouped as "From your dictations" and "From your projects",
-  each with the reason it was suggested. Tick some, then choose:
+Tray > **Teach words…** opens the ShoutAbout window on its **Teach words** page (or
+`vocab review`).
+- **Top:** a box plus an **Add word** button. Press Enter to add; the word goes to the top.
+- **Suggestions** (left), each with the reason it was suggested. Tick some, then choose:
   - **Add selected** puts them at the top of the vocab, in the order shown.
-  - **Dismiss selected** means they are never suggested again.
-  - **Rescan** looks for new suggestions now.
-- **Right:** your vocab in priority order. Select one or more words, then **Remove** (or press
-  Delete). **Open vocab.txt** opens the file in your editor.
-
-There is also a small **Add a word…** box that has only the entry field. Its
-**Review suggestions…** button grows it into the full window. Only one window is open at a
-time: opening it again brings the existing one to the front.
+  - **Dismiss** means they are never suggested again.
+  - **Suggest from my project folders** looks through your project folders once, now
+    ([below](#from-your-project-folders)).
+- **Your words** (right): your vocab in priority order. Select one or more words, then
+  **Remove** (or press Delete). **Open vocab.txt** opens the file in your editor.
 
 ### 3. CLI
 
@@ -78,10 +75,11 @@ time: opening it again brings the existing one to the front.
 .\.venv\Scripts\python.exe -m shoutabout vocab list [--json]      # priority order
 .\.venv\Scripts\python.exe -m shoutabout vocab add Chameleon CV    # one phrase; goes to the top
 .\.venv\Scripts\python.exe -m shoutabout vocab remove Chameleon CV
-.\.venv\Scripts\python.exe -m shoutabout vocab suggest [--projects] [--json]   # refresh + list pending
-.\.venv\Scripts\python.exe -m shoutabout vocab seed [ROOT ...]     # project folders only
+.\.venv\Scripts\python.exe -m shoutabout vocab suggest [--json]    # list waiting suggestions
+.\.venv\Scripts\python.exe -m shoutabout vocab suggest --projects  # look through project folders first
+.\.venv\Scripts\python.exe -m shoutabout vocab seed [ROOT ...]     # look through project folders
 .\.venv\Scripts\python.exe -m shoutabout vocab dismiss Some Word   # never suggest it again
-.\.venv\Scripts\python.exe -m shoutabout vocab review              # the Teach window
+.\.venv\Scripts\python.exe -m shoutabout vocab review              # Teach words in the window
 ```
 
 `add`, `remove` and `dismiss` join their arguments into one phrase, so `vocab add Chameleon CV`
@@ -97,37 +95,20 @@ behind, it is ignored after 30 seconds.
 
 ## Suggestions
 
-ShoutAbout looks for words you would probably want to teach. **Nothing is added until you
-approve it**, in the window, with `vocab add`, or by ticking it.
-
-### From your dictation history
-
-Suggestions come from `history.jsonl` ([history.md](history.md)), using the cleaned `text` of
-each dictation. History is off by default, and it is mined only while it's on (Settings > Keep a
-history of what I dictate); with it off, only project folders are suggested from.
-- **Cleanup corrections.** Words the LLM cleanup re-cased or corrected into a proper-looking
-  word, for example "github" to "GitHub". One occurrence is enough. The detail shows what
-  Whisper heard.
-- **Capitalised names.** Capitalised words and 2 to 3 word Capitalised Phrases that appear
-  **mid-sentence** at least twice, such as "Priya Raghunathan" or "Chameleon CV". A capital
-  letter at the start of a sentence doesn't count. In "Tell Priya Raghunathan…", the name
-  counts once it has also been seen mid-sentence somewhere else.
-- **Mixed-case and code-like tokens** that appear at least twice anywhere, such as `GitHub`,
-  `iOS`, `ShoutAbout` or `GPT5`.
-
-What is left out:
-- terms already in your vocab
-- anything you accepted or dismissed before
-- words that are mostly written in lowercase ("Plan" vs "plan")
-- runs of 4 or more capitalised words, which are usually titles
-- a built-in stoplist of everyday capitalised words: I, I'm, OK, days, months, greetings,
-  common acronyms (AI, PC, URL…) and names Whisper already knows (Google, Windows, iPhone…)
+ShoutAbout can suggest names from your project folders. **Nothing is added until you approve
+it**: tick it and press **Add selected**, or use `vocab add`.
 
 ### From your project folders
 
-ShoutAbout scans these folders 2 levels deep: `~/Documents`, `~/source/repos`, `~/repos`,
-`~/code` and `~/projects`, whichever exist. You can set your own with `[learn] project_roots`,
-or with `vocab seed ROOT...`.
+Project folders are only looked at when you ask: **Suggest from my project folders** in Teach
+words, `vocab seed` or `vocab suggest --projects`. ShoutAbout then scans these folders 2 levels
+deep, whichever exist:
+- Windows: `~/Documents`, `~/source/repos`, `~/repos`, `~/code` and `~/projects`.
+- Mac: only folders macOS doesn't guard: `~/Developer`, `~/code`, `~/Code`, `~/repos`,
+  `~/projects`, `~/Projects`, `~/src`, `~/git` and `~/source/repos`. Never `~/Documents`,
+  `~/Desktop` or `~/Downloads`.
+
+You can set your own with `[learn] project_roots`, or with `vocab seed ROOT...`.
 
 A folder is a project if it has `.git`, `pyproject.toml`, `package.json`, `Cargo.toml`,
 `go.mod` or a `*.sln`. Candidates come from:
@@ -142,24 +123,33 @@ capitals (AI, API, CV, UI, UX, GPU, LLM, SDK, CLI, DB, ID…), and mixed-case na
 are (`ShoutAbout`). Clones and git worktrees of the same repo count as one suggestion, so you
 might see "+10 more folders". Variant folders such as `app-review`, `app-src` or
 `plot-twist-beta` fold into their project. The scan never enters hidden folders, `.venv`,
-`node_modules` or other projects, and it stops after a few thousand folders.
+`node_modules` or other projects, and it stops after a few thousand folders. Left out: terms
+already in your vocab, anything you accepted or dismissed before, and generic folder names
+(`src`, `docs`, `demo`…).
 
 ### When suggestions are refreshed
 
-- **The hub:** 90 seconds after it starts, then every 24 hours. When a refresh finds **new**
-  suggestions, the tray shows one notification, **Teach words**: "N new words to teach." (the
-  title is the menu item's name). It doesn't nag about the same words again.
-- **Rescan** in the window, `vocab suggest` and `vocab seed` refresh whenever you run them.
+- **When you ask:** **Suggest from my project folders**, `vocab seed` and
+  `vocab suggest --projects`.
+- **By itself, only with `seed_projects = true`** (set by hand in `config.toml`): the hub looks
+  90 seconds after it starts, then every 24 hours. When it finds **new** suggestions it shows
+  one notification, **Teach words**: "N new words to teach." It doesn't nag about the same
+  words again.
 
 Settings in `config.toml` take effect after a hub restart:
 
 ```toml
 [learn]
-enabled = true             # false = no background suggestions (the CLI and window still work)
-seed_projects = true       # also suggest names from project folders
+enabled = true
+seed_projects = false      # true = also look through your project folders every day by itself
 project_roots = []         # folders to scan; empty = the defaults above
-notify = true              # one tray notification when new suggestions are waiting
+notify = true              # one notification when the daily look finds new words
 ```
+
+**Upgrading:** an existing install's `seed_projects = true` is switched off once
+(`learn-projects-off` in `migrations.py`), and project suggestions still waiting are dropped.
+Accepted and dismissed words stay remembered, so they don't come back (where they came from is
+forgotten). Setting `seed_projects = true` again afterwards sticks.
 
 ### Where suggestions are kept
 
@@ -172,13 +162,10 @@ it with `vocab add`.
 
 ## Privacy
 
-- **Everything stays on this PC.** Mining and scanning run locally, and nothing is uploaded.
-- The project scan is **read-only**. It lists folders and reads small files: `.git/config`,
-  `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod` and the first 8 KB of a README.
-- `vocab-suggestions.json` contains words taken from your dictations, and sometimes the
-  misheard form, as in `Whisper heard "github"`. Treat it like `history.jsonl`. Turning history
-  off (the default) or deleting `history.jsonl` stops history suggestions. `[learn] enabled =
-  false` stops the background job.
+- **Everything stays on this computer.** The scan runs locally, and nothing is uploaded.
+- Project folders are looked at only when you ask (or with `seed_projects = true`). The scan is
+  **read-only**: it lists folders and reads small files: `.git/config`, `package.json`,
+  `pyproject.toml`, `Cargo.toml`, `go.mod` and the first 8 KB of a README.
 - `hub.log` never contains vocabulary terms. `/vocab` logs only counts, such as
   `vocab add route=lan added=true status=added chars=12 count=31`, and suggestion refreshes log
   `vocab suggestions refreshed: 3 new, 12 pending`.

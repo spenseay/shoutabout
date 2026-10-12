@@ -30,7 +30,6 @@ INFO_KEYS = (
     "vocab_file",
     "token_file",
     "log_dir",
-    "history_file",
     "port",
     "host",
     "lan_ip",
@@ -246,7 +245,6 @@ def collect_info(paths: Paths) -> dict[str, Any]:
         "vocab_file": str(paths.vocab_file),
         "token_file": str(paths.token_file),
         "log_dir": str(paths.log_dir),
-        "history_file": str(paths.history_file),
         "port": cfg.server.port,
         "host": cfg.server.host,
         "lan_ip": netinfo.lan_ipv4(),
@@ -630,7 +628,6 @@ def cmd_transcribe(args: argparse.Namespace) -> int:
         cleaner=cleaner,
         injector=NullInjector("The CLI never pastes."),
         state=HubState(),
-        history=None,
     )
 
     manifests: dict[Path, dict[str, dict[str, Any]]] = {}
@@ -871,16 +868,9 @@ def cmd_vocab_suggest(args: argparse.Namespace) -> int:
     from shoutabout.learn import refresh_suggestions
 
     paths = _paths(args)
-    roots = _learn_roots(paths) if args.projects else None
-    history_on = _load_config(paths).history.enabled  # history is mined only while it's on
-    if not history_on:
-        print(
-            "History is off, so your dictations weren't scanned. Turn it on in Settings.",
-            file=sys.stderr,
-        )
-    new = refresh_suggestions(
-        paths, include_projects=args.projects, include_history=history_on, roots=roots
-    )
+    new = 0
+    if args.projects:  # project folders are only looked at when asked
+        new = refresh_suggestions(paths, include_projects=True, roots=_learn_roots(paths))
     _print_suggestions(paths, new, json_out=args.json, source=None)
     return 0
 
@@ -890,16 +880,13 @@ def cmd_vocab_seed(args: argparse.Namespace) -> int:
 
     paths = _paths(args)
     roots = _learn_roots(paths, args.roots)
-    new = refresh_suggestions(paths, include_projects=True, include_history=False, roots=roots)
+    new = refresh_suggestions(paths, include_projects=True, roots=roots)
     _print_suggestions(paths, new, json_out=args.json, source="projects")
     return 0
 
 
 def cmd_vocab_review(args: argparse.Namespace) -> int:
-    from shoutabout.review_ui import run_review_window
-
-    run_review_window(_paths(args))
-    return 0
+    return _open_window(_paths(args), "teach")
 
 
 # ------------------------------------------------------- setup / settings / devices
@@ -924,6 +911,20 @@ def standalone_services(paths: Paths) -> Any:
     )
 
 
+def _open_window(paths: Paths, page: str) -> int:
+    """The ShoutAbout window on ``page``, without a hub; returns when it's closed."""
+    if sys.platform == "darwin":  # v2-macos: Tk must run on the main thread
+        from shoutabout.mac.ui_child import run_standalone
+
+        return run_standalone(paths, page, None)
+    from shoutabout.ui_host import UiHost
+
+    host = UiHost(standalone_services(paths))
+    host.open_window(page)
+    host.wait()
+    return 0
+
+
 def cmd_setup(args: argparse.Namespace) -> int:
     if sys.platform == "darwin":  # v2-macos: Tk must run on the main thread
         from shoutabout.mac.ui_child import run_standalone
@@ -938,27 +939,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
 
 def cmd_settings(args: argparse.Namespace) -> int:
-    if sys.platform == "darwin":  # v2-macos
-        from shoutabout.mac.ui_child import run_standalone
-
-        return run_standalone(_paths(args), "settings", None)
-    from shoutabout.ui_host import UiHost
-
-    host = UiHost(standalone_services(_paths(args)))
-    host.svc.open_history = host.open_history
-    host.open_settings()
-    host.wait()
-    return 0
-
-
-def cmd_history(args: argparse.Namespace) -> int:
-    from shoutabout.ui_host import UiHost
-
-    host = UiHost(standalone_services(_paths(args)))
-    host.svc.open_history = host.open_history
-    host.open_history()
-    host.wait()
-    return 0
+    return _open_window(_paths(args), "settings")
 
 
 def cmd_mac_ui(args: argparse.Namespace) -> int:
@@ -966,13 +947,6 @@ def cmd_mac_ui(args: argparse.Namespace) -> int:
     from shoutabout.mac.ui_child import run_child
 
     return run_child(_paths(args))
-
-
-def cmd_mac_teach(args: argparse.Namespace) -> int:
-    """v2-macos: the Teach window in its own process."""
-    from shoutabout.mac.ui_child import run_teach
-
-    return run_teach(_paths(args))
 
 
 def _find_device(devices: Sequence[Any], which: str) -> Any:
@@ -1046,10 +1020,10 @@ def _add_vocab_parser(sub: Any, common: argparse.ArgumentParser) -> None:
     q.add_argument("term", nargs="+", metavar="TERM", help=term_help)
     q.set_defaults(func=cmd_vocab_dismiss)
 
-    q = vsub.add_parser(
-        "suggest", parents=[common], help="find words you say often (history; + projects)"
+    q = vsub.add_parser("suggest", parents=[common], help="list the suggestions waiting")
+    q.add_argument(
+        "--projects", action="store_true", help="look through your project folders first"
     )
-    q.add_argument("--projects", action="store_true", help="also scan your project folders")
     q.add_argument("--json", action="store_true")
     q.set_defaults(func=cmd_vocab_suggest)
 
@@ -1064,7 +1038,7 @@ def _add_vocab_parser(sub: Any, common: argparse.ArgumentParser) -> None:
     q.add_argument("--json", action="store_true")
     q.set_defaults(func=cmd_vocab_seed)
 
-    q = vsub.add_parser("review", parents=[common], help="open the Teach ShoutAbout window")
+    q = vsub.add_parser("review", parents=[common], help="open Teach words in the window")
     q.set_defaults(func=cmd_vocab_review)
 
 
@@ -1209,16 +1183,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--phone", action="store_true", help="only the add-a-phone step")
     p.set_defaults(func=cmd_setup)
 
-    p = sub.add_parser("settings", parents=[common], help="open the settings window")
+    p = sub.add_parser("settings", parents=[common], help="open Settings in the window")
     p.set_defaults(func=cmd_settings)
-
-    p = sub.add_parser("history", parents=[common], help="open the History window")
-    p.set_defaults(func=cmd_history)
-    # v2-macos: internal commands of the Mac app (its window processes)
+    # v2-macos: an internal command of the Mac app (its window process)
     p = sub.add_parser("mac-ui", parents=[common], help=argparse.SUPPRESS)
     p.set_defaults(func=cmd_mac_ui)
-    p = sub.add_parser("mac-teach", parents=[common], help=argparse.SUPPRESS)
-    p.set_defaults(func=cmd_mac_teach)
 
     p = sub.add_parser("devices", parents=[common], help="paired phones: list / remove")
     dsub = p.add_subparsers(dest="devices_command", metavar="ACTION")

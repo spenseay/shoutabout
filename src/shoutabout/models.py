@@ -1,4 +1,4 @@
-"""Shared result types passed between the pipeline, server, history and CLI."""
+"""Shared result types passed between the pipeline, server, Recent and CLI."""
 
 from __future__ import annotations
 

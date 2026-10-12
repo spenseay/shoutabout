@@ -5,11 +5,10 @@ main thread      tray message loop (or wait on the server with tray=False)
 thread "server"  uvicorn (FastAPI app)
 thread "engine"  load Whisper, then publish ctx.pipeline
 thread "warmer"  keep the Ollama cleanup model loaded
-thread "learn"   vocab suggestions from history (+ project folders): shortly after start,
-                 then daily; one tray notification when new ones are waiting
-thread "teach-ui" the Tk "Teach ShoutAbout" window, while it is open
+thread "learn"   only with [learn] seed_projects = true: word suggestions from project
+                 folders shortly after start, then daily; one notification when new ones wait
 thread "hotkey"  "Talk to this PC" (+ "hotkey-hook", "overlay"; see voice_runtime.py)
-thread "ui"      the setup / settings windows and pairing prompts, while one is open
+thread "ui"      the ShoutAbout window, the setup window and pairing prompts, while one is open
 thread "discovery" announces the hub on the network once it's listening (hub_v2)
 ```
 
@@ -17,11 +16,11 @@ The model setup is picked once at start (``voice_runtime``: explicit config valu
 over "auto"); the engine thread downloads the model first if it isn't here yet, with
 progress in ``HubState.progress``.
 
-The other v2 parts (pairing, per-device tokens, discovery, setup and settings windows) live in
-:mod:`hub_v2`; the blocks marked ``# --- v2-setup`` below wire them in.
+Nothing you dictate is written to disk: :class:`~shoutabout.recent.Recent` keeps the last
+few dictations and failed recordings in memory for the Recent page.
 
-Tray wiring for teaching words: :func:`open_teach_window` and :func:`open_add_word` return at
-once and are safe to call from any thread (the Tk window gets its own thread).
+The other v2 parts (pairing, per-device tokens, discovery, the windows) live in
+:mod:`hub_v2`; the blocks marked ``# --- v2-setup`` below wire them in.
 """
 
 from __future__ import annotations
@@ -62,40 +61,19 @@ GREET_WAIT_S = 30 * 60.0  # "Ready" after a launch waits this long at most (mode
 # ------------------------------------------------------------------ teaching words
 
 
-def open_teach_window(paths: Paths) -> None:
-    """Tray action "Teach words…": add words, review suggestions, edit the vocab."""
-    from shoutabout.review_ui import open_review_window
-
-    open_review_window(paths)
-
-
-def open_add_word(paths: Paths) -> None:
-    """Tray action "Add a word…": the small teach-a-word box."""
-    from shoutabout.review_ui import open_add_word_dialog
-
-    open_add_word_dialog(paths)
-
-
 def teach_notification(new: int) -> tuple[str, str]:
     """(title, message) for the tray when ``new`` suggestions are waiting."""
     words = "word" if new == 1 else "words"
     return (TEACH_TITLE, f"{new} new {words} to teach.")
 
 
-def refresh_and_notify(
-    paths: Paths, learn_cfg: Any, notify: Any, *, include_history: bool = True
-) -> int:
-    """One suggestions refresh; notifies once if it found new ones. Returns the new count.
-    ``include_history`` is ``[history] enabled``: history is mined only while it's on."""
+def refresh_and_notify(paths: Paths, learn_cfg: Any, notify: Any) -> int:
+    """One look through the project folders (``[learn] seed_projects = true`` only);
+    notifies once if it found new suggestions. Returns the new count."""
     from shoutabout.learn import refresh_suggestions
 
     roots = [Path(r).expanduser() for r in learn_cfg.project_roots] or None
-    new = refresh_suggestions(
-        paths,
-        include_projects=learn_cfg.seed_projects,
-        include_history=include_history,
-        roots=roots,
-    )
+    new = refresh_suggestions(paths, include_projects=learn_cfg.seed_projects, roots=roots)
     if new and learn_cfg.notify:
         notify(*teach_notification(new))
     return new
@@ -158,7 +136,7 @@ def is_elevated() -> bool:
 
 def run_hub(paths: Paths, *, tray: bool = True, greet: bool = False) -> int:
     """Run the hub. ``greet``: the user opened ShoutAbout (Start menu, the installer's
-    last page), so say it's ready, or, when it already runs, show that copy's settings."""
+    last page), so say it's ready, or, when it already runs, show that copy's window."""
     had_console = sys.stderr is not None
     paths.log_dir.mkdir(parents=True, exist_ok=True)
     redirect_std_streams(paths)
@@ -192,7 +170,7 @@ def run_hub(paths: Paths, *, tray: bool = True, greet: bool = False) -> int:
             from shoutabout.reopen import ask_running_hub
 
             if ask_running_hub():
-                log.info("ShoutAbout is already running: asked it to show its settings")
+                log.info("ShoutAbout is already running: asked it to show its window")
                 return 0
         log.warning("another ShoutAbout hub is already running; exiting")
         return 1
@@ -317,7 +295,14 @@ def _run(
         mac_hub = MacHub(paths, state, notify)
     # --- end v2-macos
 
-    # --- v2-setup: pairing, per-device tokens, discovery, setup/settings windows
+    # The last few dictations, and recordings that couldn't be written out (Recent > Try
+    # again): in memory only, gone when the hub quits.
+    from shoutabout.recent import Recent
+
+    recent = Recent()
+    ctx.recent = recent
+
+    # --- v2-setup: pairing, per-device tokens, discovery, the windows
     from shoutabout import hub_v2
 
     v2 = hub_v2.start(
@@ -327,13 +312,14 @@ def _run(
         state,
         with_ui=tray and sys.platform in ("win32", "darwin"),  # v2-macos: darwin too
         notify=notify,
-        open_teach=lambda: open_teach_window(paths),
+        recent=recent,
         native_prompt=(
             (lambda prompt: mac_hub.native_prompt(prompt, ctx.pairing)) if mac_hub else None
         ),
     )
     # --- end v2-setup
 
+    mac_reopen: Any = None
     if mac_hub is not None:  # v2-macos
         try:
             tray_icon = _build_tray(paths, cfg, token, state, notify, request_quit, v2, mac_hub)
@@ -341,6 +327,10 @@ def _run(
         except Exception:
             log.exception("couldn't create the menu bar icon; running without it")
             tray_icon = None
+        if v2.ui is not None:  # opened again from Finder, Spotlight or Launchpad: the window
+            from shoutabout.reopen import watch_mac
+
+            mac_reopen = watch_mac(v2.ui.open_window)  # noqa: F841 - Cocoa holds it weakly
         import signal
 
         signal.signal(signal.SIGTERM, lambda *_: request_quit())  # log out, pkill: quit cleanly
@@ -358,15 +348,10 @@ def _run(
     from shoutabout.inject import create_injector
 
     injector = create_injector(cfg.paste, notifier)
-    # A recording whose transcription fails is kept for History > Try again (history on).
-    from shoutabout.failed_audio import FailedRecordings
-
-    failed = FailedRecordings(paths.failed_dir, enabled=cfg.history.enabled)
-    ctx.failed = failed
     # --- v2-voice: automatic model choice, cleanup and "Talk to this PC" -------------
     from shoutabout.voice_runtime import VoiceRuntime
 
-    voice = VoiceRuntime(cfg, state, notify, failed=failed)
+    voice = VoiceRuntime(cfg, state, notify, recent=recent)
     try:
         voice.choose()
     except Exception:  # never stop the hub over the choice; the engine reports problems
@@ -375,17 +360,9 @@ def _run(
     if mac_hub is not None:  # v2-macos: setup asks for permissions (else a notice), then watch
         mac_hub.start_permissions(voice, v2, first_run=show_setup)
     # --- end v2-voice -----------------------------------------------------------------
-    from shoutabout.history import HistoryLog
-
-    history = None
-    if cfg.history.enabled:
-        history = HistoryLog(paths.history_file, paths.audio_dir, cfg.history.keep_audio)
-    # --- v2-setup: POST /paste pastes phone-made text with the same injector and history
+    # --- v2-setup: POST /paste pastes phone-made text with the same injector (and Recent)
     ctx.injector = injector
-    ctx.history = history
     services = v2.services
-    services.history_log = history
-    services.failed = failed
 
     def copy_text(text: str) -> None:
         from shoutabout.inject import clipboard
@@ -393,42 +370,28 @@ def _run(
         clipboard.set_text(text, exclude_from_history=cfg.paste.exclude_from_history)
 
     def retry_failed(item_id: str) -> str:
-        """History > Try again: transcribe a kept recording (never pasted: the History
-        window has the focus). Written to history; the recording is deleted on success."""
-        item = failed.get(item_id)
-        if item is None:
+        """Recent > Try again: transcribe a kept recording (never pasted: the ShoutAbout
+        window has the focus). It joins Recent; the recording is dropped on success."""
+        samples = recent.samples(item_id)
+        item = recent.get_failed(item_id)
+        if samples is None or item is None:
             raise LookupError("That recording is gone.")
         pipeline = ctx.pipeline
         if pipeline is None:
             raise RuntimeError("ShoutAbout is still getting ready. Try again in a moment.")
-        result = pipeline.process_file(
-            item.audio,
+        result = pipeline.process_audio(
+            samples,
             target="pc",
             route=item.route,
             deliver=False,
             extra={"source": item.source, "recovered": True},
         )
         if result.text:
-            failed.remove(item_id)
+            recent.remove_failed(item_id)
         return result.text
 
     services.copy_text = copy_text
     services.retry_failed = retry_failed
-
-    def reload_history(new_cfg: Any, _key: str) -> bool:
-        """[history] enabled / keep_audio apply at once (the History window's "Turn on")."""
-        nonlocal history
-        hc = new_cfg.history
-        cfg.history = hc
-        history = (
-            HistoryLog(paths.history_file, paths.audio_dir, hc.keep_audio) if hc.enabled else None
-        )
-        ctx.history = history
-        services.history_log = history
-        failed.enabled = hc.enabled
-        if ctx.pipeline is not None:
-            ctx.pipeline.history = history
-        return True
 
     def reload_cleanup(new_cfg: Any, _key: str) -> bool:
         """Turn LLM cleanup on/off live when the cleaner exists (else: restart)."""
@@ -445,7 +408,6 @@ def _run(
 
     v2.reloaders["cleanup"] = reload_cleanup
     v2.reloaders["dictation"] = reload_dictation
-    v2.reloaders["history"] = reload_history
     # --- end v2-setup
 
     # ------------------------------------------------------------------ threads
@@ -499,7 +461,7 @@ def _run(
                 cleaner=voice.cleaner,  # v2-voice: may have been turned on since start
                 injector=injector,
                 state=state,
-                history=history,
+                recent=recent,
             )
             ctx.startup_error = None
             if not server_failed.is_set():
@@ -538,14 +500,15 @@ def _run(
             stopping.wait(interval)
 
     def learn_loop() -> None:
-        if not cfg.learn.enabled:
+        # Project folders are looked at only when the person asks (Teach words), unless
+        # they turned [learn] seed_projects on in config.toml.
+        if not (cfg.learn.enabled and cfg.learn.seed_projects):
             return
         if stopping.wait(LEARN_FIRST_DELAY_S):
             return
         while not stopping.is_set():
             try:
-                # cfg.history follows Settings live (reload_history)
-                refresh_and_notify(paths, cfg.learn, notify, include_history=cfg.history.enabled)
+                refresh_and_notify(paths, cfg.learn, notify)
             except Exception:
                 log.exception("vocab suggestions refresh failed")
             stopping.wait(LEARN_INTERVAL_S)
@@ -565,7 +528,7 @@ def _run(
     if v2.ui is not None and sys.platform == "win32":
         from shoutabout.reopen import watch
 
-        watch(v2.ui.open_settings, stopping)  # Start menu while running: show settings
+        watch(v2.ui.open_window, stopping)  # Start menu while running: the window, at Home
     # --- end v2-setup
     if greet and not show_setup:
         threading.Thread(
@@ -597,12 +560,6 @@ def _run(
                 wait_idle(2.0)
             except Exception:
                 log.exception("waiting for the clipboard restore failed")
-        teach_ui = sys.modules.get("shoutabout.review_ui")
-        if teach_ui is not None:  # close an open Teach window on its own thread before exit
-            try:
-                teach_ui.close_window(2.0)
-            except Exception:
-                log.exception("closing the Teach ShoutAbout window failed")
         v2.stop()  # v2-setup: close windows, withdraw the network announcement
         if mac_hub is not None:  # v2-macos
             mac_hub.stop()
@@ -674,16 +631,12 @@ def _build_tray(
         # v2-voice: local_dictation.hint_text(cfg) -> "Press Right Ctrl to talk, and again to stop."
         return services.hint_text(services.config()) if services is not None else None
 
-    teach = lambda: open_teach_window(paths)  # noqa: E731
-    if mac_hub is not None and ui is not None:  # v2-macos: Tk windows live in child processes
-        teach = ui.open_teach
+    # Recent…, Teach words… and Settings… open the one ShoutAbout window on that page.
     actions = TrayActions(
         toggle_pause=guarded("Pause", state.toggle_paused),
         quit=request_quit,
-        history=guarded("History", ui.open_history)
-        if ui is not None and hasattr(ui, "open_history")
-        else None,
-        teach=guarded("Teach words", teach),
+        recent=guarded("Recent", ui.open_recent) if ui is not None else None,
+        teach=guarded("Teach words", ui.open_teach) if ui is not None else None,
         settings=guarded("Settings", ui.open_settings) if ui is not None else None,
         setup=guarded("Set up", ui.open_setup) if ui is not None else None,
         hint=hint if services is not None else None,

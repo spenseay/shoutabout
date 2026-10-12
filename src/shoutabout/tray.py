@@ -16,8 +16,8 @@ fails (Explorer not ready yet at logon) it is retried with backoff.
 
 The menu is short on purpose: a status line ("Ready", "Getting ready… 42%", "Listening",
 "Paused"), how to talk ("Press Right Ctrl to talk, and again to stop."), Pause/Resume,
-History…, Teach words…, Settings…, Set up…, Quit. Everything else lives in the settings
-window.
+Recent…, Teach words…, Settings…, Set up…, Quit. The first three open the one ShoutAbout
+window on that page.
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ MENU_ERROR_MAX = 60
 CMD_STATUS = 1
 CMD_HINT = 2
 CMD_PAUSE = 10
-CMD_HISTORY = 14
+CMD_RECENT = 14
 CMD_TEACH = 15
 CMD_SETTINGS = 17
 CMD_SETUP = 18
@@ -67,8 +67,8 @@ class TrayActions:
     toggle_pause: Callable[[], None]
     quit: Callable[[], None]
     # Optional windows; each menu item appears only when its action is set.
-    history: Callable[[], None] | None = None  # History… (history_ui)
-    teach: Callable[[], None] | None = None  # Teach words… (review_ui)
+    recent: Callable[[], None] | None = None  # Recent… (the last few dictations)
+    teach: Callable[[], None] | None = None  # Teach words…
     settings: Callable[[], None] | None = None  # Settings…
     setup: Callable[[], None] | None = None  # Set up…
     # "Press Right Ctrl to talk…" (local_dictation.hint_text), read when the menu opens.
@@ -178,16 +178,16 @@ def build_menu(
     teaching: bool = False,
     settings: bool = False,
     setup: bool = False,
-    history: bool = False,
+    recent: bool = False,
 ) -> list[MenuItem]:
-    """Status, how to talk, Pause/Resume, History…, Teach words…, Settings…, Set up…, Quit."""
+    """Status, how to talk, Pause/Resume, Recent…, Teach words…, Settings…, Set up…, Quit."""
     header = status_header(status, paused, error, percent)
     items = [MenuItem(CMD_STATUS, _menu_label(truncate(header, 64)), False)]
     if hint:
         items.append(MenuItem(CMD_HINT, _menu_label(truncate(hint, 64)), False))
     items += [SEPARATOR, MenuItem(CMD_PAUSE, "Resume" if paused else "Pause")]
-    if history:
-        items.append(MenuItem(CMD_HISTORY, "History…"))
+    if recent:
+        items.append(MenuItem(CMD_RECENT, "Recent…"))
     if teaching:
         items.append(MenuItem(CMD_TEACH, "Teach words…"))
     if settings:
@@ -581,7 +581,7 @@ class TrayIcon:
             teaching=actions.teach is not None,
             settings=actions.settings is not None,
             setup=actions.setup is not None,
-            history=actions.history is not None,
+            recent=actions.recent is not None,
         )
         hmenu = u32.CreatePopupMenu()
         if not hmenu:
@@ -626,7 +626,7 @@ class TrayIcon:
             CMD_PAUSE: ("toggle_pause", self._actions.toggle_pause),
         }
         for command, name in (
-            (CMD_HISTORY, "history"),
+            (CMD_RECENT, "recent"),
             (CMD_TEACH, "teach"),
             (CMD_SETTINGS, "settings"),
             (CMD_SETUP, "setup"),

@@ -169,8 +169,8 @@ the Mac; admin windows on Windows), and never ask for recordings.
 ## Legal drafts
 
 `site/privacy.html` and `site/terms.html` are plain-English drafts that match what the
-software does today (microphone only between the key presses, recordings kept in memory,
-history (off by default) and logs on the computer, on-device recognition on iPhone, LAN-only pairing, model
+software does today (microphone only between the key presses, recordings and the last 3
+dictations kept in memory only, logs on the computer, on-device recognition on iPhone, LAN-only pairing, model
 downloads from Hugging Face, Accessibility on the Mac, downloads served by GitHub, the
 optional tunnel and Shortcuts signing). They are **not legal advice**. To decide:
 

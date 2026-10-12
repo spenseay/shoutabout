@@ -53,7 +53,7 @@ speech model is downloaded on first run.
 | Apps list entry | *Settings > Apps > Installed apps* (`HKLM\...\Uninstall\{B70711A6-7F23-457D-B910-31004776AB13}_is1`) | Yes |
 | Firewall rule | One inbound rule named **ShoutAbout**: program `C:\Program Files\ShoutAbout\ShoutAbout.exe`, TCP, any port, **Private networks only**. It lets the phone reach the PC at home, and never on public Wi-Fi. | Yes |
 | Start at sign-in | Only if **Start ShoutAbout when I sign in** is ticked (the default), on the **first** install: `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, value `ShoutAbout` = `"C:\Program Files\ShoutAbout\ShoutAbout.exe" run`, for the user who ran Setup. After that, the app's settings own this value; upgrades never change it. | Yes (the value and its Task Manager "startup approved" twin) |
-| Your data | Nothing at install time. The app creates `%APPDATA%\shoutabout` (settings, vocabulary, history, logs, hub token) on first run, and downloads the speech model. | Only if you ask (below) |
+| Your data | Nothing at install time. The app creates `%APPDATA%\shoutabout` (settings, vocabulary, logs, hub token) on first run, and downloads the speech model. | Only if you ask (below) |
 | Setup log | `%TEMP%\Setup Log <date> #<n>.txt` | No (it's in Temp) |
 
 The installer doesn't install services, drivers, scheduled tasks or other programs. It doesn't
@@ -82,7 +82,7 @@ The uninstaller then:
 3. only if the box is ticked, deletes `%APPDATA%\shoutabout` and `%LOCALAPPDATA%\shoutabout`
    for the user running the uninstaller.
 
-Left the box unticked? Reinstalling picks up the same settings, vocabulary and history.
+Left the box unticked? Reinstalling picks up the same settings and vocabulary.
 
 What always stays: the speech model in the Hugging Face cache
 (`%USERPROFILE%\.cache\huggingface\hub`), because other apps can share that cache; any Ollama
@@ -99,7 +99,7 @@ Running a newer `ShoutAbout-Setup-<version>.exe` updates ShoutAbout in place:
 - it skips the start-at-sign-in question (the app's settings own it by then);
 - it stops a running ShoutAbout, replaces `C:\Program Files\ShoutAbout\_internal\` completely
   (no stale files), and updates the firewall rule;
-- settings, vocabulary and history are kept;
+- settings and vocabulary are kept;
 - the last page offers **Start ShoutAbout now**. A silent upgrade restarts ShoutAbout by itself
   if it was running before.
 
@@ -373,7 +373,7 @@ are build tools only.
   `ShoutAbout.exe`, or `pythonw -m shoutabout run` from source.
 - **Start at sign-in contract:** value `ShoutAbout` under
   `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, data = `"<path of ShoutAbout.exe>" run`
-  (the same string the settings window's start-with-Windows switch writes, so it shows as
+  (the same string the Settings page's Start with Windows switch writes, so it shows as
   on). The installer writes it once; the app's settings own it afterwards; the uninstaller
   deletes it.
 - **Taskbar identity:** the Start menu shortcut has AppUserModelID `ShoutAbout.App`

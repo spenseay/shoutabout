@@ -414,15 +414,34 @@ def test_first_run_defaults_set_the_mac_hotkey(tmp_path):
     assert (cfg.dictation.hotkey, cfg.dictation.mode) == (keys.DEFAULT_MAC_HOTKEY, "toggle")
 
 
-def test_learn_defaults_never_scan_guarded_folders(tmp_path):
-    assert platform.learn_defaults(tmp_path) == {"seed_projects": False}
-    (tmp_path / "Documents").mkdir()
-    assert platform.learn_defaults(tmp_path) == {"seed_projects": False}
+def test_first_run_never_turns_project_scanning_on(tmp_path):
+    from shoutabout.config import ensure_initialized, load_config
+
+    paths = Paths(tmp_path)
+    ensure_initialized(paths)
+    platform.first_run_defaults(paths, fresh=True)
+    cfg = load_config(paths)
+    assert cfg.learn.seed_projects is False and cfg.learn.project_roots == []
+
+
+def test_mac_project_roots_never_include_guarded_folders(tmp_path, monkeypatch):
+    from shoutabout import learn
+
+    assert platform.mac_project_roots(tmp_path) == []
+    for name in ("Documents", "Desktop", "Downloads"):
+        (tmp_path / name).mkdir()
+    assert platform.mac_project_roots(tmp_path) == []
     (tmp_path / "Developer").mkdir()
     (tmp_path / "source" / "repos").mkdir(parents=True)
-    roots = platform.learn_defaults(tmp_path)["project_roots"]
-    assert roots == ["~/Developer", "~/source/repos"]
-    assert all("Documents" not in r and "Desktop" not in r for r in platform.MAC_PROJECT_ROOTS)
+    roots = platform.mac_project_roots(tmp_path)
+    assert roots == [tmp_path / "Developer", tmp_path / "source" / "repos"]
+    assert all(
+        "Documents" not in r and "Desktop" not in r and "Downloads" not in r
+        for r in platform.MAC_PROJECT_ROOTS
+    )
+    # "Suggest from my project folders" on a Mac looks only there
+    monkeypatch.setattr(platform, "mac_project_roots", lambda home=None: [tmp_path / "Developer"])
+    assert learn.default_project_roots("darwin") == [tmp_path / "Developer"]
 
 
 def test_doctor_rows_say_where_the_answer_comes_from():

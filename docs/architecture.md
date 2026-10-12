@@ -16,7 +16,7 @@ hub (pythonw.exe -m shoutabout run, logon task, user session, not elevated)
  |- server thread: FastAPI --> Pipeline --> engine (Whisper, CUDA)
  |                                     |--> cleaner (Ollama HTTP, 127.0.0.1:11434) + guard
  |                                     |--> injector (clipboard + SendInput) --> focused window
- |                                     '--> HistoryLog (history.jsonl)
+ |                                     '--> Recent (the last 3, in memory only)
  |- engine loader thread (loads Whisper, then publishes ctx.pipeline)
  '- warmer thread (keeps the Ollama model loaded)
 ```
@@ -29,7 +29,7 @@ hub (pythonw.exe -m shoutabout run, logon task, user session, not elevated)
 | `hub.py` | `run_hub`: single-instance mutex, logging, startup warnings, and the four threads below. |
 | `server.py` | `create_app(HubContext)`: the source-IP middleware (pure ASGI), `/health`, `/transcribe`, the order of checks, size caps, and the error-to-status mapping. OpenAPI and docs pages are disabled. |
 | `security.py` | `classify_source` (peer IP to route), `bearer_ok` (constant-time compare), `AccessJwtValidator` (RS256 with a JWKS cache), `RateLimiter` (sliding window). |
-| `pipeline.py` | `Pipeline.process_file`, serialised by a lock: decode, STT, normalise, cleanup, normalise, deliver, history. Sets the hub status. |
+| `pipeline.py` | `Pipeline.process_file`, serialised by a lock: decode, STT, normalise, cleanup, normalise, deliver, Recent. Sets the hub status. |
 | `audio.py` | The decoder chain (see [Audio decoding](#audio-decoding)): container sniffing, WAV -> Media Foundation -> PyAV, mono + 16 kHz, duration checks, error types; `encode_m4a` for tests (PyAV only). |
 | `wavdecode.py`, `resample.py` | Uncompressed WAV (PCM 8/16/24/32-bit, float, extensible, RF64) read with numpy; the mono downmix and the polyphase Kaiser-windowed-sinc resampler. |
 | `mfdecode.py` | Windows Media Foundation through plain ctypes COM calls: byte stream -> source resolver -> source reader -> float PCM. COM per call, `MFStartup` once per process; plain-words errors for Windows "N" editions. |
@@ -46,18 +46,20 @@ hub (pythonw.exe -m shoutabout run, logon task, user session, not elevated)
 | `hardware.py`, `modelpick.py`, `modelstore.py` | v2 automatic model choice: NVIDIA GPU / CPU / RAM detection (NVML, nvidia-smi, CTranslate2), the best / balanced / light tiers with config.toml overrides, and the resumable model download with byte progress ([models.md](models.md)). |
 | `local_dictation.py`, `hotkey.py`, `mic.py`, `overlay.py` | v2 "Talk to this PC": the observe-only `WH_KEYBOARD_LL` hotkey listener and its state machine, the microphone recorder (sounddevice), the mouth-pill layered window, and the controller that feeds `Pipeline.process_audio` ([local-dictation.md](local-dictation.md)). |
 | `voice_runtime.py` | What `hub.py` calls for the above: choose the models at start, download in the engine thread (progress in `HubState`), turn "auto" cleanup on when Ollama appears, start/stop/reload "Talk to this PC". |
-| `history.py` | `HistoryLog.append`, which is thread-safe and never raises; `read_history` and `clear` for the History window ([history.md](history.md)). |
-| `failed_audio.py` | Recordings whose transcription failed, kept (5 newest, 120 MB) for History > Try again while history is on; it's off by default ([history.md](history.md)). |
-| `history_model.py` / `history_ui.py` | The History window: logic (Tk-free, tested) and its Tk view on the UI thread. |
-| `migrations.py` | One-time upgrades of config values an older version generated (toggle mode and the 600 s limit). |
+| `recent.py` | `Recent`: the last 3 dictations meant for this computer and the last 3 recordings the speech engine couldn't write out, in memory only (nothing on disk); thread-safe, never raises; a version counter the Recent page watches ([history.md](history.md)). |
+| `recent_model.py` / `recent_ui.py` | The Recent page: logic (Tk-free, tested) and its Tk view (Copy, Try again, Delete). |
+| `learn.py` | Word suggestions from project folders, only when asked (or with `[learn] seed_projects = true`); `vocab-suggestions.json` ([vocab.md](vocab.md)). |
+| `migrations.py` | One-time upgrades, remembered in `migrations.json`: config values an older version generated (toggle mode and the 600 s limit); `learn-projects-off` (`seed_projects` off once); `history-gone` (deletes the old `history.jsonl`, `audio`, `failed` and `[history]`). |
 | `doctor.py` | Setup checks, printed as `[PASS]`/`[WARN]`/`[FAIL]`/`[SKIP]` with fix hints. |
 | `shortcuts.py` | The iPhone shortcuts (Dictate, Dictation Target) as plists, with the secrets as import questions; signing through RoutineHub's HubSign (setup time only). |
 | `config.py` | Paths, the TOML schema (pydantic, unknown keys rejected), token generation and loading, `ensure_initialized`. |
-| `config_edit.py` | Comment-preserving edits to config.toml (tomlkit), validated against the schema and written atomically. Used by the setup and settings windows. |
+| `config_edit.py` | Comment-preserving edits to config.toml (tomlkit), validated against the schema and written atomically. Used by the setup window and Settings. |
 | `discovery.py` | DNS-SD announcement of `_shoutabout._tcp` (TXT `v`, `id`, `name`, `ver`) with `DnsServiceRegister` / `DnsServiceDeRegister` through ctypes ([protocol.md](protocol.md)). |
 | `pair_requests.py`, `devices.py`, `identity.py` | Pairing requests (single pending, codes, expiry, rate limits, approval only from the PC UI); per-device tokens stored as SHA-256 in devices.json; the installation id and friendly name. |
 | `hub_v2.py`, `app_services.py` | The hub's v2 wiring (pairing, discovery, windows, hot reload) and the bundle of services the windows use; `# v2-voice:` marks the hooks into hardware detection, model pick and download, and hotkey dictation. |
-| `setup_flow.py` / `setup_ui.py`, `settings_model.py` / `settings_ui.py`, `approval_ui.py`, `ui_host.py`, `ui_kit.py` | First-run setup, settings, History and the pairing prompt: logic (Tk-free, tested) and Tk views on one UI thread ([setup-experience.md](setup-experience.md)). |
+| `app_window.py`, `review_ui.py` | The one ShoutAbout window: tabs (Home, Teach words, Recent, Settings), Home, Ctrl+Tab and Esc; the Teach words page. Every way in (tray, menu bar, reopen, CLI) opens this window on a page, never a second copy. |
+| `setup_flow.py` / `setup_ui.py`, `settings_model.py` / `settings_ui.py`, `approval_ui.py`, `ui_host.py`, `ui_kit.py` | First-run setup, the Settings page and the pairing prompt: logic (Tk-free, tested) and Tk views on one UI thread ([setup-experience.md](setup-experience.md)). |
+| `reopen.py` | Opening ShoutAbout while it runs shows its window at Home: a named event on Windows (the Start menu's second `ShoutAbout.exe` sets it), the "reopen" Apple event on macOS. |
 | `firstrun.py`, `winstartup.py` | First-run detection (existing installs never see the wizard) and port choice; Start with Windows (per-user Run key, installed app only). |
 | `models.py`, `state.py`, `text.py`, `netinfo.py`, `logging_setup.py` | Result types; thread-safe `HubState`; whitespace normalisation; LAN IP and Wi-Fi name detection; rotating log and pythonw stream redirection. |
 | `mac/` | v2-macos: the macOS layer (menu bar, CGEventTap hotkey, NSPanel overlay, NSPasteboard paste, permissions, the Tk window process and its link, dns-sd, LaunchAgent, afconvert, Apple Silicon facts). Hooks in the shared modules are marked `# v2-macos`. See [macos.md](macos.md). |
@@ -73,7 +75,8 @@ hub (pythonw.exe -m shoutabout run, logon task, user session, not elevated)
 | `warmer` | `OllamaCleaner.warm()` every `warm_interval_s` | Reloads the model after an Ollama restart and primes the prompt cache. Never raises. With `[cleanup] enabled = "auto"` it looks for Ollama every 30 s until a suitable model shows up. |
 | `hotkey-hook`, `hotkey`, `overlay`, `overlay-warm`, `mic-warm`, `dictation-transcribe` | "Talk to this PC" ([local-dictation.md](local-dictation.md)) | The hook thread only queues key events; the worker runs the state machine; transcriptions take `HubState.busy` like phone requests. Stopped on Pause and Quit. |
 | `discovery` | Waits until uvicorn listens, then announces the hub with DNS-SD | Windows calls the registration callback on its own thread pool. |
-| `ui` | Tk: the setup and settings windows and pairing prompts (`ui_host`) | Started on demand, ends when the last window closes. Workers never hold Tk objects. |
+| `ui` | Tk: the ShoutAbout window, the setup window and pairing prompts (`ui_host`) | Started on demand, ends when the last window closes. Workers never hold Tk objects. |
+| `learn` | Only with `[learn] seed_projects = true`: project folders 90 s after start, then every 24 h | One notification when new words wait. Otherwise it ends at once. |
 | worker pool | `Pipeline.process_file` | The pipeline lock allows only one transcription at a time. A paste schedules a clipboard restore on a timer. |
 
 ## Request lifecycle (`POST /transcribe`)
@@ -115,7 +118,7 @@ hub (pythonw.exe -m shoutabout run, logon task, user session, not elevated)
    - deliver: for `target=pc`, when not paused and the text is non-empty, call
      `injector.paste`. An empty transcript gets the warning `No speech detected.` on either
      target.
-   - history append
+   - Recent (`target=pc` only, in memory)
 10. The temp file is deleted, one `transcribe id=...` log line is written (no text), and the JSON
     response is returned.
 
@@ -225,7 +228,7 @@ Access JWT checks:
 | Port already in use | uvicorn can't bind | Tray goes to ERROR with "Couldn't listen on port <port> — is another copy running?". The task exits with code 1. Fix: stop the other program, or re-run setup with `-Port`. |
 | Second hub started | The mutex is already held | The second process logs and exits with code 1 |
 | Config invalid / token missing | The hub doesn't start | `hub.log`: `can't start: ...` |
-| Ollama down, model missing, timeout (2 s), guard rejection, output truncated | Raw transcript used; `cleanup: "fallback"` and the reason are logged and stored in history | The text arrives uncleaned |
+| Ollama down, model missing, timeout (2 s), guard rejection, output truncated | Raw transcript used; `cleanup: "fallback"`, and the reason is logged | The text arrives uncleaned |
 | Upload too large, audio too long, undecodable | Request rejected before the GPU runs | `413` / `415` |
 | PC locked, or the UAC secure desktop showing (the input desktop isn't "Default") | No paste; the text is left on the PC clipboard | `pasted: false` and "The PC is locked — text is on your clipboard." |
 | No foreground window | No paste; the text is left on the PC clipboard | `pasted: false` and "No focused window on the PC (locked?) — text is on your clipboard." |
@@ -233,7 +236,6 @@ Access JWT checks:
 | Clipboard changed before the restore | The restore is skipped (sequence number check) | The newer clipboard content is kept |
 | Hub paused | Transcribes but doesn't paste | The phone gets the text and "Hub is paused — not pasted on the PC." |
 | Empty transcript (silence) | Nothing pasted (either target) | `text: ""` and "No speech detected." |
-| History write fails | Logged; the request still succeeds | Nothing |
 | Tunnel down / route wrong | The request never reaches the hub | Cloudflare `502`/`530`/`1033` |
 | Request takes over 125 s through the tunnel | Cloudflare times out; the hub still finishes and pastes | Cloudflare `524` |
 | PC asleep | Nothing answers | A Shortcut connection error or timeout |

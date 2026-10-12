@@ -10,7 +10,8 @@ the same folder + ``os.replace``), so a crash can never leave half a file behind
 
     update_config(paths, {"dictation": {"hotkey": "right_alt"}, "cleanup": {"enabled": "auto"}})
 
-A value of ``None`` removes the key (the setting goes back to its default).
+A value of ``None`` removes the key (the setting goes back to its default); a section of
+``None`` removes the whole section (``{"history": None}``).
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from tomlkit.items import Item, Table
 from shoutabout.config import ConfigError, Paths, example_config_text, parse_config
 from shoutabout.fileio import atomic_write_text
 
-Changes = Mapping[str, Mapping[str, Any]]
+Changes = Mapping[str, Mapping[str, Any] | None]
 Validator = Callable[[str, str], Any]
 
 _lock = threading.Lock()  # one writer at a time inside this process
@@ -66,6 +67,11 @@ def apply_changes(text: str, changes: Changes) -> tuple[str, bool]:
         raise ConfigEditError(f"config.toml isn't valid TOML: {exc}") from exc
     changed = False
     for section, values in changes.items():
+        if values is None:
+            if section in doc:
+                del doc[section]
+                changed = True
+            continue
         if not values:
             continue
         table = doc.get(section)

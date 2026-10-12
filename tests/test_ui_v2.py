@@ -29,12 +29,16 @@ class FakeWindow:
         self.flow = flow
         self.closed = 0
         self.fronted = 0
+        self.pages: list = []
 
     def close(self) -> None:
         self.closed += 1
 
     def bring_to_front(self) -> None:
         self.fronted += 1
+
+    def show(self, page) -> None:
+        self.pages.append(page)
 
 
 class FakeFlow:
@@ -101,10 +105,38 @@ def test_same_request_never_gets_two_prompts(host):
 
 def test_open_existing_windows_come_to_the_front(host):
     host._windows["setup"] = setup = FakeWindow(FakeFlow(True))
-    host._windows["settings"] = settings = FakeWindow()
+    host._windows["main"] = main = FakeWindow()
     host._handle("setup", "full")
-    host._handle("settings", None)
-    assert (setup.fronted, settings.fronted) == (1, 1)
+    host._handle("main", "settings")
+    assert (setup.fronted, main.fronted) == (1, 1)
+    assert main.pages == ["settings"]
+
+
+def test_every_opener_reaches_the_one_window_on_its_page(host, monkeypatch):
+    """Tray items, a second launch and the CLI all open the same window: never a copy."""
+    import shoutabout.app_window as app_window
+
+    made = []
+
+    class FakeAppWindow(FakeWindow):
+        def __init__(self, window, services, *, page, on_close, on_add_phone) -> None:
+            super().__init__()
+            self.first, self.on_close, self.on_add_phone = page, on_close, on_add_phone
+            made.append(self)
+
+    monkeypatch.setattr(app_window, "AppWindow", FakeAppWindow)
+    host.open_window()  # opened again while running: Home
+    host.open_teach()
+    host.open_recent()
+    host.open_settings()
+    (window,) = made
+    assert window.first == "home"
+    assert window.pages == ["teach", "recent", "settings"]
+    assert window.fronted == 4 and host.is_open("main")
+    window.on_close()
+    assert not host.is_open("main")
+    host.open_settings()
+    assert len(made) == 2 and made[1].first == "settings"
 
 
 def test_finished_events_without_windows_are_ignored(host):
@@ -166,30 +198,26 @@ def test_setup_and_settings_commands_open_windows(cli_home, monkeypatch):
         def open_setup(self, mode="full"):
             opened.append(("setup", mode))
 
-        def open_settings(self):
-            opened.append(("settings", None))
-
-        def open_history(self):
-            opened.append(("history", None))
+        def open_window(self, page="home"):
+            opened.append(("window", page))
 
         def wait(self):
             opened.append(("wait", None))
 
     monkeypatch.setattr(ui_host, "UiHost", FakeHost)
+    monkeypatch.setattr(cli.sys, "platform", "win32")
     assert cli.main(["setup"]) == 0
     assert cli.main(["setup", "--phone"]) == 0
     assert cli.main(["settings"]) == 0
-    assert cli.main(["history"]) == 0
     assert opened == [
         ("setup", "full"),
         ("wait", None),
         ("setup", "phone"),
         ("wait", None),
-        ("settings", None),
-        ("wait", None),
-        ("history", None),
+        ("window", "settings"),
         ("wait", None),
     ]
+    assert cli.main(["history"]) == 2  # History is now Recent, in the window: no command
 
 
 # ----------------------------------------------------------- real Tk (opt-in)
@@ -346,7 +374,7 @@ def test_settings_window_renders_and_saves(tmp_path, tk_root):
     import tkinter as tk
 
     from shoutabout.settings_model import SettingsModel
-    from shoutabout.settings_ui import SettingsWindow
+    from shoutabout.settings_ui import SettingsPage
 
     saved = []
     svc = make_services(tmp_path, saved=saved)
@@ -354,7 +382,7 @@ def test_settings_window_renders_and_saves(tmp_path, tk_root):
     top = tk.Toplevel(tk_root)
     top.withdraw()
     added = []
-    win = SettingsWindow(top, SettingsModel(svc), on_add_phone=lambda: added.append(1))
+    win = SettingsPage(top, SettingsModel(svc), on_add_phone=lambda: added.append(1))
     _pump(tk_root, 0.5)
     assert not win.view.loading_quality
     key = svc.devices.list()[0].key
@@ -366,18 +394,13 @@ def test_settings_window_renders_and_saves(tmp_path, tk_root):
     win.apply(lambda: win.model.set_cleanup("off"))
     _pump(tk_root, 0.3)
     assert saved[-1] == {"cleanup": {"enabled": False}}
-    # History: a switch, off by default; clicking its label turns it on.
-    from shoutabout.settings_model import HISTORY_LABEL, HISTORY_NOTE
-
     texts = _texts(win.outer)
-    assert "HISTORY" in texts and HISTORY_NOTE in texts and win.view.history_on is False
+    # No history to switch on (Recent is in memory), and the window's tabs say "Settings".
+    assert "HISTORY" not in texts and "SETTINGS" not in texts
+    assert "History…" not in texts and "Teach words…" not in texts
     # No Ollama here: the AI cleanup choice isn't shown at all.
     assert "AI CLEANUP" not in texts and "Automatic" not in texts
     assert not any("ollama" in t.lower() for t in texts)
-    (label,) = [w for w in _widgets(win.outer) if _text(w) == HISTORY_LABEL]
-    label.event_generate("<Button-1>")
-    _pump(tk_root, 0.3)
-    assert saved[-1] == {"history": {"enabled": True}}
     win._add_phone()
     assert added == [1]
     win.close()
@@ -388,12 +411,12 @@ def test_settings_window_shows_ai_cleanup_when_ollama_is_there(tmp_path, tk_root
     import tkinter as tk
 
     from shoutabout.settings_model import CLEANUP_NOTE, SettingsModel
-    from shoutabout.settings_ui import SettingsWindow
+    from shoutabout.settings_ui import SettingsPage
 
     svc = make_services(tmp_path, cleanup_available=lambda _cfg: True)
     top = tk.Toplevel(tk_root)
     top.withdraw()
-    win = SettingsWindow(top, SettingsModel(svc))
+    win = SettingsPage(top, SettingsModel(svc))
     _pump(tk_root, 0.5)
     texts = _texts(win.outer)
     assert "AI CLEANUP" in texts and CLEANUP_NOTE in texts
@@ -458,17 +481,20 @@ def test_approval_prompt_allow_and_dont_allow(tmp_path, tk_root):
 
 @pytest.mark.windows
 def test_ui_host_real_thread_opens_and_closes(tmp_path, monkeypatch):
-    from shoutabout.settings_ui import SettingsWindow
+    from shoutabout.app_window import AppWindow
 
-    monkeypatch.setattr(SettingsWindow, "bring_to_front", lambda self: None)  # keep focus
+    monkeypatch.setattr(AppWindow, "bring_to_front", lambda self: None)  # keep focus
     svc = make_services(tmp_path)
     svc.detect_hardware = lambda **_k: SimpleNamespace(best_gpu=None, cpu_name="x")
     h = ui_host.UiHost(svc)
     h.open_settings()
     for _ in range(100):
-        if h.is_open("settings"):
+        if h.is_open("main"):
             break
         time.sleep(0.05)
-    assert h.is_open("settings")
+    assert h.is_open("main")
+    h.open_window("teach")  # the same window, another page
+    time.sleep(0.3)
+    assert h._windows["main"].current == "teach"
     h.shutdown(5.0)
     assert h._thread is None or not h._thread.is_alive()

@@ -37,12 +37,12 @@ Notify = Callable[[str, str], None]
 
 class VoiceRuntime:
     def __init__(
-        self, cfg: Config, state: HubState, notify: Notify | None = None, *, failed: Any = None
+        self, cfg: Config, state: HubState, notify: Notify | None = None, *, recent: Any = None
     ) -> None:
         self.cfg = cfg
         self.state = state
         self._notify = notify
-        self.failed = failed  # failed_audio.FailedRecordings: kept for History > Try again
+        self.recent = recent  # recent.Recent: failed recordings kept for Recent > Try again
         self.choice: ModelChoice | None = None
         self.cleaner: Any = None
         self.dictation: Any = None
@@ -165,7 +165,7 @@ class VoiceRuntime:
                 state=self.state,
                 pipeline=logged_pipeline(pipeline),
                 notify=self._notify,
-                failed=self.failed,
+                recent=self.recent,
                 **dictation_factories(),
             )
             self.dictation.follow_pause()

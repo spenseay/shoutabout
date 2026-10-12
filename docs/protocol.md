@@ -169,8 +169,8 @@ Existing: `POST /transcribe`, `GET`/`POST /vocab`, `GET /health` (no auth) are u
 Body: `{"text": "…"}` (at most 10,000 characters). The text is pasted **exactly like a
 transcription result**: whitespace collapsed to one paragraph (newlines never reach the
 paste target), control characters dropped, the same paste injector and paste-chord rules
-(Ctrl+V, or Shift+Insert for listed terminals), the same `trailing_space` setting, written
-to `history.jsonl` like a dictation. LLM cleanup is **not** applied: the phone already made
+(Ctrl+V, or Shift+Insert for listed terminals), the same `trailing_space` setting, kept in
+Recent like a dictation. LLM cleanup is **not** applied: the phone already made
 the final text. The text is never interpreted, and only its length is logged.
 
 | Reply | When |

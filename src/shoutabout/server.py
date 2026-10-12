@@ -98,10 +98,9 @@ class HubContext:
     # a best guess from [stt] in the config.
     model_info: Callable[[], Any] | None = None
     injector: Any = None  # inject.Injector for POST /paste (independent of the engine)
-    history: Any = None  # history.HistoryLog (None = /paste isn't written to history)
-    # failed_audio.FailedRecordings: an upload whose transcription failed is kept there so
-    # History can try it again (None = not kept).
-    failed: Any = None
+    # recent.Recent: the last few dictations (/paste text too) and uploads the speech engine
+    # couldn't write out (Recent > Try again), in memory only. None = not kept.
+    recent: Any = None
     lan_url: Callable[[], str | None] | None = None  # fallback LAN URL for pairing
 
 
@@ -451,7 +450,7 @@ def _lan_url_for(request: Request, ctx: HubContext) -> str | None:
 
 
 def _source_of(request: Request) -> str | None:
-    """The paired phone's name (history says where a dictation came from), or None."""
+    """The paired phone's name (Recent says where a dictation came from), or None."""
     name = getattr(getattr(request.state, "auth", None), "name", None)
     return str(name) if name else None
 
@@ -465,16 +464,17 @@ def _keep_failed(
     route: str,
     source: str | None,
 ) -> None:
-    """An upload the speech engine couldn't transcribe is kept for History > Try again.
-    Not for bad or too-long audio, or a PC that can't decode audio: trying again wouldn't
-    help."""
-    if ctx.failed is None or path is None:
+    """An upload the speech engine couldn't transcribe is kept (in memory, decoded) for
+    Recent > Try again. Not for bad or too-long audio, or a PC that can't decode audio:
+    trying again wouldn't help."""
+    if ctx.recent is None or ctx.pipeline is None or path is None:
         return
     names = {cls.__name__ for cls in type(exc).__mro__}
     if status != 500 and "EngineError" not in names:
         return
     try:
-        ctx.failed.keep_file(path, route=route, source=source, error=detail)
+        audio = ctx.pipeline.decode(path)  # it decoded a moment ago: the engine failed
+        ctx.recent.keep_failed(audio, route=route, source=source, error=detail)
     except Exception:
         log.exception("couldn't keep the failed upload")
 
@@ -483,7 +483,7 @@ def _paste_text(
     ctx: HubContext, text: str, route: str, source: str | None = None
 ) -> TranscribeResult:
     """Paste phone-made text like a transcription result: same injector, same paste-chord
-    rules, same trailing-space setting, no cleanup. Written to history like one."""
+    rules, same trailing-space setting, no cleanup. Kept in Recent like one."""
     t0 = time.perf_counter()
     payload = text + (" " if ctx.config.paste.trailing_space else "")
     # Take turns with phone audio and "Talk to this PC" (the pipeline holds the same lock).
@@ -507,8 +507,8 @@ def _paste_text(
         request_id=uuid.uuid4().hex[:12],
         extra={"stt_model": "phone", "llm_model": None, "source": source},
     )
-    if ctx.history is not None:
-        ctx.history.append(result)
+    if ctx.recent is not None:
+        ctx.recent.add(result)
     return result
 
 

@@ -1,11 +1,10 @@
-"""Vocab suggestions: history mining, project seeding, the suggestions store, the Teach window."""
+"""Vocab suggestions: project folders (only when asked), the suggestions store, Teach words."""
 
 from __future__ import annotations
 
 import json
 import subprocess
 import sys
-import threading
 from pathlib import Path
 
 import pytest
@@ -20,10 +19,10 @@ from shoutabout.learn import (
     base_slug,
     dismiss,
     find_projects,
+    forget_source,
     git_remote_names,
     load_suggestions,
     match_key,
-    mine_history,
     package_names,
     pending_suggestions,
     readme_title,
@@ -35,70 +34,7 @@ from shoutabout.vocab import add_term, parse_vocab, read_terms, remove_term
 
 # ------------------------------------------------------------------------- fixtures
 
-
-def record(text: str, raw: str | None = None, *, ts: str, cleanup: str = "applied") -> dict:
-    return {
-        "ts": ts,
-        "id": "abc",
-        "route": "lan",
-        "target": "pc",
-        "raw_text": text if raw is None else raw,
-        "text": text,
-        "cleanup": cleanup,
-    }
-
-
-HISTORY = [
-    record(
-        "I pushed the branch to GitHub and asked Claude Code to review it.",
-        ts="2026-10-01T09:00:00-07:00",
-    ),
-    record("Then Chameleon CV needs a new release on GitHub.", ts="2026-10-02T09:00:00-07:00"),
-    record("Tell Priya Raghunathan about Chameleon CV on Monday.", ts="2026-10-03T09:00:00-07:00"),
-    record(
-        "Yesterday Priya Raghunathan said the iOS build is fine. OK so the iOS app works.",
-        ts="2026-10-04T09:00:00-07:00",
-    ),
-    # Only ever capitalised because it starts a sentence: not a suggestion.
-    record("Zorblax shipped it. Zorblax is great. Zorblax again!", ts="2026-10-05T09:00:00-07:00"),
-    # Stoplist: months, I, OK, days.
-    record("We met in March and I said OK in March on Friday.", ts="2026-10-05T10:00:00-07:00"),
-    # (a) the LLM cleanup re-cased a name (plus the usual sentence-start fix).
-    record(
-        "The ShoutAbout hub runs on my PC.",
-        raw="the shoutabout hub runs on my pc",
-        ts="2026-09-30T08:00:00-07:00",
-    ),
-    # (c) letters+digits, also at a sentence start.
-    record("Compare GPT5 with the old model. GPT5 is faster.", ts="2026-10-06T09:00:00-07:00"),
-    # An everyday word that is mostly lowercase.
-    record(
-        "we follow the Plan daily, the Plan works, we plan to plan and plan again",
-        ts="2026-10-06T10:00:00-07:00",
-    ),
-    # Cleanup fell back: its text is the raw text, nothing to learn from the diff.
-    record(
-        "the zentrix thing",
-        raw="the zentrix thing",
-        ts="2026-10-06T11:00:00-07:00",
-        cleanup="fallback",
-    ),
-    # A 4+ word capitalised run is a title, not a term.
-    record(
-        "I read The Very Hungry Caterpillar Book and The Very Hungry Caterpillar Book.",
-        ts="2026-10-06T12:00:00-07:00",
-    ),
-]
-
 VOCAB = ["Better Shell", "Claude Code"]
-
-
-def write_history(path: Path, records=HISTORY, junk: bool = True) -> Path:
-    lines = [json.dumps(r, ensure_ascii=False) for r in records]
-    if junk:
-        lines[2:2] = ["{not json", "", "[1, 2]"]
-    path.write_text("\n".join(lines) + "\n", "utf-8")
-    return path
 
 
 @pytest.fixture
@@ -106,130 +42,16 @@ def paths(tmp_path) -> Paths:
     p = Paths(tmp_path / "home")
     p.home.mkdir()
     p.vocab_file.write_text("# vocab\n" + "\n".join(VOCAB) + "\n", "utf-8")
-    write_history(p.history_file)
     return p
+
+
+@pytest.fixture
+def root(tmp_path) -> Path:
+    return make_tree(tmp_path / "Documents")
 
 
 def by_term(suggestions) -> dict[str, Suggestion]:
     return {s.term: s for s in suggestions}
-
-
-# -------------------------------------------------------------------- history mining
-
-
-def test_mine_history_finds_the_right_words(tmp_path):
-    found = by_term(mine_history(write_history(tmp_path / "h.jsonl"), VOCAB))
-    assert {"GitHub", "Chameleon CV", "Priya Raghunathan", "iOS", "ShoutAbout", "GPT5"} <= set(
-        found
-    )
-    for not_wanted in (
-        "Claude Code",  # already in vocab
-        "Zorblax",  # only at sentence starts
-        "March",  # stoplist (month)
-        "Friday",
-        "Monday",
-        "OK",
-        "I",
-        "PC",
-        "Then",
-        "The",
-        "Plan",  # mostly lowercase "plan"
-        "Zentrix",
-        "The Very Hungry Caterpillar Book",
-        "Very Hungry Caterpillar Book",
-    ):
-        assert not_wanted not in found, not_wanted
-    assert all(s.source == "history" and s.status == "pending" for s in found.values())
-
-
-def test_mine_history_counts_details_and_first_seen(tmp_path):
-    found = by_term(mine_history(write_history(tmp_path / "h.jsonl"), VOCAB))
-    assert found["GitHub"].count == 2
-    assert found["GitHub"].detail == "seen 2× in your dictations"
-    assert found["Chameleon CV"].count == 2
-    assert found["Chameleon CV"].first_seen == "2026-10-02T09:00:00-07:00"
-    assert found["iOS"].count == 2
-    assert found["GPT5"].count == 2
-    shout = found["ShoutAbout"]
-    assert shout.count == 1
-    assert shout.detail == 'cleanup fixed it 1× (Whisper heard "shoutabout")'
-
-
-def test_mine_history_vocab_and_exclusions_are_case_insensitive(tmp_path):
-    path = write_history(tmp_path / "h.jsonl")
-    found = by_term(
-        mine_history(path, ["github", "chameleon-cv"], exclude={match_key("Priya Raghunathan")})
-    )
-    assert "GitHub" not in found
-    assert "Chameleon CV" not in found
-    assert "Priya Raghunathan" not in found
-    assert "iOS" in found
-
-
-def test_mine_history_single_mention_is_not_enough(tmp_path):
-    path = write_history(
-        tmp_path / "h.jsonl",
-        [record("Ask Nadia about the Kestrel launch.", ts="2026-10-01T00:00:00Z")],
-    )
-    assert mine_history(path, []) == []
-
-
-def test_mine_history_phrase_at_sentence_start_is_not_split(tmp_path):
-    # "Claude Code is ready": the capital C of "Claude" says nothing, and "Code" must not
-    # become a suggestion of its own.
-    path = write_history(
-        tmp_path / "h.jsonl",
-        [
-            record("Claude Code is ready. Claude Code works.", ts="2026-10-01T00:00:00Z"),
-            record("Claude Code again.", ts="2026-10-01T00:00:01Z"),
-        ],
-    )
-    assert mine_history(path, []) == []
-
-
-def test_sentence_initial_verb_before_a_name(tmp_path):
-    # "Ask Nadia ..." at a sentence start: the tail "Nadia" counts once Nadia has also been
-    # seen mid-sentence; without that confirmation it doesn't.
-    ask = [record("Ask Nadia about the launch.", ts=f"2026-10-0{i}T00:00:00Z") for i in (1, 2)]
-    path = write_history(tmp_path / "h.jsonl", ask)
-    assert mine_history(path, []) == []
-    path = write_history(
-        tmp_path / "h2.jsonl", [*ask, record("I told Nadia already.", ts="2026-10-03T00:00:00Z")]
-    )
-    found = by_term(mine_history(path, []))
-    assert list(found) == ["Nadia"]
-    assert found["Nadia"].count == 3
-    assert found["Nadia"].first_seen == "2026-10-01T00:00:00Z"
-
-
-def test_mine_history_missing_or_empty_file(tmp_path):
-    assert mine_history(tmp_path / "nope.jsonl", []) == []
-    empty = tmp_path / "empty.jsonl"
-    empty.write_text("", "utf-8")
-    assert mine_history(empty, []) == []
-
-
-def test_cleanup_fix_of_a_phrase(tmp_path):
-    path = write_history(
-        tmp_path / "h.jsonl",
-        [record("Ship the Kestrel Launch today.", raw="ship the kestrel lunch today", ts="t")],
-    )
-    found = by_term(mine_history(path, []))
-    assert list(found) == ["Kestrel Launch"]
-    assert 'heard "kestrel lunch"' in found["Kestrel Launch"].detail
-
-
-def test_tokens_sentence_starts():
-    toks = learn._tokens('Hello there. "Quoted" word, GitHub\'s repo! next')
-    assert [(t.text, t.start, t.brk) for t in toks] == [
-        ("Hello", True, False),
-        ("there", False, True),
-        ("Quoted", True, True),
-        ("word", False, True),
-        ("GitHub", False, False),
-        ("repo", False, True),
-        ("next", True, False),
-    ]
 
 
 # ------------------------------------------------------------------ project seeding
@@ -388,50 +210,57 @@ def test_seed_missing_root(tmp_path):
 # ------------------------------------------------------------------------ the store
 
 
-def test_refresh_merge_semantics(paths):
-    new = refresh_suggestions(paths)
+def test_refresh_merge_semantics(paths, root):
+    new = refresh_suggestions(paths, roots=[root])
     pending = by_term(pending_suggestions(paths))
     assert new == len(pending) > 0
-    assert "GitHub" in pending
-    assert refresh_suggestions(paths) == 0  # nothing new the second time
+    assert "Rocket Launcher" in pending
+    assert "Better Shell" not in pending  # already in the vocab
+    assert refresh_suggestions(paths, roots=[root]) == 0  # nothing new the second time
     data = json.loads(paths.suggestions_file.read_text("utf-8"))
     assert data["version"] == 1
     assert {s["status"] for s in data["suggestions"]} == {"pending"}
 
     # Dismissed: never comes back.
-    assert dismiss(paths, ["github"]) == 1
-    assert "GitHub" not in by_term(pending_suggestions(paths))
-    assert refresh_suggestions(paths) == 0
-    assert "GitHub" not in by_term(pending_suggestions(paths))
+    assert dismiss(paths, ["rocket launcher"]) == 1
+    assert "Rocket Launcher" not in by_term(pending_suggestions(paths))
+    assert refresh_suggestions(paths, roots=[root]) == 0
+    assert "Rocket Launcher" not in by_term(pending_suggestions(paths))
 
     # Accepted: goes to the top of vocab.txt, never re-suggested, even after removal.
-    results = accept(paths, ["Chameleon CV", "iOS"])
+    results = accept(paths, ["Chameleon CV", "iOS App"])
     assert [r.status for r in results] == ["added", "added"]
-    assert read_terms(paths.vocab_file)[:3] == ["Chameleon CV", "iOS", "Better Shell"]
+    assert read_terms(paths.vocab_file)[:3] == ["Chameleon CV", "iOS App", "Better Shell"]
     remove_term(paths.vocab_file, "Chameleon CV")
-    assert refresh_suggestions(paths) == 0
+    assert refresh_suggestions(paths, roots=[root]) == 0
     assert "Chameleon CV" not in by_term(pending_suggestions(paths))
     statuses = {s.term: s.status for s in load_suggestions(paths)}
-    assert statuses["GitHub"] == "dismissed"
+    assert statuses["Rocket Launcher"] == "dismissed"
     assert statuses["Chameleon CV"] == "accepted"
 
 
-def test_refresh_counts_new_history(paths):
-    refresh_suggestions(paths)
-    with paths.history_file.open("a", encoding="utf-8") as fh:
-        for i in range(2):
-            fh.write(json.dumps(record("We shipped Kestrel Labs today.", ts=f"2026-10-09T0{i}")))
-            fh.write("\n")
-    assert refresh_suggestions(paths) == 1
+def test_refresh_counts_new_projects(paths, root):
+    refresh_suggestions(paths, roots=[root])
+    (root / "kestrel-labs" / ".git").mkdir(parents=True)
+    assert refresh_suggestions(paths, roots=[root]) == 1
     assert "Kestrel Labs" in by_term(pending_suggestions(paths))
 
 
-def test_term_added_elsewhere_becomes_accepted(paths):
-    refresh_suggestions(paths)
-    add_term(paths.vocab_file, "GPT5")  # e.g. taught from the phone
-    assert "GPT5" not in by_term(pending_suggestions(paths))
-    refresh_suggestions(paths)
-    assert {s.term: s.status for s in load_suggestions(paths)}["GPT5"] == "accepted"
+def test_without_projects_nothing_is_looked_at(paths, root, monkeypatch):
+    def boom(*_a, **_k):
+        raise AssertionError("project folders were scanned")
+
+    monkeypatch.setattr(learn, "seed_from_projects", boom)
+    assert refresh_suggestions(paths, include_projects=False, roots=[root]) == 0
+    assert pending_suggestions(paths) == []
+
+
+def test_term_added_elsewhere_becomes_accepted(paths, root):
+    refresh_suggestions(paths, roots=[root])
+    add_term(paths.vocab_file, "Webstuff")  # e.g. taught from the phone
+    assert "Webstuff" not in by_term(pending_suggestions(paths))
+    refresh_suggestions(paths, roots=[root])
+    assert {s.term: s.status for s in load_suggestions(paths)}["Webstuff"] == "accepted"
 
 
 def test_accept_reports_invalid_and_existing(paths):
@@ -440,39 +269,20 @@ def test_accept_reports_invalid_and_existing(paths):
     assert parse_vocab(paths.vocab_file.read_text("utf-8"))[0] == "Fresh Term"
 
 
-def test_refresh_with_projects(paths, tmp_path):
-    root = make_tree(tmp_path / "Documents")
-    new = refresh_suggestions(paths, include_projects=True, roots=[root])
-    pending = pending_suggestions(paths)
-    sources = [s.source for s in pending]
-    assert sources == sorted(sources, key=["history", "projects"].index)  # history first
-    terms = by_term(pending)
-    assert terms["Chameleon CV"].source == "history"  # found in both: first source wins
-    assert terms["Rocket Launcher"].source == "projects"
-    assert "Better Shell" not in terms  # in vocab
-    assert new == len(pending)
-
-
-def test_projects_only_refresh(paths, tmp_path):
-    root = make_tree(tmp_path / "Documents")
-    refresh_suggestions(paths, include_projects=True, include_history=False, roots=[root])
-    assert {s.source for s in pending_suggestions(paths)} == {"projects"}
-
-
-def test_corrupt_store_is_replaced(paths):
+def test_corrupt_store_is_replaced(paths, root):
     paths.suggestions_file.write_text("{this is not json", "utf-8")
     assert load_suggestions(paths) == []
-    assert refresh_suggestions(paths) > 0
+    assert refresh_suggestions(paths, roots=[root]) > 0
     assert load_suggestions(paths)
 
 
-def test_store_tolerates_odd_entries(paths):
+def test_store_tolerates_odd_entries(paths, root):
     paths.suggestions_file.write_text(
         json.dumps(
             {
                 "suggestions": [
-                    {"term": "GitHub", "status": "dismissed"},
-                    {"term": "GitHub", "status": "pending"},  # duplicate key: first wins
+                    {"term": "Webstuff", "status": "dismissed"},
+                    {"term": "Webstuff", "status": "pending"},  # duplicate key: first wins
                     {"nope": 1},
                     "junk",
                     {"term": "Odd", "status": "weird", "count": "x"},
@@ -482,18 +292,46 @@ def test_store_tolerates_odd_entries(paths):
         "utf-8",
     )
     stored = {s.term: s for s in load_suggestions(paths)}
-    assert stored["GitHub"].status == "dismissed"
+    assert stored["Webstuff"].status == "dismissed"
     assert stored["Odd"].status == "pending" and stored["Odd"].count == 0
-    refresh_suggestions(paths)
-    assert "GitHub" not in by_term(pending_suggestions(paths))
+    refresh_suggestions(paths, roots=[root])
+    assert "Webstuff" not in by_term(pending_suggestions(paths))
+
+
+def test_forget_source_drops_waiting_ones_and_where_they_came_from(paths, root):
+    refresh_suggestions(paths, roots=[root])
+    dismiss(paths, ["Webstuff"])
+    accept(paths, ["iOS App"])
+    waiting = len(pending_suggestions(paths))
+    assert forget_source(paths, "projects") == waiting
+    assert pending_suggestions(paths) == []
+    left = {s.term: s for s in load_suggestions(paths)}
+    assert left["Webstuff"].status == "dismissed" and left["iOS App"].status == "accepted"
+    assert all(s.detail == "" for s in left.values())  # no folder names left behind
+    assert forget_source(paths, "projects") == 0
+    assert forget_source(Paths(paths.home / "nothing-here"), "projects") == 0
+
+
+def test_default_project_roots(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    assert learn.default_project_roots("win32") == []
+    (tmp_path / "Documents").mkdir()
+    (tmp_path / "source" / "repos").mkdir(parents=True)
+    found = learn.default_project_roots("win32")
+    assert found == [tmp_path / "Documents", tmp_path / "source/repos"]
+    # A Mac never looks in Documents (macOS would ask the person out of the blue).
+    assert learn.default_project_roots("darwin") == [tmp_path / "source/repos"]
+    (tmp_path / "Developer").mkdir()
+    found = learn.default_project_roots("darwin")
+    assert found == [tmp_path / "Developer", tmp_path / "source/repos"]
 
 
 # ------------------------------------------------------------------- hub job
 
 
-def test_refresh_and_notify_once(paths):
+def test_refresh_and_notify_once(paths, root):
     notes = FakeNotifier()
-    cfg = LearnConfig(seed_projects=False)
+    cfg = LearnConfig(seed_projects=True, project_roots=[str(root)])
     n = refresh_and_notify(paths, cfg, notes.notify)
     assert n > 0
     assert notes.messages == [teach_notification(n)]
@@ -504,34 +342,24 @@ def test_refresh_and_notify_once(paths):
     assert len(notes.messages) == 1  # nothing new, no second notification
 
 
-def test_refresh_and_notify_respects_notify_false(paths):
+def test_refresh_and_notify_respects_notify_false(paths, root):
     notes = FakeNotifier()
-    assert refresh_and_notify(paths, LearnConfig(seed_projects=False, notify=False), notes.notify)
+    cfg = LearnConfig(seed_projects=True, project_roots=[str(root)], notify=False)
+    assert refresh_and_notify(paths, cfg, notes.notify)
     assert notes.messages == []
 
 
-def test_history_is_mined_only_while_history_is_on(paths, tmp_path):
-    """[history] enabled = false (the default): the hub's refresh and the Teach window's
-    Rescan leave history.jsonl alone, even if one is left from when history was on."""
+def test_the_hub_never_scans_by_default(paths, root, monkeypatch):
+    """[learn] seed_projects is off: the hub's refresh never looks at the folders."""
+
+    def boom(*_a, **_k):
+        raise AssertionError("project folders were scanned")
+
+    monkeypatch.setattr(learn, "seed_from_projects", boom)
     notes = FakeNotifier()
-    learn_cfg = LearnConfig(seed_projects=False)
-    assert refresh_and_notify(paths, learn_cfg, notes.notify, include_history=False) == 0
+    cfg = LearnConfig(project_roots=[str(root)])
+    assert refresh_and_notify(paths, cfg, notes.notify) == 0
     assert pending_suggestions(paths) == [] and notes.messages == []
-    # The Teach window's Rescan reads config.toml; [history] isn't there: off by default.
-    paths.config_file.write_text("[learn]\nseed_projects = false\n", "utf-8")
-    assert review_ui.rescan_suggestions(paths) == 0
-    assert pending_suggestions(paths) == []
-    root = make_tree(tmp_path / "Documents")
-    paths.config_file.write_text(f"[learn]\nproject_roots = [{json.dumps(str(root))}]\n", "utf-8")
-    assert review_ui.rescan_suggestions(paths) > 0
-    assert {s.source for s in pending_suggestions(paths)} == {"projects"}
-    # Turned on: dictations are scanned too.
-    paths.config_file.write_text(
-        f"[history]\nenabled = true\n\n[learn]\nproject_roots = [{json.dumps(str(root))}]\n",
-        "utf-8",
-    )
-    assert review_ui.rescan_suggestions(paths) > 0
-    assert "history" in {s.source for s in pending_suggestions(paths)}
 
 
 def test_teach_notification_singular():
@@ -542,13 +370,13 @@ def test_learn_config_defaults():
     cfg = Config().learn
     assert (cfg.enabled, cfg.seed_projects, cfg.notify, cfg.project_roots) == (
         True,
-        True,
+        False,
         True,
         [],
     )
 
 
-# --------------------------------------------------------------------- review UI
+# ------------------------------------------------------------------- Teach words
 
 
 def test_review_ui_import_is_headless():
@@ -557,12 +385,20 @@ def test_review_ui_import_is_headless():
     assert out.stdout.strip() == "False"
 
 
-def test_pick_font():
-    available = ["Segoe UI", "Arial", "archivo"]
-    assert review_ui.pick_font(available, review_ui.TITLE_FONTS) == "Segoe UI"
-    assert review_ui.pick_font(available, review_ui.BODY_FONTS) == "archivo"
-    assert review_ui.pick_font(["Anton", "Segoe UI"], review_ui.TITLE_FONTS) == "Anton"
-    assert review_ui.pick_font([], review_ui.BODY_FONTS) == "TkDefaultFont"
+def test_suggest_from_my_project_folders(paths, root):
+    """The button: one look, at [learn] project_roots (else the usual folders)."""
+    paths.config_file.write_text(f"[learn]\nproject_roots = [{json.dumps(str(root))}]\n")
+    new = review_ui.suggest_from_projects(paths)
+    assert new > 0 and {s.source for s in pending_suggestions(paths)} == {"projects"}
+    assert review_ui.scan_message(new).startswith(f"Found {new} new word")
+    assert review_ui.suggest_from_projects(paths) == 0
+    assert review_ui.scan_message(0) == "Nothing new in your project folders."
+    assert review_ui.scan_message(1) == "Found 1 new word."
+
+
+def test_suggest_uses_the_usual_folders_without_a_setting(paths, root, monkeypatch):
+    monkeypatch.setattr(learn, "default_project_roots", lambda platform=None: [root])
+    assert review_ui.suggest_from_projects(paths) > 0
 
 
 def test_group_suggestions():
@@ -570,12 +406,12 @@ def test_group_suggestions():
         Suggestion("P1", "projects", 1, "", ""),
         Suggestion("H1", "history", 2, "", ""),
         Suggestion("M1", "manual", 0, "", ""),
-        Suggestion("H2", "history", 1, "", ""),
+        Suggestion("P2", "projects", 1, "", ""),
     ]
     groups = review_ui.group_suggestions(s)
     assert [(title, [x.term for x in items]) for title, items in groups] == [
-        ("From your dictations", ["H1", "H2"]),
-        ("From your projects", ["P1"]),
+        ("From your projects", ["P1", "P2"]),
+        ("From your dictations", ["H1"]),
         ("Manual", ["M1"]),
     ]
     assert review_ui.group_suggestions([]) == []
@@ -595,54 +431,49 @@ def test_messages():
     assert review_ui.accept_message([]) == "Nothing to add."
 
 
-def test_one_window_at_a_time(monkeypatch, tmp_path):
-    started = threading.Event()
-    release = threading.Event()
-    runs: list[tuple] = []
+def _pump(root, seconds: float) -> None:
+    import time
 
-    def fake_run(paths, mode, handle):
-        runs.append((mode, handle))
-        started.set()
-        release.wait(5)
-
-    monkeypatch.setattr(review_ui, "_run_tk", fake_run)
-    paths = Paths(tmp_path)
-    t1 = review_ui.open_add_word_dialog(paths)
-    assert started.wait(5)
-    assert review_ui.is_open()
-    t2 = review_ui.open_review_window(paths)  # brings the open one forward instead
-    assert t2 is t1
-    assert len(runs) == 1
-    assert runs[0][1].requests.get_nowait() == ("focus", "review")
-    release.set()
-    t1.join(5)
-    assert not review_ui.is_open()
-    t3 = review_ui.open_review_window(paths)  # a new one once the first has closed
-    t3.join(5)
-    assert t3 is not t1 and len(runs) == 2
-
-
-def test_hub_exposes_tray_callables(monkeypatch, tmp_path):
-    from shoutabout import hub
-
-    calls = []
-    monkeypatch.setattr(review_ui, "open_review_window", lambda p: calls.append(("review", p)))
-    monkeypatch.setattr(review_ui, "open_add_word_dialog", lambda p: calls.append(("add", p)))
-    paths = Paths(tmp_path)
-    hub.open_teach_window(paths)
-    hub.open_add_word(paths)
-    assert calls == [("review", paths), ("add", paths)]
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        root.update()
+        time.sleep(0.02)
 
 
 @pytest.mark.windows
-def test_real_window_opens_and_closes(paths):
-    t = review_ui.open_review_window(paths)
-    t.join(2.0)  # still running: the window is up
-    assert t.is_alive() and review_ui.is_open()
-    assert review_ui.open_review_window(paths) is t
-    review_ui.close_window(5.0)
-    assert not t.is_alive()
-    t = review_ui.open_add_word_dialog(paths)
-    t.join(1.5)
-    review_ui.close_window(5.0)
-    assert not t.is_alive()
+def test_teach_page_adds_scans_and_removes(paths, root, monkeypatch):
+    tk = pytest.importorskip("tkinter")
+    monkeypatch.setattr(learn, "default_project_roots", lambda platform=None: [root])
+    try:
+        window = tk.Tk()
+    except tk.TclError as exc:  # no display, or Tcl not ready for another interpreter
+        pytest.skip(f"no Tk: {exc}")
+    window.withdraw()
+    try:
+        page = review_ui.TeachPage(tk.Frame(window), paths)
+        _pump(window, 0.4)
+        assert page.vocab_terms == VOCAB and page.suggestion_vars == []
+        page.entry.insert(0, "Priya Raghunathan")
+        page.add_word()
+        _pump(window, 0.4)
+        assert read_terms(paths.vocab_file)[0] == "Priya Raghunathan"
+        assert page.vocab_terms[0] == "Priya Raghunathan"
+        assert page.scan_button["text"] == review_ui.SCAN_LABEL
+        page.scan_projects()  # the only thing that looks at the folders
+        _pump(window, 0.8)
+        assert page.status["text"].startswith("Found ")
+        terms = [s.term for _var, s in page.suggestion_vars]
+        assert "Rocket Launcher" in terms
+        var = next(v for v, s in page.suggestion_vars if s.term == "Rocket Launcher")
+        var.set(1)
+        page.accept_selected()
+        _pump(window, 0.4)
+        assert read_terms(paths.vocab_file)[0] == "Rocket Launcher"
+        page.vocab_list.selection_set(0)
+        page.remove_selected()
+        _pump(window, 0.4)
+        assert "Rocket Launcher" not in read_terms(paths.vocab_file)
+        page.close()
+        assert page.closed
+    finally:
+        window.destroy()

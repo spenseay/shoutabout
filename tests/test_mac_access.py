@@ -337,9 +337,8 @@ def red_pixels(img: brand.Image) -> int:
 def test_menu_bar_rests_on_the_mouth_with_its_tongue():
     idle = brand.menubar_frames("idle", 36)[0]
     assert red_pixels(idle) > 20  # the tongue
-    assert red_pixels(brand.tray_frames("idle", 36)[0]) == 0  # the Windows tray: teeth only
     assert idle.pixel(18, 2)[:3] == brand.YELLOW  # on the yellow tile (light and dark bars)
-    for state in ("starting", "transcribing", "paused", "error"):
+    for state in brand.TRAY_STATES:  # the same icons as the Windows tray
         assert brand.menubar_frames(state, 36) == brand.tray_frames(state, 36)
 
 

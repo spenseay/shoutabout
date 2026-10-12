@@ -20,7 +20,7 @@ Code: [`hardware.py`](../src/shoutabout/hardware.py) (what the PC has),
 | **Balanced** | No usable GPU; ≥ 6 physical cores and ≥ 8 GB RAM | `small.en`, CPU, `int8`, threads = cores (max 8) | 1.2 s here; expect ~2–3 s on a 6–8 core laptop | `ok` | Off |
 | **Light** | Everything else | `base.en`, CPU, `int8`, threads = cores (max 8) | 0.4 s here (4 threads); expect ~1–1.5 s on a 4-core laptop | `slow` | Off |
 
-The explanation shown in the setup and settings windows is one plain sentence, for example
+The explanation shown in the setup window and Settings is one plain sentence, for example
 "Your NVIDIA GeForce RTX 4080 SUPER runs the most accurate speech model." or "No NVIDIA graphics
 card was found, so your Intel Core i5-8250U (4 cores) runs a light speech model."
 
@@ -88,7 +88,7 @@ is `"auto"`. Any explicit value wins:
 | All explicit (a v1 config: `large-v3-turbo` / `cuda` / `float16`, `enabled = true`) | Exactly what v1 did. The hardware and Ollama aren't even probed. |
 | `model = "small.en"`, the rest `"auto"` | small.en on the best device and precision for this PC. |
 | `device = "cpu"`, the rest `"auto"` | The CPU choice for this PC's cores and RAM. |
-| `tier = "best"` / `"balanced"` / `"light"` (model, device and compute type `"auto"`) | That tier, picked by hand (the settings window's override). It runs even when the PC can't really manage it (Best without a usable GPU runs on the CPU); the explanation then says "It will be slow on this PC" and `speed` is `slow`. |
+| `tier = "best"` / `"balanced"` / `"light"` (model, device and compute type `"auto"`) | That tier, picked by hand (Settings > Quality). It runs even when the PC can't really manage it (Best without a usable GPU runs on the CPU); the explanation then says "It will be slow on this PC" and `speed` is `slow`. |
 | `[cleanup] enabled = true` / `false` | Forced on / off. |
 
 With `device = "auto"` the engine also falls back to the CPU if the GPU fails to load (out of

@@ -1,9 +1,10 @@
-"""The settings window (Tk): one short page over :class:`~shoutabout.settings_model.SettingsModel`.
+"""The Settings page of the ShoutAbout window (Tk): one short page over
+:class:`~shoutabout.settings_model.SettingsModel`.
 
-Sections: Talk to this PC, Phones, Quality, AI cleanup (only when Ollama with a suitable
-model is there), History (off by default), This PC (name and start with Windows), and a
-footer (History…, Teach words…, version). Changes save as soon as they're made; the line at
-the bottom says "Saved." or "Restart ShoutAbout to apply".
+Sections: Talk to this PC, Phones (Add a phone opens the pairing window), Quality, AI
+cleanup (only when Ollama with a suitable model is there), This PC (name and start with
+Windows), and a footer (version, log folder, hub token). Changes save as soon as they're
+made; the line at the bottom says "Saved." or "Restart ShoutAbout to apply".
 """
 
 from __future__ import annotations
@@ -19,8 +20,6 @@ from shoutabout import ui_kit as kit
 from shoutabout.settings_model import (
     CLEANUP_CHOICES,
     CLEANUP_NOTE,
-    HISTORY_LABEL,
-    HISTORY_NOTE,
     MODE_CHOICES,
     NO_MIC_NOTE,
     SettingsModel,
@@ -29,8 +28,6 @@ from shoutabout.settings_model import (
 
 log = logging.getLogger(__name__)
 
-WINDOW_TITLE = "ShoutAbout settings"
-BASE_W, BASE_H = 640, 940
 POLL_MS = 120
 CONFIRM_MS = 3000
 QUALITY_LABELS = {"best": "Best", "balanced": "Balanced", "light": "Light"}
@@ -72,44 +69,31 @@ class Segmented:
             ).pack(side="left", padx=(0, 2))
 
 
-class SettingsWindow:
+class SettingsPage:
     def __init__(
         self,
-        window: Any,
+        parent: Any,
         model: SettingsModel,
         *,
-        on_close: Callable[[], None] | None = None,
         on_add_phone: Callable[[], None] | None = None,
         load_in_background: bool = True,
     ) -> None:
         import tkinter as tk
         import tkinter.font as tkfont
 
-        self.win = window
+        self.win = parent
         self.model = model
-        self.on_close = on_close
         self.on_add_phone = on_add_phone
         self.closed = False
-        self.scale = kit.ui_scale(window)
-        self.fonts = kit.Fonts(tkfont.families(window))
+        self.scale = kit.ui_scale(parent)
+        self.fonts = kit.Fonts(tkfont.families(parent))
         self.results: queue.Queue = queue.Queue()
         self._pending: dict[int, Callable[[Any, BaseException | None], None]] = {}
         self._job = 0
         self._confirm: str | None = None
-        self._icon: Any = None
-        window.title(WINDOW_TITLE)
-        window.configure(bg=kit.YELLOW)
-        w = min(round(BASE_W * self.scale), window.winfo_screenwidth() - 40)
-        h = min(round(BASE_H * self.scale), window.winfo_screenheight() - 80)
-        window.geometry(f"{w}x{h}")
-        window.minsize(min(w, round(560 * self.scale)), min(h, round(600 * self.scale)))
-        window.protocol("WM_DELETE_WINDOW", self.close)
-        window.bind("<Escape>", lambda _e: self.close())
-        with contextlib.suppress(Exception):
-            self._icon = kit.app_icon_photo(window, 32)
-            window.iconphoto(False, self._icon)
+        self._jobs: dict[str, Any] = {}  # pending after() jobs
         # The page scrolls when the screen is short (a 1080p laptop at 150 % is 720 px high).
-        frame = tk.Frame(window, bg=kit.YELLOW)
+        frame = tk.Frame(parent, bg=kit.YELLOW)
         frame.pack(fill="both", expand=True)
         self.canvas = tk.Canvas(frame, bg=kit.YELLOW, highlightthickness=0, bd=0)
         self.scrollbar = tk.Scrollbar(frame, orient="vertical", command=self.canvas.yview)
@@ -122,14 +106,16 @@ class SettingsWindow:
             "<Configure>",
             lambda e: (self.canvas.itemconfigure(page_id, width=e.width), self._fit_scroll()),
         )
-        window.bind("<MouseWheel>", self._on_wheel)
         self.outer = tk.Frame(page, bg=kit.YELLOW)
         self.outer.pack(fill="both", expand=True, padx=round(28 * self.scale))
         self.view: SettingsView = model.view()
         self.render()
         if load_in_background:
             self.run_async(model.load_models, lambda _r, _e: self.reload())
-        self.win.after(POLL_MS, self._poll)
+        else:  # tests and screenshots: everything at once
+            model.load_models()
+            self.reload()
+        self._jobs["poll"] = self.win.after(POLL_MS, self._poll)
 
     # ------------------------------------------------------------ plumbing
 
@@ -138,16 +124,13 @@ class SettingsWindow:
             return
         self.closed = True
         self._pending.clear()
+        kit.cancel_jobs(self.win, self._jobs)
         with contextlib.suppress(Exception):
             self.win.destroy()
-        if self.on_close is not None:
-            self.on_close()
 
-    def bring_to_front(self) -> None:
-        with contextlib.suppress(Exception):
-            self.win.deiconify()
-            self.win.lift()
-            self.win.focus_force()
+    def on_shown(self) -> None:
+        """The page came to the front: show the settings as they are now."""
+        self.reload()
 
     def run_async(
         self, work: Callable[[], Any], done: Callable[[Any, BaseException | None], None]
@@ -187,7 +170,7 @@ class SettingsWindow:
         except Exception:
             log.exception("settings window update failed")
         if not self.closed:
-            self.win.after(POLL_MS, self._poll)
+            self._jobs["poll"] = self.win.after(POLL_MS, self._poll)
 
     def _fit_scroll(self) -> None:
         """Scroll region = the page; the scrollbar shows only when the page doesn't fit."""
@@ -203,7 +186,7 @@ class SettingsWindow:
                 self.scrollbar.pack_forget()
                 canvas.yview_moveto(0)
 
-    def _on_wheel(self, event: Any) -> None:
+    def on_wheel(self, event: Any) -> None:
         if self.scrollbar.winfo_ismapped():
             step = int(-event.delta / 120) or (-1 if event.delta > 0 else 1)
             self.canvas.yview_scroll(step, "units")
@@ -223,13 +206,16 @@ class SettingsWindow:
 
     # -------------------------------------------------------------- layout
 
-    def _section(self, title: str) -> Any:
+    def _section(self, title: str, *, first: bool = False) -> Any:
         import tkinter as tk
 
         s = self.scale
-        tk.Frame(self.outer, bg=kit.BLACK, height=max(1, round(2 * s))).pack(
-            fill="x", pady=(round(14 * s), round(8 * s))
-        )
+        if first:  # under the window's tabs: no rule of its own
+            tk.Frame(self.outer, bg=kit.YELLOW, height=round(18 * s)).pack(fill="x")
+        else:
+            tk.Frame(self.outer, bg=kit.BLACK, height=max(1, round(2 * s))).pack(
+                fill="x", pady=(round(14 * s), round(8 * s))
+            )
         tk.Label(
             self.outer,
             text=title.upper(),
@@ -322,14 +308,8 @@ class SettingsWindow:
         self.win.after_idle(lambda: self.canvas.yview_moveto(top))
         v, f, s, m = self.view, self.fonts, self.scale, self.model
 
-        head = tk.Frame(self.outer, bg=kit.YELLOW)
-        head.pack(fill="x", pady=(round(18 * s), 0))
-        if self._icon is not None:
-            tk.Label(head, image=self._icon, bg=kit.YELLOW).pack(side="left", padx=(0, 10))
-        tk.Label(head, text="SETTINGS", font=f.title, bg=kit.YELLOW, fg=kit.BLACK).pack(side="left")
-
         # Talk to this PC
-        body = self._section("Talk to this PC")
+        body = self._section("Talk to this PC", first=True)
         self._switch_row(
             body,
             "On" if v.pc_enabled else "Off",
@@ -408,16 +388,6 @@ class SettingsWindow:
             ).frame.pack(anchor="w")
             self._note(body, CLEANUP_NOTE)
 
-        # History (off by default; the hub applies it at once)
-        body = self._section("History")
-        self._switch_row(
-            body,
-            HISTORY_LABEL,
-            v.history_on,
-            lambda: self.apply(lambda: m.set_history(not v.history_on)),
-        )
-        self._note(body, HISTORY_NOTE)
-
         # This PC
         body = self._section("This PC")
         row = tk.Frame(body, bg=kit.YELLOW)
@@ -457,12 +427,12 @@ class SettingsWindow:
         foot = tk.Frame(self.outer, bg=kit.YELLOW)
         foot.pack(fill="x")
         svc = m.svc
-        if svc.open_history is not None:
-            kit.button(foot, "History…", svc.open_history, f, "light").pack(
-                side="left", padx=(0, round(8 * s))
+        if svc.open_logs is not None:
+            kit.link(foot, "Open log folder", svc.open_logs, f).pack(side="left")
+        if svc.copy_hub_token is not None:
+            kit.link(foot, "Copy hub token (Shortcuts)", svc.copy_hub_token, f).pack(
+                side="left", padx=(round(14 * s), 0)
             )
-        if svc.open_teach is not None:
-            kit.button(foot, "Teach words…", svc.open_teach, f, "light").pack(side="left")
         tk.Label(
             foot,
             text=f"ShoutAbout {v.version}".strip(),
@@ -470,14 +440,6 @@ class SettingsWindow:
             bg=kit.YELLOW,
             fg=kit.MUTED,
         ).pack(side="right")
-        extras = tk.Frame(self.outer, bg=kit.YELLOW)
-        extras.pack(fill="x", pady=(round(6 * s), 0))
-        if svc.open_logs is not None:
-            kit.link(extras, "Open log folder", svc.open_logs, f).pack(side="left")
-        if svc.copy_hub_token is not None:
-            kit.link(extras, "Copy hub token (Shortcuts)", svc.copy_hub_token, f).pack(
-                side="left", padx=(round(14 * s), 0)
-            )
         self._status = tk.Label(
             self.outer,
             text=m.message,

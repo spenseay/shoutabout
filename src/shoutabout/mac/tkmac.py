@@ -1,7 +1,7 @@
-"""Make the shared Tk windows (setup, settings, pairing prompt, Teach) right on macOS.
+"""Make the shared Tk windows (the ShoutAbout window, setup, pairing prompt) right on macOS.
 
-Installed only in ShoutAbout's own window process on a Mac (:mod:`shoutabout.mac.ui_child`
-and ``mac-teach``), never on Windows, so the shared window code stays unchanged:
+Installed only in ShoutAbout's own window process on a Mac (:mod:`shoutabout.mac.ui_child`),
+never on Windows, so the shared window code stays unchanged:
 
 * **Words**: the copy says "PC" and "Start with Windows"; :func:`mac_copy` rewrites every
   widget text and window title on its way to Tk ("Talk to this PC" -> "Talk to this Mac",

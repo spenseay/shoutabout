@@ -180,24 +180,24 @@ def test_tray_mouths(size):
         img = brand.tray_icon(state, size)
         assert rgb(img, c, c) == brand.BLACK
         assert rgb(img, c, c - size // 4) == TILE[state]  # above the pill: tile
-    for state in ("idle", "error"):  # ajar: teeth over throat, no tongue
+    img = brand.tray_icon("error", size)  # ajar on the red tile: teeth over throat
+    assert rgb(img, c, c) == brand.BLACK
+    assert brand.WHITE in {img.pixel(x, y)[:3] for y in range(size) for x in range(size)}
+    for state in ("idle", "transcribing"):  # open, the mark itself: teeth, throat, tongue
         img = brand.tray_icon(state, size)
-        assert rgb(img, c, c) == brand.BLACK
-        colours = {img.pixel(x, y)[:3] for y in range(size) for x in range(size)}
-        assert brand.WHITE in colours
-        if state == "idle":
-            assert brand.RED not in colours
-    img = brand.tray_icon("transcribing", size)  # open: teeth, throat, tongue
-    assert rgb(img, c, c - 1) == brand.BLACK
-    column = [img.pixel(c, y)[:3] for y in range(size)]
-    assert brand.WHITE in column[: c - 1]  # teeth above the centre
-    assert brand.RED in column[c:]  # tongue below it
-    assert column.index(brand.WHITE) < column.index(brand.BLACK) < column.index(brand.RED)
+        assert rgb(img, c, c - 1) == brand.BLACK
+        column = [img.pixel(c, y)[:3] for y in range(size)]
+        assert brand.WHITE in column[: c - 1]  # teeth above the centre
+        assert brand.RED in column[c:]  # tongue below it
+        assert column.index(brand.WHITE) < column.index(brand.BLACK) < column.index(brand.RED)
 
 
 def test_tray_states_are_distinct():
-    images = {state: brand.tray_icon(state, 24).rgba for state in brand.TRAY_STATES}
-    assert len(set(images.values())) == len(brand.TRAY_STATES)
+    # "transcribing" rests on the same mouth as "idle" and tells itself apart by talking.
+    still = [s for s in brand.TRAY_STATES if s != "transcribing"]
+    images = {state: brand.tray_icon(state, 24).rgba for state in still}
+    assert len(set(images.values())) == len(still)
+    assert len({f.rgba for f in brand.tray_frames("transcribing", 24)}) > 1
 
 
 def test_small_tray_icons_are_pixel_snapped():

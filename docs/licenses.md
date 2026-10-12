@@ -81,7 +81,7 @@ which is BSD, was the other option considered.)
 | segno | 1.6.6 | BSD-3-Clause | Metadata only says "BSD License"; the `LICENSE` file is 3-clause (verified) |
 | psutil | 7.2.2 | BSD-3-Clause | |
 | sounddevice | 0.5.6 | MIT | Microphone for "Talk to this PC". Imported only when recording starts. **Bundled PortAudio DLLs: see flag 9** |
-| tomlkit | 0.15.1 | MIT | Comment-preserving config edits (settings window); `LICENSE` file is MIT (verified) |
+| tomlkit | 0.15.1 | MIT | Comment-preserving config edits (Settings); `LICENSE` file is MIT (verified) |
 | pyobjc-core, pyobjc-framework-Cocoa, -Quartz, -ApplicationServices, -AVFoundation (and their dependencies -CoreAudio, -CoreMedia, -CoreText) | 12.2.2 | MIT | **macOS only** (`sys_platform == 'darwin'` markers; never installed on Windows/Linux). The Mac app's menu bar, overlay, hotkey, pasting and permission checks ([macos.md](macos.md)). Pure bindings to Apple's system frameworks, which are part of macOS and not redistributed. |
 
 ## Runtime dependencies: transitive

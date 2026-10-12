@@ -1,4 +1,4 @@
-"""Everything the setup and settings windows need from the rest of the app, in one place.
+"""Everything the ShoutAbout and setup windows need from the rest of the app, in one place.
 
 The windows never import the hub, the engine or the v2-voice modules directly: they get an
 :class:`AppServices`. The hub builds one with the live objects (pairing manager, device
@@ -116,7 +116,7 @@ def default_hint_text(cfg: Any) -> str:
 
 
 def default_copy_text(text: str) -> None:
-    """History > Copy: put the text on the clipboard (kept out of clipboard history)."""
+    """Recent > Copy: put the text on the clipboard (kept out of clipboard history)."""
     from shoutabout.inject import clipboard
 
     clipboard.set_text(text, exclude_from_history=True)
@@ -206,20 +206,23 @@ class AppServices:
     on_settings_saved: Callable[[set[str]], set[str]] | None = None
     lan_url: Callable[[], str | None] | None = None
     on_identity_changed: Callable[[], None] | None = None  # re-announce on the network
-    open_teach: Callable[[], None] | None = None
     open_logs: Callable[[], None] | None = None
     copy_hub_token: Callable[[], None] | None = None
-    open_history: Callable[[], None] | None = None  # the History window (needs the UI host)
     has_microphone: Callable[[], bool | None] = default_has_microphone
     cleanup_available: Callable[[Any], bool] = default_cleanup_available  # Ollama + a model
-    # History: the running hub hands over its log (so clearing takes the same lock as
-    # writing) and the failed-recordings folder; standalone, the files are used directly.
-    history_log: Any = None  # history.HistoryLog
-    failed: Any = None  # failed_audio.FailedRecordings
-    copy_text: Callable[[str], None] | None = default_copy_text  # History > Copy
-    # History > Try again: transcribe a kept recording (by id); returns the text. Only with
+    # Recent: the running hub's last few dictations and failed recordings, in memory
+    # (recent.Recent; on a Mac the window process's mac.ui_child.RemoteRecent). None without
+    # a hub in this process: nothing to show.
+    recent: Any = None
+    copy_text: Callable[[str], None] | None = default_copy_text  # Recent > Copy
+    # Recent > Try again: transcribe a kept recording (by id); returns the text. Only with
     # a running hub (it has the speech engine).
     retry_failed: Callable[[str], str] | None = None
+    # Home's status line. macOS: the permissions still missing ("microphone"...), from
+    # mac.permissions. The Mac window process asks the hub for the whole status instead
+    # (``remote_status``: what hub_status() returns there).
+    missing_permissions: Callable[[], list[str]] | None = None
+    remote_status: Callable[[], dict[str, Any] | None] | None = None
     startup: Any = None  # winstartup.StartupManager
     # v2-macos: the permissions macOS must allow (shoutabout.mac.access: status(), ask(key));
     # the setup then opens on "Allow access". None elsewhere.
@@ -259,33 +262,30 @@ class AppServices:
             log.exception("hot-reloading settings failed")
             return keys
 
-    # -------------------------------------------------------------- history
+    # ------------------------------------------------------------ hub status
 
-    def history_enabled(self) -> bool:
-        return bool(getattr(getattr(self.config(), "history", None), "enabled", False))
-
-    def read_history(self, limit: int | None = None) -> list[dict[str, Any]]:
-        from shoutabout.history import read_history
-
-        path = getattr(self.history_log, "path", None) or self.paths.history_file
-        return read_history(path, limit)
-
-    def failed_recordings(self) -> Any:
-        if self.failed is None:
-            from shoutabout.failed_audio import FailedRecordings
-
-            self.failed = FailedRecordings(self.paths.failed_dir, enabled=self.history_enabled())
-        return self.failed
-
-    def clear_history(self) -> None:
-        """Delete every dictation record and every kept recording. Raises OSError."""
-        from shoutabout.history import clear_history_file
-
-        if self.history_log is not None:
-            self.history_log.clear()
-        else:
-            clear_history_file(self.paths.history_file)
-        self.failed_recordings().clear()
+    def hub_status(self) -> dict[str, Any] | None:
+        """What the running hub is doing, for Home: ``{"phase": "idle" | "starting" |
+        "preparing" | "error"..., "percent", "error", "paused", "missing": [permission]}``
+        (plain values: it crosses the Mac window link). None without a hub here."""
+        if self.remote_status is not None:
+            return self.remote_status()
+        state = self.state
+        if state is None:
+            return None
+        missing: list[str] = []
+        if self.missing_permissions is not None:
+            try:
+                missing = [str(m) for m in self.missing_permissions()]
+            except Exception:
+                log.debug("couldn't read the permissions", exc_info=True)
+        return {
+            "phase": str(state.phase),
+            "percent": state.progress,
+            "error": state.error,
+            "paused": bool(state.paused),
+            "missing": missing,
+        }
 
     # -------------------------------------------------------------- pairing
 

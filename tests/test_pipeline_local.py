@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import threading
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,15 +11,15 @@ import pytest
 from fakes import FakeCleaner, FakeEngine, FakeInjector, FakeVocabStore, fake_decode
 from shoutabout.config import Config
 from shoutabout.engine.base import EngineError
-from shoutabout.history import HistoryLog
 from shoutabout.models import HubStatus
 from shoutabout.pipeline import PAUSED_WARNING, Pipeline
+from shoutabout.recent import Recent
 from shoutabout.state import HubState
 
 AUDIO = Path("unused.m4a")
 
 
-def make(*, engine=None, cleaner="default", config=None, history=None, decode=fake_decode):
+def make(*, engine=None, cleaner="default", config=None, recent=None, decode=fake_decode):
     return Pipeline(
         config=config or Config(),
         engine=engine or FakeEngine(text="hello better shell"),
@@ -28,7 +27,7 @@ def make(*, engine=None, cleaner="default", config=None, history=None, decode=fa
         cleaner=FakeCleaner() if cleaner == "default" else cleaner,
         injector=FakeInjector(),
         state=HubState(),
-        history=history,
+        recent=recent,
         decode=decode,
     )
 
@@ -46,14 +45,14 @@ def test_process_audio_skips_decoding_and_marks_the_route():
     assert p.state.status == HubStatus.IDLE
 
 
-def test_process_audio_follows_pause_and_writes_history(tmp_path):
-    hist = HistoryLog(tmp_path / "h.jsonl", tmp_path / "audio", keep_audio=True)
-    p = make(history=hist)
+def test_process_audio_follows_pause_and_keeps_it_in_recent():
+    recent = Recent()
+    p = make(recent=recent)
     p.state.set_paused(True)
     r = p.process_audio([0.0] * 16_000)
     assert r.pasted is False and r.warning == PAUSED_WARNING
-    record = json.loads((tmp_path / "h.jsonl").read_text("utf-8"))
-    assert record["route"] == "local" and record["audio_file"] is None
+    (item,) = recent.items()  # not pasted: Recent has it, to copy
+    assert item.route == "local" and item.pasted is False and item.warning == PAUSED_WARNING
 
 
 def test_process_audio_engine_error_sets_error_status():

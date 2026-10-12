@@ -1,9 +1,15 @@
 """The hub's side of the window process on macOS (see :mod:`shoutabout.mac.ui_child`).
 
 :class:`MacUiBridge` has the interface :mod:`shoutabout.hub_v2` and the menu use for
-:class:`shoutabout.ui_host.UiHost` (``open_setup``, ``open_settings``, ``shutdown``), so
-the hub wires it in the same place. It starts ``ShoutAbout mac-ui`` on demand, sends it
-window requests and pairing events, and answers its calls on the link's reader thread.
+:class:`shoutabout.ui_host.UiHost` (``open_window``, ``open_setup``, ``open_settings``,
+``open_recent``, ``open_teach``, ``shutdown``), so the hub wires it in the same place. It
+starts ``ShoutAbout mac-ui`` on demand, sends it window requests and pairing events, and
+answers its calls on the link's reader thread.
+
+**Recent** lives in the hub's memory only. The window process asks for it (``recent``), and
+the hub tells a running window process each time it changes (a ``recent`` event), so the
+Recent page shows a new dictation at once. Try again runs here (:class:`Retries`: it needs
+the speech engine), polled like a download.
 
 **Pairing prompts.** A phone's request goes to the window process (its setup window
 approves inline, otherwise the small branded prompt appears). If that process doesn't
@@ -94,6 +100,46 @@ class Downloads:
             return dict(job) if job is not None else {"state": "idle", "done": 0, "total": 0}
 
 
+class Retries:
+    """Recent > Try again asked for by the window process: one thread per recording (it
+    can take a while; link calls must stay quick)."""
+
+    def __init__(self, retry: Callable[[str], str]) -> None:
+        self._retry = retry
+        self._lock = threading.Lock()
+        self._jobs: dict[str, dict[str, Any]] = {}
+
+    def start(self, item_id: str) -> None:
+        with self._lock:
+            job = self._jobs.get(item_id)
+            if job is not None and job["state"] == "running":
+                return
+            job = {"state": "running", "text": "", "error": None}
+            self._jobs[item_id] = job
+        threading.Thread(
+            target=self._run, args=(item_id, job), name="recent-retry", daemon=True
+        ).start()
+
+    def _run(self, item_id: str, job: dict[str, Any]) -> None:
+        try:
+            text = self._retry(item_id)
+        except Exception as exc:
+            with self._lock:
+                job["state"], job["error"] = "failed", str(exc) or type(exc).__name__
+            return
+        with self._lock:
+            job["state"], job["text"] = "done", str(text or "")
+
+    def status(self, item_id: str) -> dict[str, Any]:
+        with self._lock:
+            job = self._jobs.get(item_id)
+            if job is None:
+                return {"state": "idle"}
+            if job["state"] != "running":
+                self._jobs.pop(item_id, None)  # told once
+            return dict(job)
+
+
 class MacUiBridge:
     def __init__(
         self,
@@ -117,41 +163,30 @@ class MacUiBridge:
         self._seq = 0
         self._stopping = False
         self._acks: dict[str, threading.Event] = {}
-        self._teach: Any = None
+        self.retries = Retries(self._retry)
         if services.pairing is not None:
             services.pairing.subscribe(self._on_pair_request, self._on_pair_finished)
+        self._recent = getattr(services, "recent", None)
+        if self._recent is not None:
+            self._recent.subscribe(self._on_recent_changed)
 
     # ------------------------------------------------------------ public (any thread)
 
     def open_setup(self, mode: str = "full") -> None:
         self._send({"t": "open", "kind": "setup", "arg": mode or "full"})
 
+    def open_window(self, page: str = "home") -> None:
+        """The ShoutAbout window on ``page`` (the child's UiHost: ``_show_main``)."""
+        self._send({"t": "open", "kind": "main", "arg": page or "home"})
+
     def open_settings(self) -> None:
-        self._send({"t": "open", "kind": "settings"})
+        self.open_window("settings")
 
-    def open_window(self, kind: str) -> None:
-        """Another window the shared UiHost knows (e.g. "history")."""
-        self._send({"t": "open", "kind": kind})
-
-    def open_history(self) -> None:
-        """The History window (the child's UiHost shows it with ``_show_history``)."""
-        self.open_window("history")
+    def open_recent(self) -> None:
+        self.open_window("recent")
 
     def open_teach(self) -> None:
-        """The Teach window, in its own process (``mac-teach``)."""
-        with self._lock:
-            if self._teach is not None and self._teach.poll() is None:
-                return
-            try:
-                self._teach = subprocess.Popen(
-                    child_command(self.svc.paths, "mac-teach"),
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL,
-                    stderr=_log_file(self.svc.paths),
-                    close_fds=True,
-                )
-            except OSError:
-                log.exception("couldn't open the Teach window")
+        self.open_window("teach")
 
     @property
     def running(self) -> bool:
@@ -170,6 +205,8 @@ class MacUiBridge:
         if self.svc.pairing is not None:
             self.svc.pairing.unsubscribe(self._on_pair_request)
             self.svc.pairing.unsubscribe(self._on_pair_finished)
+        if self._recent is not None:
+            self._recent.unsubscribe(self._on_recent_changed)
         if link is not None:
             link.send({"t": "quit"})
             link.close()
@@ -262,9 +299,17 @@ class MacUiBridge:
             return None
         if op == "download_status":
             return self.downloads.status(str(args.get("model")))
-        if op == "open_teach":
-            self.open_teach()
+        if op == "recent":
+            return self._recent.snapshot() if self._recent is not None else None
+        if op == "remove_failed":
+            return bool(self._recent.remove_failed(str(args.get("id")))) if self._recent else False
+        if op == "retry":
+            self.retries.start(str(args.get("id")))
             return None
+        if op == "retry_status":
+            return self.retries.status(str(args.get("id")))
+        if op == "hub_status":
+            return self.svc.hub_status()
         if op in ("permissions", "allow"):  # the setup's "Allow access": the hub asks macOS
             access = getattr(self.svc, "permissions", None)
             if access is None:
@@ -273,6 +318,16 @@ class MacUiBridge:
                 return access.status()
             return access.ask(str(args.get("which")))
         raise RuntimeError(f"unknown request {op!r}")
+
+    def _retry(self, item_id: str) -> str:
+        retry = self.svc.retry_failed
+        if retry is None:
+            raise RuntimeError("ShoutAbout can't write that out right now.")
+        return str(retry(item_id) or "")
+
+    def _on_recent_changed(self, version: int) -> None:
+        """A dictation or failed recording came or went: tell an open window process."""
+        self._send({"t": "recent", "version": int(version)}, start=False)
 
     # ------------------------------------------------------------ pairing
 
