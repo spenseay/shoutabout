@@ -9,10 +9,10 @@
     "size_bytes": 533179154
   },
   "mac": {
-    "live": false,
+    "live": true,
     "file": "ShoutAbout.dmg",
     "url": "https://github.com/spenseay/shoutabout/releases/latest/download/ShoutAbout.dmg",
-    "size_bytes": null
+    "size_bytes": 66082682
   },
   "iphone": {
     "live": false,
