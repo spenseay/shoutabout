@@ -205,7 +205,10 @@ def test_the_window_has_every_page(tmp_path, monkeypatch):
     from shoutabout.recent import Recent
 
     monkeypatch.setattr(aw.AppWindow, "bring_to_front", lambda self: None)  # keep focus
-    root = tk.Tk()
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:  # no display, or Tcl not ready for another interpreter
+        pytest.skip(f"no Tk: {exc}")
     root.withdraw()
     try:
         svc = make_services(tmp_path)

@@ -444,7 +444,10 @@ def _pump(root, seconds: float) -> None:
 def test_teach_page_adds_scans_and_removes(paths, root, monkeypatch):
     tk = pytest.importorskip("tkinter")
     monkeypatch.setattr(learn, "default_project_roots", lambda platform=None: [root])
-    window = tk.Tk()
+    try:
+        window = tk.Tk()
+    except tk.TclError as exc:  # no display, or Tcl not ready for another interpreter
+        pytest.skip(f"no Tk: {exc}")
     window.withdraw()
     try:
         page = review_ui.TeachPage(tk.Frame(window), paths)
