@@ -68,6 +68,22 @@ def nsimage_from_png(png: bytes, points: tuple[float, float] | None = None) -> A
     return image
 
 
+def nsimage_from_pngs(pngs: list[bytes], points: tuple[float, float]) -> Any:
+    """One NSImage of ``points`` size with a bitmap per screen scale (e.g. 18, 36 and 54 px
+    for an 18-point icon): AppKit draws the one that matches the display, so it is sharp
+    at 1x and on Retina, never a scaled copy."""
+    from AppKit import NSBitmapImageRep, NSImage
+
+    image = NSImage.alloc().initWithSize_(points)
+    for png in pngs:
+        rep = NSBitmapImageRep.imageRepWithData_(nsdata(png))
+        if rep is None:
+            continue
+        rep.setSize_(points)  # its pixels stay; only the size it is drawn at is in points
+        image.addRepresentation_(rep)
+    return image
+
+
 def cgimage_from_bgra(width: int, height: int, bgra: bytes) -> Any:
     """A CGImage from premultiplied BGRA bytes (what overlay.premultiplied_bgra makes)."""
     import Quartz

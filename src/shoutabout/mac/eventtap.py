@@ -112,7 +112,15 @@ class QuartzTapApi:
 
 
 class TapPermissionError(OSError):
-    """macOS refused the event tap: a permission is missing (the message says which)."""
+    """macOS refused the event tap: a permission is missing (the message says which).
+
+    ``told_elsewhere``: neither permission is allowed, which the app tells the person
+    itself (the setup's "Allow access", the notice at start, the menu bar), so the
+    dictation doesn't notify about it again at every retry."""
+
+    def __init__(self, message: str, *, told_elsewhere: bool = False) -> None:
+        super().__init__(message)
+        self.told_elsewhere = told_elsewhere
 
 
 def choose_listen_only(listen: bool | None, post: bool | None) -> list[bool]:
@@ -224,7 +232,8 @@ class MacEventTap:
             if tap is None:
                 raise TapPermissionError(
                     "macOS didn't allow ShoutAbout to watch for the shortcut key. Turn on "
-                    "ShoutAbout in System Settings > Privacy & Security > Accessibility."
+                    "ShoutAbout in System Settings > Privacy & Security > Accessibility.",
+                    told_elsewhere=not order,  # nothing allowed (vs. allowed but refused)
                 )
             self._tap = tap
         except BaseException as exc:

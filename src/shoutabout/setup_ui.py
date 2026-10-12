@@ -19,6 +19,7 @@ log = logging.getLogger(__name__)
 
 WINDOW_TITLE = "Set up ShoutAbout"
 POLL_MS = 100
+PERMISSION_TICKS = 10  # v2-macos: read the permissions again every 10 polls (~1 s)
 BASE_W, BASE_H = 760, 540
 ARM_DELAY_MS = 800
 
@@ -26,6 +27,25 @@ ARM_DELAY_MS = 800
 def _arm(button: Any) -> None:
     with contextlib.suppress(Exception):  # the screen may have moved on
         button.configure(state="normal")
+
+
+def check_mark(parent: Any, on: bool, scale: float) -> Any:
+    """A round mark for an "Allow access" line: an empty ring, or black with a yellow tick."""
+    import tkinter as tk
+
+    size = round(26 * scale)
+    pad = max(1, round(2 * scale))
+    canvas = tk.Canvas(parent, width=size, height=size, bg=parent["bg"], highlightthickness=0)
+    box = (pad, pad, size - pad, size - pad)
+    if not on:
+        canvas.create_oval(*box, outline=kit.BLACK, width=max(2, round(2 * scale)))
+        return canvas
+    canvas.create_oval(*box, fill=kit.BLACK, width=0)
+    tick = [size * x for x in (0.28, 0.52, 0.44, 0.68, 0.73, 0.35)]
+    canvas.create_line(
+        *tick, fill=kit.YELLOW, width=max(2, round(3 * scale)), capstyle="round", joinstyle="round"
+    )
+    return canvas
 
 
 class SetupWindow:
@@ -46,6 +66,7 @@ class SetupWindow:
         self.scale = kit.ui_scale(window)
         self.fonts = kit.Fonts(tkfont.families(window))
         self._seen_version = -1
+        self._ticks = 0
         self._layout_key: Any = None
         self._mouth: kit.Mouth | None = None
         self._qr: Any = None
@@ -103,6 +124,9 @@ class SetupWindow:
         if self.closed:
             return
         try:
+            if self._ticks % PERMISSION_TICKS == 0:
+                self.flow.poll_permissions()  # only while it matters (a Mac, first screens)
+            self._ticks += 1
             if self.flow.version != self._seen_version:
                 self._seen_version = self.flow.version
                 self.render()
@@ -114,8 +138,15 @@ class SetupWindow:
 
     def _layout_key_now(self) -> tuple:
         f = self.flow
+        if f.screen == "allow":
+            rows = tuple((r.key, r.granted) for r in f.allow_rows())
+            return ("allow", rows, f.allow_hint)
         if f.screen == "check":
             return ("check", f.phase == "failed")
+        if f.screen == "try":
+            return ("try", f.try_note())
+        if f.screen == "done":
+            return ("done", f.needs_access())
         if f.screen == "phone":
             return ("phone", f.prompt is not None, f.show_qr, f.pair_state)
         return (f.screen,)
@@ -126,6 +157,8 @@ class SetupWindow:
             self._layout_key = key
             self._build()
         self._refresh()
+        if self.flow.take_raise():
+            self.bring_to_front()
 
     def _clear(self) -> None:
         if self._mouth is not None:
@@ -186,6 +219,36 @@ class SetupWindow:
         self._clear()
         self._header()
         getattr(self, f"_build_{self.flow.screen}")()
+
+    # ---------------------------------------------- screen 0: allow access (macOS)
+
+    def _build_allow(self) -> None:
+        import tkinter as tk
+
+        f, fonts, s = self.flow, self.fonts, self.scale
+        foot = self._footer()
+        kit.link(foot, "Skip", self._skip_allow, fonts).pack(side="right")
+        for row in f.allow_rows():
+            line = tk.Frame(self.outer, bg=kit.YELLOW)
+            line.pack(fill="x", pady=(0, round(16 * s)))
+            check_mark(line, row.granted, s).pack(side="left", padx=(0, round(14 * s)))
+            tk.Label(line, text=row.label, font=fonts.big, bg=kit.YELLOW, fg=kit.BLACK).pack(
+                side="left"
+            )
+            tk.Label(line, text=row.why, font=fonts.body, bg=kit.YELLOW, fg=kit.MUTED).pack(
+                side="left", padx=(round(8 * s), 0)
+            )
+            if not row.granted:
+                kit.button(line, "Allow", lambda key=row.key: f.ask(key), fonts).pack(side="right")
+        if f.allow_hint:
+            self._line(self.outer, f.allow_hint, fonts.body, fg=kit.MUTED, pady=(round(4 * s), 0))
+
+    def _skip_allow(self) -> None:
+        if self.flow.skip_allow():
+            self.close()
+
+    def _refresh_allow(self) -> None:
+        return  # every change rebuilds the screen (see _layout_key_now)
 
     # ------------------------------------------------- screen 1: getting ready
 
@@ -264,6 +327,8 @@ class SetupWindow:
         box.pack(fill="x")
         box.bind("<<Modified>>", self._on_text_modified)
         self._widgets["box"] = box
+        if f.try_note():  # v2-macos: pasting isn't allowed; the words are on the clipboard
+            self._line(self.outer, f.try_note(), fonts.body, fg=kit.MUTED, pady=(round(10 * s), 0))
         self.win.after(50, lambda: self._focus_box())
 
     def _focus_box(self) -> None:
@@ -302,6 +367,10 @@ class SetupWindow:
         text.pack(side="left", fill="both", expand=True)
         if f.done_line():
             self._line(text, f.done_line(), fonts.big, pady=(round(18 * s), 0))
+        if f.needs_access():  # v2-macos: skipped "Allow access"; the way back
+            kit.link(text, "Allow access", f.back_to_allow, fonts).pack(
+                anchor="w", pady=(round(10 * s), 0)
+            )
         self._mouth.talk()
         self.win.after(1600, lambda: self._mouth and self._mouth.stop(open_mouth=True))
 
