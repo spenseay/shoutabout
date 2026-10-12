@@ -164,11 +164,31 @@ def no_run(_work, _name) -> None:
     """Runner that does nothing: screenshots set the flow's state by hand."""
 
 
+class FakePermissions:
+    """A Mac that hasn't allowed the microphone or Accessibility yet (the "Allow access"
+    screen; shoutabout.mac.access status values). Nothing is asked."""
+
+    def status(self) -> dict:
+        return {
+            "microphone": "undetermined",
+            "accessibility": False,
+            "input_monitoring": None,
+            "hotkey": False,
+        }
+
+    def ask(self, _which: str) -> str:
+        return "opened"
+
+
 def setup_shot(name: str, svc: AppServices, root) -> None:
     from shoutabout.setup_flow import SetupFlow
     from shoutabout.setup_ui import SetupWindow
 
     mode = "phone" if name == "setup-add-phone" else "full"
+    if name == "setup-allow-only":
+        mode = "allow"
+    if name in ("setup-0-allow", "setup-allow-only"):
+        svc.permissions = FakePermissions()
     if name == "setup-3-done-no-mic":
         svc.has_microphone = lambda: False
     flow = SetupFlow(svc, mode=mode, runner=no_run)
@@ -284,6 +304,8 @@ def home_services(svc: AppServices, name: str) -> None:
         state.set_status(HubStatus.IDLE)
     if name == "home-no-mic":
         svc.has_microphone = lambda: False
+    if name == "home-needs-access":  # a Mac without Accessibility (Home's line + Allow)
+        svc.missing_permissions = lambda: ["accessibility"]
     svc.state = state
 
 
@@ -388,6 +410,8 @@ def overlay_shots(out_dir: Path, scale: float = 1.5) -> None:
 def main() -> int:
     out_dir = Path(sys.argv[1])
     wanted = sys.argv[2:] or [
+        "setup-0-allow",
+        "setup-allow-only",
         "setup-1-downloading",
         "setup-1-failed",
         "setup-2-try",
@@ -400,6 +424,7 @@ def main() -> int:
         "window-home",
         "window-home-getting-ready",
         "window-home-no-mic",
+        "window-home-needs-access",
         "window-teach",
         "window-recent",
         "window-settings",
