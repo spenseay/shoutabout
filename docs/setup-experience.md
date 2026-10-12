@@ -29,8 +29,33 @@ To see the screens with made-up data (nothing real is touched):
   screen (`python -m shoutabout setup --phone`).
 
 Setup changes no settings: Talk to this PC, the key and everything else are in Settings. The
-model is picked automatically; downloading it is the only thing setup has to do. On a Mac,
-macOS asks for the microphone and Accessibility itself when the app starts.
+model is picked automatically; downloading it is the only thing setup has to do. On a Mac it
+first asks for the permissions macOS guards (screen 0).
+
+## Screen 0 (Mac only): "Allow access"
+
+The first screen on a Mac while something is missing (a Mac that allows everything never
+sees it). One line per permission, a round mark that turns black with a tick as soon as
+macOS allows it (read about once a second), and **Allow**:
+
+| Line | Allow does |
+|---|---|
+| **Microphone** to hear you | macOS's own "would like to access the microphone" dialog; once asked (or refused), System Settings > Privacy & Security > Microphone |
+| **Accessibility** for Right ⌘ Command and pasting | macOS's "would like to control this computer" prompt (it puts ShoutAbout in the list) and System Settings > … > Accessibility |
+| **Input Monitoring** for Right ⌘ Command | only listed when Accessibility can't be read at all; System Settings > … > Input Monitoring |
+
+When System Settings opened, one line says "Turn on ShoutAbout there, then come back." When
+everything is allowed the window comes back to the front and moves on by itself (to "Try it"
+when the model is ready, else "Getting ready", which downloads meanwhile). A small **Skip**
+link moves on without them; "Try it" then only shows if the microphone and the hotkey work,
+and the last screen says "Almost there" / "Talk to this Mac needs access first." with an
+**Allow access** link back. Without Accessibility (a managed Mac may never allow it) "Try it"
+still works when the hotkey does: "Then press ⌘V to paste it."
+
+The hub asks macOS, not the window (`mac/access.py`): it's the process that records, taps
+the keyboard and pastes. Clicking a ShoutAbout notification while something is missing opens
+the same screen alone (`SetupFlow(mode="allow")`; Skip closes it, and once everything is
+allowed it says how to talk).
 
 ## Screen 1: "Getting ready"
 
@@ -52,7 +77,8 @@ the model ready when it starts). Closing the window cancels the download.
 "Press Right Ctrl, say this, then press it again:" (hold mode: "Hold Right Ctrl and say:") /
 **"This is my first dictation."** above a big white text box that has the focus. The real
 hotkey dictation pastes into it; as soon as words arrive the window moves on. **Skip** is a
-small link. Skipped when Talk to this PC is off or Windows reports no microphone at all.
+small link. Skipped when Talk to this PC is off or Windows reports no microphone at all (and
+on a Mac while the microphone or the hotkey isn't allowed).
 
 ## Screen 3: "You're all set"
 

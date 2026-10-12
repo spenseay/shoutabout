@@ -12,6 +12,10 @@ and ``mac-teach``), never on Windows, so the shared window code stays unchanged:
 * **Buttons**: Aqua draws ``tk.Button`` natively and ignores its colours, which turned the
   brand's yellow-on-black buttons into yellow-on-white. :class:`LabelButton` is a flat,
   clickable label with the same options (``command``, ``state``, colours).
+* **Dock icon**: Tk shows the window process in the Dock, and on macOS ``wm iconphoto``
+  replaces the *Dock* icon with the photo it gets (the windows pass a 32 px one: a blurry
+  tile). It is ignored here, so the Dock shows the app's own ShoutAbout.icns (16 to
+  1024 px); run from source (no bundle icon) it shows the brand icon rendered at Dock size.
 """
 
 from __future__ import annotations
@@ -90,8 +94,55 @@ def install() -> None:
             log.debug("couldn't set tk scaling", exc_info=True)
 
     tk.Tk.__init__ = tk_init  # type: ignore[method-assign]
+    tk.Wm.wm_iconphoto = keep_dock_icon  # type: ignore[method-assign]
+    tk.Wm.iconphoto = keep_dock_icon  # type: ignore[method-assign]
     tk.Button = make_label_button(tk)  # type: ignore[misc]
     _installed = True
+
+
+# ------------------------------------------------------------------ the Dock icon
+
+DOCK_PX = 512
+DOCK_TILE = 824 / 1024  # Apple's icon grid, as in packaging/macos/make_icns.py
+_dock_done = False
+
+
+def keep_dock_icon(_window: Any, _default: Any = False, *_images: Any) -> None:
+    """``wm iconphoto`` on macOS: never the small photo (see the module docstring)."""
+    global _dock_done
+    if _dock_done:
+        return
+    _dock_done = True
+    try:
+        from Foundation import NSBundle
+
+        if NSBundle.mainBundle().objectForInfoDictionaryKey_("CFBundleIconFile"):
+            return  # the app: macOS already shows its .icns, sharp at every size
+        from AppKit import NSApplication
+
+        from shoutabout.mac.cocoa import nsimage_from_png
+
+        png = dock_icon_png()
+        image = nsimage_from_png(png, (DOCK_PX / 2, DOCK_PX / 2))
+        NSApplication.sharedApplication().setApplicationIconImage_(image)
+    except Exception:
+        log.debug("couldn't set the Dock icon", exc_info=True)
+
+
+def dock_icon_png(size: int = DOCK_PX) -> bytes:
+    """The app icon (the rounded yellow tile on Apple's grid) as a ``size`` px PNG."""
+    import numpy as np
+
+    from shoutabout import brand
+
+    tile = max(1, round(size * DOCK_TILE))
+    art = brand.app_icon("primary", tile, rounded=True, samples=4)
+    canvas = np.zeros((size, size, 4), dtype=np.uint8)
+    off = (size - tile) // 2
+    canvas[off : off + tile, off : off + tile] = np.frombuffer(art.rgba, dtype=np.uint8).reshape(
+        tile, tile, 4
+    )
+    return brand.png_bytes(size, size, canvas.tobytes(), alpha=True)
 
 
 def make_label_button(tk: Any) -> type:

@@ -372,9 +372,8 @@ def _run(
     except Exception:  # never stop the hub over the choice; the engine reports problems
         log.exception("couldn't decide the model setup")
     voice.start_dictation(lambda: ctx.pipeline)
-    if mac_hub is not None:  # v2-macos: ask for missing permissions, then watch for them
-        mac_hub.request_permissions()
-        mac_hub.watch_permissions(voice)
+    if mac_hub is not None:  # v2-macos: setup asks for permissions (else a notice), then watch
+        mac_hub.start_permissions(voice, v2, first_run=show_setup)
     # --- end v2-voice -----------------------------------------------------------------
     from shoutabout.history import HistoryLog
 

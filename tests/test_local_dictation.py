@@ -16,7 +16,11 @@ from fakes import FakeCleaner, FakeEngine, FakeInjector, FakeVocabStore, fake_de
 from shoutabout.config import Config, parse_config
 from shoutabout.engine.base import EngineError
 from shoutabout.hotkey import Action, HotkeyEvent
-from shoutabout.inject.base import ADMIN_WINDOW_WARNING
+from shoutabout.inject.base import (
+    ADMIN_WINDOW_WARNING,
+    COPIED_NOTICE,
+    NO_PASTE_PERMISSION_WARNING,
+)
 from shoutabout.local_dictation import (
     DictationState,
     LocalDictation,
@@ -311,6 +315,23 @@ def test_other_paste_problems_notify():
     h.dictation.stop()
 
 
+def test_no_paste_permission_copies_and_says_command_v():
+    """macOS without Accessibility (a managed Mac may never allow it): the words are on the
+    clipboard every time, the pill says how to paste them, and only the injector notifies
+    (once)."""
+    h = Harness(injector=FakeInjector(PasteResult(False, NO_PASTE_PERMISSION_WARNING)))
+    h.dictation.start()
+    for _ in range(2):
+        h.send(START)
+        h.send(STOP)
+        h.wait_overlay("notice")
+        assert h.overlay.calls[-1] == f"notice:{COPIED_NOTICE}"
+        h.wait_state(DictationState.READY)
+    assert h.notes == []
+    assert len(COPIED_NOTICE) <= 28  # fits the pill
+    h.dictation.stop()
+
+
 def test_engine_failure_while_transcribing():
     h = Harness(engine=FakeEngine(fail=EngineError("Transcription failed: CUDA error")))
     h.dictation.start()
@@ -403,6 +424,23 @@ def test_hook_failure_is_reported_and_leaves_it_off():
     assert h.dictation.state == DictationState.OFF
     assert h.notes and "SetWindowsHookExW" in h.notes[0][1]
     assert h.overlay.stopped == 1
+
+
+def test_missing_mac_permission_is_told_by_the_app_not_at_every_retry():
+    from shoutabout.mac.eventtap import TapPermissionError
+
+    h = Harness()
+
+    def refused(hotkey, mode, on_event):
+        listener = FakeListener(hotkey, mode, on_event)
+        listener.start = lambda: (_ for _ in ()).throw(
+            TapPermissionError("Turn on Accessibility", told_elsewhere=True)
+        )
+        return listener
+
+    h.dictation._listener_factory = refused
+    assert h.dictation.start() is False
+    assert h.dictation.state == DictationState.OFF and h.notes == []
 
 
 def test_reload_applies_new_settings(h):

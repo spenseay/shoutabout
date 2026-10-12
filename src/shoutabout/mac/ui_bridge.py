@@ -13,6 +13,10 @@ native macOS alert instead (``native_prompt``), so a phone can always be allowed
 **Downloads** asked for by the setup window run here, in the hub process
 (:class:`Downloads`), so the hub's own loader and the window share one download
 (:func:`shoutabout.modelstore.download` joins concurrent callers in a process).
+
+**Permissions** shown and asked for by the setup's "Allow access" screen are read and
+requested here too (``permissions`` / ``allow``, :class:`shoutabout.mac.access.HubAccess`):
+the hub is the process that uses them.
 """
 
 from __future__ import annotations
@@ -261,6 +265,13 @@ class MacUiBridge:
         if op == "open_teach":
             self.open_teach()
             return None
+        if op in ("permissions", "allow"):  # the setup's "Allow access": the hub asks macOS
+            access = getattr(self.svc, "permissions", None)
+            if access is None:
+                raise RuntimeError("the permissions aren't available")
+            if op == "permissions":
+                return access.status()
+            return access.ask(str(args.get("which")))
         raise RuntimeError(f"unknown request {op!r}")
 
     # ------------------------------------------------------------ pairing

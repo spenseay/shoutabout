@@ -221,6 +221,9 @@ class AppServices:
     # a running hub (it has the speech engine).
     retry_failed: Callable[[str], str] | None = None
     startup: Any = None  # winstartup.StartupManager
+    # v2-macos: the permissions macOS must allow (shoutabout.mac.access: status(), ask(key));
+    # the setup then opens on "Allow access". None elsewhere.
+    permissions: Any = None
     version: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)

@@ -212,17 +212,19 @@ def test_tap_uses_accessibility_when_input_monitoring_is_off():
 def test_tap_without_permissions_says_what_to_do():
     api = FakeTapApi(listen=False, post=False)
     tap, _ = make_tap(api)
-    with pytest.raises(TapPermissionError, match="Accessibility"):
+    with pytest.raises(TapPermissionError, match="Accessibility") as error:
         tap.start()
     assert api.created == []  # didn't even try (no Input Monitoring prompt)
     assert not tap.installed
+    assert error.value.told_elsewhere  # the app's own "Allow access" says so, not a retry
 
 
 def test_tap_refused_by_macos():
     api = FakeTapApi(listen=None, post=None, refuse={True})
     tap, _ = make_tap(api)
-    with pytest.raises(OSError):
+    with pytest.raises(OSError) as error:
         tap.start()
+    assert not getattr(error.value, "told_elsewhere", False)  # unexpected: notify about it
 
 
 # ------------------------------------------------------------ the listener

@@ -458,6 +458,10 @@ def test_icns_file_structure(tmp_path):
     img = icns.icon_image(64)
     rgba = np.frombuffer(img.rgba, dtype=np.uint8).reshape(64, 64, 4)
     assert rgba[0, 0, 3] == 0 and rgba[32, 32, 3] == 255  # transparent margin, opaque tile
+    # Every size the Dock and Finder ask for, up to 1024 px (512 pt @2x): never blurry.
+    slots = dict(icns.SLOTS)
+    assert set(slots.values()) == {16, 32, 64, 128, 256, 512, 1024}
+    assert slots[b"ic10"] == 1024 and slots[b"ic14"] == 512 and slots[b"ic11"] == 32
 
 
 def test_mac_bundle_rules(tmp_path):

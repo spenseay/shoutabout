@@ -143,9 +143,11 @@ only the Command flag, via `CGEventPost`), and restore the old contents after
 `restore_delay_ms` unless the pasteboard changed meanwhile. The V key code is looked up in
 the current keyboard layout (`UCKeyTranslate` with Command held, on the main thread, as the
 Text Input Sources API requires) so Dvorak/AZERTY get Cmd+V too. Without Accessibility,
-macOS silently drops posted keys, so that's checked first: the text then stays on the
-clipboard, with a warning and one notification. With Secure Keyboard Entry active (password
-fields), the text stays on the clipboard too.
+macOS silently drops posted keys, so that's checked first: every dictation is then copied
+instead (left on the clipboard), the pill says **Copied · ⌘V to paste**, and the first one
+of a session notifies once. That is the whole experience on a managed Mac that never allows
+Accessibility (the hotkey then needs Input Monitoring). With Secure Keyboard Entry active
+(password fields), the text stays on the clipboard too.
 
 **Microphone** (`mac/mic_mac.py`). The shared `MicRecorder` (sounddevice → PortAudio's
 Core Audio backend). Before opening the device the permission is checked
@@ -171,24 +173,44 @@ a new install of the built app; Settings > This Mac switches it.
 
 **Menu** (`mac/menubar.py`). The Windows tray menu (`tray.build_menu`): status, how to
 talk, Pause/Resume, Teach words…, Settings…, Set up…, Quit, plus a line per missing
-permission ("Allow pasting (Accessibility)…") that opens the right System Settings pane.
-The icon is the brand tray tile (36 px at 18 pt), with the Windows states and animations.
-Notifications use `NSUserNotificationCenter`, else `osascript`.
+permission ("Allow pasting (Accessibility)…") that asks macOS (its dialog) or opens the
+right System Settings pane. The icon is the brand tile at 18 pt with a bitmap per screen
+scale (18, 36, 54 px; `brand.menubar_frames`): at rest the mouth is open with its red
+tongue, like the app icon (the Windows tray's resting mouth shows only teeth), with the
+tray's other states and animations. It's a colour image, not a template (a template can't
+show the tongue); the yellow tile reads on light and dark menu bars. Notifications use
+`NSUserNotificationCenter` (a delegate shows them even while ShoutAbout is in front, and a
+click while a permission is missing opens "Allow access"), else `osascript`.
 
 **Words.** The shared windows say "PC"; the window process rewrites widget texts on their
 way to Tk ("Talk to this Mac", "Open at login", "menu bar", "log in"), sets Tk's scaling to
 96/72 so sizes match the Windows design, and replaces `tk.Button` (Aqua ignores button
-colours) with a flat clickable label (`mac/tkmac.py`).
+colours) with a flat clickable label (`mac/tkmac.py`). Tk puts the window process in the
+Dock, and on macOS `wm iconphoto` would replace its Dock icon with the windows' 32 px photo
+(blurry): it's ignored, so the Dock shows `ShoutAbout.icns` (16 to 1024 px).
 
 ## Permissions
 
 | Permission | Why | How it's asked | If refused |
 |---|---|---|---|
-| Microphone | Talk to this Mac | At first start (`AVCaptureDevice.requestAccess`), with the Info.plist reason | "Mic blocked" + where to turn it on; menu line "Allow the microphone…" |
-| Accessibility | Pasting (posting Cmd+V), and the hotkey when Input Monitoring is off | At every start while missing (`AXIsProcessTrustedWithOptions` with the prompt: macOS's own dialog with *Open System Settings*) | Text stays on the clipboard with a notification; menu line "Allow pasting (Accessibility)…"; the hotkey starts by itself within 2 s of turning it on |
-| Input Monitoring | Only if the hotkey tap can't run on Accessibility | Never asked up front; menu line when needed | — |
+| Microphone | Talk to this Mac | The setup's first screen, "Allow access" (`AVCaptureDevice.requestAccess`, with the Info.plist reason; once asked or refused, System Settings > Microphone); or the first hotkey press | Pill "Mic blocked" (a notification once); menu line "Allow the microphone…"; "Try it" isn't shown |
+| Accessibility | Pasting (posting Cmd+V), and the hotkey (an ordinary event tap) | "Allow access" (`AXIsProcessTrustedWithOptions` with the prompt, which puts ShoutAbout in the list, and System Settings > Accessibility) | Every dictation is copied ("Copied · ⌘V to paste"); menu line "Allow pasting (Accessibility)…"; the hotkey starts by itself as soon as it's on |
+| Input Monitoring | Only if the hotkey can't be heard through Accessibility | Listed in "Allow access" only when Accessibility can't be read; menu line when neither is on | — |
 | Local Network (macOS 15+) | The iPhone finding and reaching the Mac | macOS asks itself when needed | Pair with the QR code (Settings > Phones > Add a phone > Scan a code) |
 | Firewall (if on) | Incoming phone connections | macOS asks when the server starts | The phone can't reach the Mac |
+
+**Who asks, and nothing fails silently** (`mac/access.py`). Every request is made by the hub
+(the window process forwards "Allow" over its link): it's the process that records, taps the
+keyboard and posts Cmd+V, and it's ShoutAbout.app as launchd started it. (The window
+process is the same executable forked by the hub, so macOS counts it as the app too.)
+Every Allow also opens System Settings at the pane, so there is always a switch to flip
+even when macOS shows no dialog. On a first run the setup asks; on later starts one
+notification says what's missing ("ShoutAbout needs access", "Click to allow …") and a
+click opens "Allow access" alone; a first-run setup closed with something still missing
+gets that notification once the window is gone. The hub's permission watcher wakes as soon
+as the setup sees a change and (re)starts the hotkey listener, also when Input Monitoring
+turns on after a listen-only tap was made (such a tap hears nothing until it is made
+again), so "Try it" works right after Allow, without relaunching.
 
 macOS grants these to the app's **code signature**. An ad-hoc signed app gets a new one at
 every build, so after rebuilding, remove ShoutAbout from System Settings > Privacy &

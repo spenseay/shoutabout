@@ -10,6 +10,11 @@ from shoutabout.models import PasteResult
 log = logging.getLogger(__name__)
 
 ADMIN_WINDOW_WARNING = "Couldn't paste into an admin window — text is on your clipboard."
+# v2-macos: macOS doesn't let ShoutAbout paste (Accessibility is off, maybe for good on a
+# managed Mac). The words are on the clipboard every time, the pill says so (COPIED_NOTICE)
+# and the injector notifies once, not at every dictation.
+NO_PASTE_PERMISSION_WARNING = "ShoutAbout isn't allowed to paste yet — text is on your clipboard."
+COPIED_NOTICE = "Copied · ⌘V to paste"
 
 
 @runtime_checkable

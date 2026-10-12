@@ -279,6 +279,46 @@ def test_setup_window_renders_every_screen(tmp_path, tk_root):
 
 
 @pytest.mark.windows
+def test_setup_window_allow_access_screen(tmp_path, tk_root):
+    """The macOS first screen, drawn by the same Tk view (with a fake hub to ask)."""
+    import tkinter as tk
+
+    from shoutabout import setup_flow
+    from shoutabout.setup_flow import SetupFlow
+    from shoutabout.setup_ui import SetupWindow
+    from v2_fakes import FakeAccess, inline_runner
+
+    access = FakeAccess()
+    svc = make_services(tmp_path, permissions=access)
+    flow = SetupFlow(svc, runner=inline_runner)
+    top = tk.Toplevel(tk_root)
+    top.withdraw()
+    win = SetupWindow(top, flow)
+    _pump(tk_root, 0.3)
+    texts = _texts(win.outer)
+    assert "ALLOW ACCESS" in texts and "Microphone" in texts and "Accessibility" in texts
+    assert texts.count("Allow") == 2 and "Skip" in texts
+    allow = [w for w in _widgets(win.outer) if _text(w) == "Allow"][1]
+    allow.invoke()  # Accessibility: System Settings opens
+    _pump(tk_root, 0.3)
+    assert access.asked == ["accessibility"]
+    assert setup_flow.ALLOW_HINT in _texts(win.outer)
+    access.grant("microphone")
+    _pump(tk_root, 1.3)  # the next poll sees it: one check mark, one button left
+    assert _texts(win.outer).count("Allow") == 1
+    flow.skip_allow()  # no hotkey yet: never Try it
+    _pump(tk_root, 0.3)
+    texts = _texts(win.outer)
+    assert flow.screen == "done" and setup_flow.ACCESS_LINE in texts
+    assert "Allow access" in texts  # the way back (a link; withdrawn windows take no clicks)
+    flow.back_to_allow()
+    access.grant("accessibility")
+    _pump(tk_root, 1.3)
+    assert flow.screen == "try" and "TRY IT" in _texts(win.outer)
+    win.close()
+
+
+@pytest.mark.windows
 def test_setup_window_failed_download(tmp_path, tk_root):
     import tkinter as tk
 

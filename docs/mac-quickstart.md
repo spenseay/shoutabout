@@ -30,34 +30,42 @@ Safari downloads it and unpacks it into **Downloads** as a folder called
    time), puts **ShoutAbout** in your Applications folder and opens it. You can close
    Terminal when it says `Done`.
 
-## 3. Say yes to macOS (once)
+## 3. Allow access (once)
 
-A yellow mouth appears in the menu bar (top right of the screen). macOS then asks:
+A yellow mouth appears in the menu bar (top right of the screen) and the ShoutAbout window
+opens on **"Allow access"**, with one line for each thing macOS has to allow:
+
+| Line | Click **Allow**, then |
+|---|---|
+| **Microphone** | macOS asks **"ShoutAbout" would like to access the microphone.** → **Allow** |
+| **Accessibility** | System Settings opens at Privacy & Security > Accessibility (macOS may also show **"ShoutAbout" would like to control this computer…**): turn on the switch next to **ShoutAbout** (type your Mac password if asked) |
+
+Each line gets a tick as soon as macOS allows it; when both have one, the window comes back
+by itself. Accessibility is what lets ShoutAbout notice the shortcut key and paste your words
+where you're typing; nothing needs restarting.
+
+On a work Mac that won't let you turn on Accessibility, click **Skip**: your words are then
+copied instead of pasted (the mouth says **Copied · ⌘V to paste**), and the shortcut needs
+Input Monitoring (menu bar mouth > **Allow the shortcut key (Input Monitoring)…**).
+
+macOS may also ask:
 
 | You see | Click |
 |---|---|
-| **"ShoutAbout" would like to access the microphone.** | **Allow** |
-| **"ShoutAbout" would like to control this computer using accessibility features.** | **Open System Settings**, then turn on the switch next to **ShoutAbout** (type your Mac password if asked). Then close System Settings. |
 | **Allow "ShoutAbout" to find devices on local networks?** (only on some macOS versions) | **Allow** (the iPhone needs it to find your Mac) |
 | **Do you want the application "ShoutAbout.app" to accept incoming network connections?** (only if the firewall is on) | **Allow** |
 
-Accessibility is what lets ShoutAbout paste your words where you're typing and notice the
-shortcut key. You don't need to restart anything: within a couple of seconds of turning it
-on, the shortcut works.
-
-If you missed a dialog: click the mouth in the menu bar. While something is missing, the
-menu shows a line like **Allow pasting (Accessibility)…** that opens the right page.
-
-Also normal on the first start: a notification **"ShoutAbout can't use the hotkey"** (it
-goes away once Accessibility is on), and macOS's **"Background Items Added"** notice
-(that's ShoutAbout opening at login; you can turn it off in ShoutAbout's Settings).
+Later, if something is missing, ShoutAbout says so when it starts (**"ShoutAbout needs
+access"**; click it to get the same window), and the menu bar mouth shows a line like
+**Allow pasting (Accessibility)…**. macOS's **"Background Items Added"** notice is normal
+too (that's ShoutAbout opening at login; you can turn it off in ShoutAbout's Settings).
 
 ## 4. The setup window
 
-The ShoutAbout window opens by itself:
+Then, in the same window:
 
-1. **"Getting ready"**: it downloads the speech model (about 490 MB, a minute or two) and
-   moves on by itself.
+1. **"Getting ready"** (only if it's still downloading): the speech model, about 490 MB, a
+   minute or two; it moves on by itself.
 2. **"Try it"**: press **Right ⌘ Command** once (the ⌘ key to the right of the space bar),
    say "This is my first dictation.", press **Right ⌘** again. The words appear in the box.
 3. **"You're all set"** → **Done**, or **Connect your iPhone** to pair your phone now (step 6).
@@ -88,7 +96,7 @@ Later: menu bar mouth > **Settings…** > **Phones** > **Add a phone**.
 | The build stops with `ERROR:` | Send the file `~/Downloads/shoutabout-v2/packaging/dist-mac/build.log` |
 | No mouth in the menu bar after the build | Open **Applications** and double-click **ShoutAbout**. Still nothing: send the logs (below) |
 | Right ⌘ does nothing | Menu bar mouth: is there an **Allow…** line? Click it and turn ShoutAbout on. Is the menu saying **Paused**? Click **Resume** |
-| The mouth appears but nothing is pasted | System Settings > Privacy & Security > **Accessibility**: ShoutAbout must be on. The text is on your clipboard: press ⌘V yourself |
+| The mouth says **Copied · ⌘V to paste** | Pasting isn't allowed: press ⌘V yourself, or menu bar mouth > **Allow pasting (Accessibility)…** and turn ShoutAbout on |
 | "Mic blocked" | System Settings > Privacy & Security > **Microphone**: turn on ShoutAbout |
 | You rebuilt the app and permissions stopped working | System Settings > Privacy & Security > Accessibility: select ShoutAbout, click **−**, then reopen ShoutAbout and allow again (a rebuilt app counts as a new app) |
 | The iPhone doesn't find the Mac | Same Wi-Fi? On a work network, devices may not be allowed to see each other: try your home Wi-Fi |

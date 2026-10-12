@@ -10,7 +10,8 @@ over its stdin/stdout (:mod:`shoutabout.mac.uilink`):
 * the hub sends ``open`` (setup / settings), ``pair`` and ``pair-done`` events, ``quit``;
 * the windows call the hub for what only the hub can do: approve or deny a phone
   (:class:`RemotePairing`), apply saved settings live, re-announce a new name, download
-  the speech model (so only one process ever writes it), open the Teach window.
+  the speech model (so only one process ever writes it), open the Teach window, read and
+  ask for the macOS permissions (:class:`shoutabout.mac.access.RemoteAccess`).
 
 Everything else the windows need (config.toml, devices.json, identity.json, the LaunchAgent)
 is files they read and write directly, as on Windows; the hub sees changes by mtime.
@@ -266,6 +267,7 @@ def mac_services(paths: Paths, link: Any, pairing: RemotePairing) -> Any:
     from shoutabout.devices import DeviceStore
     from shoutabout.identity import IdentityStore
     from shoutabout.mac import keys
+    from shoutabout.mac.access import RemoteAccess
     from shoutabout.mac.startup_mac import MacStartupManager
 
     def settings_saved(changed: set[str]) -> set[str]:
@@ -304,6 +306,7 @@ def mac_services(paths: Paths, link: Any, pairing: RemotePairing) -> Any:
         open_logs=open_logs,
         copy_hub_token=copy_hub_token,
         startup=MacStartupManager(),
+        permissions=RemoteAccess(link),  # the hub reads and asks for them
         version=__version__,
     )
 

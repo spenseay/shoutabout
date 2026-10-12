@@ -38,7 +38,7 @@ import numpy as np
 from shoutabout.config import Config
 from shoutabout.engine.base import SAMPLE_RATE, EngineError
 from shoutabout.hotkey import Action, HotkeyEvent, HotkeyListener, hotkey_label
-from shoutabout.inject.base import ADMIN_WINDOW_WARNING
+from shoutabout.inject.base import ADMIN_WINDOW_WARNING, COPIED_NOTICE, NO_PASTE_PERMISSION_WARNING
 from shoutabout.mic import MicError, MicRecorder, has_input_device, no_mic_error, warm_up
 from shoutabout.models import HubStatus
 from shoutabout.overlay import OverlayLike, create_overlay
@@ -168,10 +168,13 @@ class LocalDictation:
             except Exception as exc:
                 log.error("couldn't listen for the dictation hotkey: %s", exc)
                 self._safe(overlay.stop)
-                self._notify(
-                    "ShoutAbout can't use the hotkey",
-                    f"Talk to this PC is off: {exc}",
-                )
+                # v2-macos: a missing permission is told by the app itself, once (the
+                # setup's "Allow access", the notice at start), not at every retry.
+                if not getattr(exc, "told_elsewhere", False):
+                    self._notify(
+                        "ShoutAbout can't use the hotkey",
+                        f"Talk to this PC is off: {exc}",
+                    )
                 return False
             self._overlay, self._listener = overlay, listener
             self._set_state(DictationState.READY)
@@ -393,6 +396,8 @@ class LocalDictation:
                 outcome = lambda o: o.done()  # noqa: E731
             elif result.warning == NO_SPEECH_WARNING:
                 outcome = lambda o: o.notice("Didn't catch that")  # noqa: E731
+            elif result.warning == NO_PASTE_PERMISSION_WARNING:  # v2-macos: ⌘V pastes it
+                outcome = lambda o: o.notice(COPIED_NOTICE)  # noqa: E731
             else:
                 warning = result.warning or "Not pasted"
                 if warning != ADMIN_WINDOW_WARNING:  # the injector already said so

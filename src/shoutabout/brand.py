@@ -137,6 +137,9 @@ TRAY_LOOKS: dict[str, tuple[RGB, str]] = {
     "paused": (YELLOW, "shut"),
     "error": (RED, "ajar"),
 }
+# The macOS menu bar rests on the mark itself (the app icon's mouth: wide open, tongue out);
+# a teeth-only mouth reads oddly up there. Every other state is the tray's.
+MENUBAR_LOOKS: dict[str, tuple[RGB, str]] = {**TRAY_LOOKS, "idle": (YELLOW, "open")}
 
 
 # ---------------------------------------------------------------------------- easing
@@ -598,14 +601,16 @@ def tray_icon(
     scale: float = 1.0,
     squash: float = 1.0,
     samples: int = 8,
+    looks: dict[str, tuple[RGB, str]] = TRAY_LOOKS,
 ) -> Image:
     """One tray tile (rounded square, radius 23 %) for a hub state.
 
     ``opening`` overrides the mouth height (px of 130) and ``scale`` its width (talk
-    frames); ``squash`` narrows-and-thickens the shut pill (hum frames)."""
-    if state not in TRAY_LOOKS:
+    frames); ``squash`` narrows-and-thickens the shut pill (hum frames); ``looks`` maps
+    states to tiles and mouths (:data:`MENUBAR_LOOKS` on a Mac)."""
+    if state not in looks:
         raise ValueError(f"unknown tray state {state!r}")
-    tile_color, mouth = TRAY_LOOKS[state]
+    tile_color, mouth = looks[state]
     tile = RoundRect(0, 0, size, size, TRAY_RADIUS * size)
     layers = [Layer(tile, tile_color)]
     c = size / 2
@@ -660,6 +665,15 @@ def tray_frames(state: str, size: int) -> tuple[Image, ...]:
     if state == "starting":
         return tuple(tray_icon(state, size, squash=q) for q in hum_frames(HUM_FRAMES))
     return (tray_icon(state, size),)
+
+
+@lru_cache(maxsize=64)
+def menubar_frames(state: str, size: int) -> tuple[Image, ...]:
+    """:func:`tray_frames` for the macOS menu bar (:data:`MENUBAR_LOOKS`: at rest the mouth
+    is open with its red tongue, like the app icon)."""
+    if MENUBAR_LOOKS.get(state) == TRAY_LOOKS.get(state):
+        return tray_frames(state, size)
+    return (tray_icon(state, size, looks=MENUBAR_LOOKS),)
 
 
 def frame_interval_ms(state: str) -> int:

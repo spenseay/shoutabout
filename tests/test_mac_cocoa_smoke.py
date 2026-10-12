@@ -73,9 +73,10 @@ def cocoa(monkeypatch):
     }
     for name, mod in modules.items():
         monkeypatch.setitem(sys.modules, name, mod)
-    from shoutabout.mac import menubar
+    from shoutabout.mac import menubar, platform
 
     monkeypatch.setattr(menubar, "_CONTROLLER", None)
+    monkeypatch.setattr(platform, "_NOTICE_DELEGATE", None)
     return modules, calls
 
 
@@ -177,13 +178,58 @@ def test_native_prompt_and_permission_menu(cocoa, monkeypatch, tmp_path):
     hub.native_prompt(prompt, pairing)
     pairing.deny.assert_called_once_with("r")
     monkeypatch.setattr(permissions.sys, "platform", "darwin")
-    opened = []
+    opened, prompted = [], []
     monkeypatch.setattr(permissions, "open_settings", lambda key, **kw: opened.append(key))
     monkeypatch.setattr(permissions, "microphone_status", lambda: "denied")
+    monkeypatch.setattr(
+        permissions, "accessibility_trusted", lambda prompt=False: prompted.append(prompt) or False
+    )
+    monkeypatch.setattr(permissions, "input_monitoring_granted", lambda: False)
     for i in range(3):
         hub.open_permission(i)
     assert opened == ["accessibility", "microphone", "input_monitoring"]
-    hub.request_permissions()
+    assert True in prompted  # Accessibility: macOS's prompt too (it adds ShoutAbout to the list)
+
+
+def test_mac_hub_start_notices_and_clicks(cocoa, monkeypatch, tmp_path):
+    from shoutabout.config import Paths
+    from shoutabout.mac import permissions, platform
+
+    modules, _calls = cocoa
+    told: list[tuple[str, str]] = []
+    hub = platform.MacHub(Paths(tmp_path), HubState(), lambda t, m: told.append((t, m)))
+    report = permissions.PermissionReport("granted", False, False)
+    monkeypatch.setattr(permissions, "report", lambda: report)
+    monkeypatch.setattr(hub, "watch_permissions", lambda voice: None)
+    opened: list[str] = []
+    ui = types.SimpleNamespace(open_setup=opened.append, running=False)
+    v2 = types.SimpleNamespace(ui=ui, services=types.SimpleNamespace(permissions=None))
+    hub.start_permissions(None, v2, first_run=False)
+    assert v2.services.permissions is hub.access
+    assert told == [("ShoutAbout needs access", "Click to allow Accessibility.")]
+    center = modules["Foundation"].NSUserNotificationCenter.defaultUserNotificationCenter()
+    delegate = center.setDelegate_.call_args.args[0]
+    assert delegate.userNotificationCenter_shouldPresentNotification_(center, None) is True
+    delegate.userNotificationCenter_didActivateNotification_(center, None)
+    import time
+
+    for _ in range(50):
+        if opened:
+            break
+        time.sleep(0.01)
+    assert opened == ["allow"]  # the click opens "Allow access"
+    # A first run says nothing at start (the setup opens on "Allow access")...
+    told.clear()
+    first = platform.MacHub(Paths(tmp_path), HubState(), lambda t, m: told.append((t, m)))
+    monkeypatch.setattr(first, "watch_permissions", lambda voice: None)
+    first.start_permissions(None, v2, first_run=True)
+    assert told == [] and not first.tell_after_setup()
+    # ...but once the setup window has come and gone with something still missing, it does.
+    ui.running = True
+    assert not first.tell_after_setup()
+    ui.running = False
+    assert first.tell_after_setup() and len(told) == 1
+    assert not first.tell_after_setup()  # once
 
 
 def test_hub_v2_wires_the_mac_parts(monkeypatch, tmp_path):

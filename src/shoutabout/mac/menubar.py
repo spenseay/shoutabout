@@ -11,8 +11,11 @@ Quit), plus, while a permission is missing, one line that opens the right System
 pane. It is rebuilt each time it opens. Menu commands other than Quit run on a short-lived
 thread, so a slow action never freezes the menu bar.
 
-The icon is the tray tile of :mod:`shoutabout.brand` at 36 px shown at 18 points (sharp on
-Retina), with the same states and animations as the Windows tray.
+The icon is the brand tile of :func:`shoutabout.brand.menubar_frames`: at rest the mouth is
+open with its red tongue (the app icon's mouth, not the Windows tray's teeth-only one),
+with the tray's other states and animations. It is a full-colour image (a template image
+would lose the tongue), yellow, so it reads on light and dark menu bars, 18 points with
+a bitmap for each screen scale (18, 36 and 54 px), so it is sharp everywhere.
 """
 
 from __future__ import annotations
@@ -39,8 +42,8 @@ from shoutabout.tray import (
 
 log = logging.getLogger(__name__)
 
-ICON_PX = 36
 ICON_PT = 18.0
+ICON_SCALES = (1, 2, 3)  # one bitmap per screen scale: 18, 36 and 54 px
 ACCESSORY_POLICY = 1  # NSApplicationActivationPolicyAccessory
 VARIABLE_LENGTH = -1.0  # NSVariableStatusItemLength
 SIGNAL_POLL_S = 0.5
@@ -76,6 +79,15 @@ def _controller_class() -> Any:
 
         _CONTROLLER = ShoutAboutMenuController
     return _CONTROLLER
+
+
+def icon_pngs(key: str) -> list[list[bytes]]:
+    """For each frame of a state, its PNGs at every scale (1x first). Pure, for tests."""
+    per_scale = [brand.menubar_frames(key, round(ICON_PT * s)) for s in ICON_SCALES]
+    return [
+        [brand.png_bytes(img.width, img.height, img.rgba, alpha=True) for img in frame]
+        for frame in zip(*per_scale, strict=True)
+    ]
 
 
 def menu_entries(
@@ -224,12 +236,9 @@ class MacMenuBar:
     def _frames(self, key: str) -> list[Any]:
         frames = self._images.get(key)
         if frames is None:
-            from shoutabout.mac.cocoa import nsimage_from_png
+            from shoutabout.mac.cocoa import nsimage_from_pngs
 
-            frames = []
-            for img in brand.tray_frames(key, ICON_PX):
-                png = brand.png_bytes(img.width, img.height, img.rgba, alpha=True)
-                frames.append(nsimage_from_png(png, (ICON_PT, ICON_PT)))
+            frames = [nsimage_from_pngs(pngs, (ICON_PT, ICON_PT)) for pngs in icon_pngs(key)]
             self._images[key] = frames
         return frames
 

@@ -8,9 +8,12 @@ voice_runtime.py and inject/__init__.py is marked ``# v2-macos``).
   LaunchAgent, Finder, the pasteboard);
 * :func:`dictation_factories`: the event tap, the Mac microphone and the Mac overlay for
   :class:`shoutabout.local_dictation.LocalDictation`;
-* :class:`MacHub`: the menu bar, the permission lines in it, the startup permission
-  requests, the native fallback pairing prompt, and a watcher that turns the hotkey on as
-  soon as Accessibility is allowed (no restart needed).
+* :class:`MacHub`: the menu bar, the permission lines in it, the one place that asks macOS
+  for permissions (:class:`shoutabout.mac.access.HubAccess`, also behind the setup's
+  "Allow access" screen), a notice at start when something is missing (clicking a
+  ShoutAbout notification then opens that screen), the native fallback pairing prompt, and
+  a watcher that (re)starts the hotkey listener as soon as a permission for it is allowed
+  (no restart needed).
 """
 
 from __future__ import annotations
@@ -228,8 +231,11 @@ def logged_pipeline(get: Callable[[], Any]) -> Callable[[], Any]:
 
 
 def permission_items(report: Any) -> list[tuple[int, str]]:
-    """Menu lines for missing permissions: (index into PERMISSION_KEYS, label)."""
+    """Menu lines for missing permissions: (index into PERMISSION_KEYS, label). The
+    microphone is listed before macOS has asked too (the line asks)."""
     missing = report.missing()
+    if report.microphone == "undetermined" and "microphone" not in missing:
+        missing = ["microphone", *missing]
     return [
         (PERMISSION_KEYS.index(m), PERMISSION_LABELS[m]) for m in missing if m in PERMISSION_LABELS
     ]
@@ -238,16 +244,67 @@ def permission_items(report: Any) -> list[tuple[int, str]]:
 PERMISSION_KEYS = ("accessibility", "microphone", "input_monitoring")
 
 
+def _hotkey_grants(report: Any) -> tuple[bool, bool]:
+    """The permissions that let the event tap hear the hotkey: (Accessibility, Input
+    Monitoring)."""
+    return report.accessibility is True, report.input_monitoring is True
+
+
+_NOTICE_DELEGATE: Any = None
+
+
+def _notice_delegate_class() -> Any:
+    """The NSUserNotificationCenter delegate (defined once per process): banners show even
+    while ShoutAbout is in front, and a click on one goes to :meth:`MacHub.notice_clicked`."""
+    global _NOTICE_DELEGATE
+    if _NOTICE_DELEGATE is None:
+        import objc
+        from Foundation import NSObject
+
+        try:
+            protocols = [objc.protocolNamed("NSUserNotificationCenterDelegate")]
+        except Exception:
+            protocols = []
+
+        class ShoutAboutNoticeDelegate(NSObject, protocols=protocols):  # type: ignore[call-arg]
+            def userNotificationCenter_shouldPresentNotification_(
+                self, _center: Any, _note: Any
+            ) -> bool:
+                return True
+
+            def userNotificationCenter_didActivateNotification_(
+                self, _center: Any, _note: Any
+            ) -> None:
+                owner = getattr(self, "owner", None)
+                if owner is not None:
+                    owner.notice_clicked()
+
+        _NOTICE_DELEGATE = ShoutAboutNoticeDelegate
+    return _NOTICE_DELEGATE
+
+
 class MacHub:
     """The Mac-only parts of a running hub (main thread for the Cocoa ones)."""
 
     def __init__(self, paths: Paths, state: Any, notify: Callable[[str, str], None]) -> None:
+        from shoutabout.mac.access import HubAccess
+
         self.paths = paths
         self.state = state
         self.notify = notify
         self.menubar: Any = None
         self._stopping = threading.Event()
+        self._wake = threading.Event()
         self._voice: Any = None
+        self._ui: Any = None
+        self._delegate: Any = None
+        # The watcher's memory (its thread only): the hotkey permissions last seen, and
+        # whether it already retried a listener that is off although allowed.
+        self._grants = (False, False)
+        self._retried_off = False
+        self._told = True  # the notice about missing permissions was posted (or not needed)
+        self._setup_seen = False
+        self.access = HubAccess(hotkey=self._hotkey_on, on_change=self._wake.set)
 
     def build_menubar(self, actions: Any) -> Any:
         from shoutabout.mac.menubar import MacMenuBar
@@ -262,69 +319,160 @@ class MacHub:
         return self.menubar
 
     def open_permission(self, index: int) -> None:
-        from shoutabout.mac import permissions
+        """A menu line "Allow …": macOS's dialog, or System Settings at the pane."""
+        self.access.ask(PERMISSION_KEYS[index])
+        self._wake.set()
 
-        key = PERMISSION_KEYS[index]
-        if key == "microphone" and permissions.microphone_status() == "undetermined":
-            permissions.request_microphone()
-            return
-        if key == "input_monitoring":
-            permissions.request_input_monitoring()
-        permissions.open_settings(key)
+    # -- start-up
 
-    def request_permissions(self) -> None:
-        """At start: let macOS ask for what's missing (each dialog appears once)."""
-        from shoutabout.mac import permissions
-
-        now = permissions.report()
+    def start_permissions(self, voice: Any, v2: Any, *, first_run: bool) -> None:
+        """Hand the setup window its "Allow access" screen, say what's missing (on a first
+        run only once the setup window is gone: it opens on that screen), and start the
+        watcher."""
+        self._voice = voice
+        self._ui = getattr(v2, "ui", None)
+        services = getattr(v2, "services", None)
+        if services is not None:
+            services.permissions = self.access
+        self.listen_for_clicks()
+        now = self.access.status()
         log.info(
             "permissions: microphone=%s, accessibility=%s, input monitoring=%s",
-            now.microphone,
-            now.accessibility,
-            now.input_monitoring,
+            now["microphone"],
+            now["accessibility"],
+            now["input_monitoring"],
         )
-        if now.microphone == "undetermined":
-            permissions.request_microphone()
-        if now.accessibility is False:
-            permissions.accessibility_trusted(prompt=True)
+        if first_run and self._ui is not None:
+            self._told = False  # said once the setup window is gone (tell_after_setup)
+        else:
+            self.tell_missing(now)
+        self.watch_permissions(voice)
+
+    def tell_missing(self, status: Any = None) -> bool:
+        """One notification when a permission is missing ("Click to allow …"; the click
+        opens "Allow access"). True if it posted one."""
+        from shoutabout.mac import access
+
+        self._told = True
+        words = access.notice(status if status is not None else self.access.status())
+        if words is None:
+            return False
+        self.notify(*words)
+        return True
+
+    def tell_after_setup(self) -> bool:
+        """A first run: once the setup window has come and gone, say (once) what is still
+        missing, so a closed setup never leaves the hotkey silently deaf."""
+        ui = self._ui
+        if self._told or ui is None:
+            return False
+        if getattr(ui, "running", False):
+            self._setup_seen = True
+            return False
+        if not self._setup_seen:
+            return False
+        return self.tell_missing()
+
+    def listen_for_clicks(self) -> None:
+        """Clicking a ShoutAbout notification while a permission is missing opens the
+        setup's "Allow access" screen (every such notification is about one)."""
+        from shoutabout.mac.cocoa import call_on_main
+
+        def install() -> None:
+            from Foundation import NSUserNotificationCenter
+
+            center = NSUserNotificationCenter.defaultUserNotificationCenter()
+            if center is None:  # no bundle (run from source): osascript notifications
+                return
+            delegate = _notice_delegate_class().alloc().init()
+            delegate.owner = self
+            self._delegate = delegate  # the center doesn't keep its delegate alive
+            center.setDelegate_(delegate)
+
+        call_on_main(install)
+
+    def notice_clicked(self) -> None:
+        from shoutabout.mac import access
+
+        ui = self._ui
+        if ui is None:
+            return
+        try:
+            if not access.missing(self.access.status()):
+                return
+        except Exception:
+            log.exception("couldn't read the permissions")
+            return
+        # Off the main thread: opening the window may start the window process.
+        threading.Thread(
+            target=lambda: ui.open_setup("allow"), name="open-allow", daemon=True
+        ).start()
+
+    # -- the hotkey watcher
+
+    def _hotkey_on(self) -> bool | None:
+        from shoutabout.local_dictation import DictationState
+
+        dictation = getattr(self._voice, "dictation", None)
+        if dictation is None:
+            return None
+        return dictation.state != DictationState.OFF
 
     def watch_permissions(self, voice: Any) -> None:
-        """Turn "Talk to this Mac" on as soon as macOS allows the hotkey listener."""
+        """(Re)start "Talk to this Mac" as soon as macOS allows the hotkey listener."""
+        from shoutabout.mac.permissions import report
+
         self._voice = voice
+        self._grants = _hotkey_grants(report())
         threading.Thread(target=self._watch, name="permissions", daemon=True).start()
 
     def _watch(self) -> None:
-        from shoutabout.local_dictation import DictationState
         from shoutabout.mac.permissions import report
 
-        allowed_before = report().can_hear_hotkey
-        retried_off = False  # one retry per "allowed" spell when the listener is off
-        while not self._stopping.wait(PERMISSION_POLL_S):
-            allowed = report().can_hear_hotkey
-            newly = allowed and not allowed_before
-            allowed_before = allowed
-            if not allowed:
-                retried_off = False
-                continue
-            voice = self._voice
-            if voice is None or not voice.cfg.dictation.enabled or self.state.paused:
-                continue
-            dictation = getattr(voice, "dictation", None)
-            current = dictation.state if dictation is not None else DictationState.OFF
-            if current in (DictationState.LISTENING, DictationState.THINKING):
-                if newly:
-                    allowed_before = False  # try again on the next round
-                continue
-            off = current == DictationState.OFF
-            if not newly and not (off and not retried_off):
-                continue
-            retried_off = retried_off or off
-            # (Re)start the listener: a tap made before the permission may hear nothing.
-            log.info("the hotkey permission is on now; starting talk to this Mac")
+        while not self._stopping.is_set():
+            # Every few seconds, or at once when the setup window saw a change.
+            self._wake.wait(PERMISSION_POLL_S)
+            self._wake.clear()
+            if self._stopping.is_set():
+                return
             try:
-                voice.reload_dictation(voice.cfg)
+                self.check_hotkey(report())
+                self.tell_after_setup()
             except Exception:
-                log.exception("couldn't start talk to this Mac")
+                log.exception("the permission watcher failed")
+
+    def check_hotkey(self, now: Any) -> bool:
+        """One look at the permissions. Restart the hotkey listener when a permission that
+        lets it hear the key was just turned on (a tap made before that may hear nothing,
+        e.g. a listen-only tap made before Input Monitoring), or once when it is off although
+        allowed. True if it restarted it."""
+        from shoutabout.local_dictation import DictationState
+
+        before, grants = self._grants, _hotkey_grants(now)
+        newly = any(g and not b for g, b in zip(grants, before, strict=True))
+        self._grants = grants
+        if not now.can_hear_hotkey:
+            self._retried_off = False
+            return False
+        voice = self._voice
+        if voice is None or not voice.cfg.dictation.enabled or self.state.paused:
+            return False
+        dictation = getattr(voice, "dictation", None)
+        current = dictation.state if dictation is not None else DictationState.OFF
+        if current in (DictationState.LISTENING, DictationState.THINKING):
+            if newly:
+                self._grants = before  # not mid-dictation: try again on the next round
+            return False
+        off = current == DictationState.OFF
+        if not newly and not (off and not self._retried_off):
+            return False
+        self._retried_off = self._retried_off or off
+        log.info("the hotkey permission is on now; starting talk to this Mac")
+        try:
+            voice.reload_dictation(voice.cfg)
+        except Exception:
+            log.exception("couldn't start talk to this Mac")
+        return True
 
     def native_prompt(self, prompt: Any, pairing: Any) -> None:
         """The fallback pairing prompt: a plain macOS alert (main thread)."""
@@ -355,3 +503,4 @@ class MacHub:
 
     def stop(self) -> None:
         self._stopping.set()
+        self._wake.set()
