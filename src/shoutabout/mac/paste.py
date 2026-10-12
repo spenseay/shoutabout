@@ -14,7 +14,10 @@ Like the Windows injector:
 
 When the text can't be pasted it stays on the pasteboard (never restored) and the result
 says why: Accessibility isn't allowed (macOS then silently drops posted keys, so we check
-first), or a password field has Secure Keyboard Entry on.
+first). Secure Event Input doesn't stop it: that flag (``IsSecureEventInputEnabled``) is
+system-wide, often held for hours by a password manager, a VPN or a company security tool
+in the background, and it only stops other apps from *reading* keystrokes; a posted Cmd+V
+still reaches the app in front. It's logged once (with the app holding it), not obeyed.
 
 The "V" key is looked up in the current keyboard layout (``UCKeyTranslate`` with the
 Command modifier, on the main thread, as macOS requires for the Text Input Sources API), so
@@ -47,7 +50,6 @@ STRING_TYPE = "public.utf8-plain-text"  # NSPasteboardTypeString
 ACCESSIBILITY_WARNING = NO_PASTE_PERMISSION_WARNING
 NO_PASTE_TITLE = "ShoutAbout can't paste yet"
 NO_PASTE_MESSAGE = "Your words are copied: press ⌘V. Click to allow pasting."
-SECURE_INPUT_WARNING = "A password field has the focus — text is on your clipboard."
 CLIPBOARD_WARNING = "Couldn't use the clipboard on the Mac — not pasted."
 SEND_FAILED_WARNING = "Couldn't send the paste keystroke — text is on your clipboard."
 
@@ -246,6 +248,35 @@ def secure_input_enabled() -> bool:
         return False
 
 
+def secure_input_holder() -> str:
+    """The app holding Secure Event Input (from ioreg's kCGSSessionSecureInputPID), for the
+    log only; "unknown" if it can't be told."""
+    if sys.platform != "darwin":
+        return "unknown"
+    try:
+        import re
+        import subprocess
+
+        out = subprocess.run(
+            ["/usr/sbin/ioreg", "-l", "-w", "0", "-d", "1"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        ).stdout
+        match = re.search(r'"kCGSSessionSecureInputPID"\s*=\s*(\d+)', out)
+        if match is None:
+            return "unknown"
+        pid = int(match.group(1))
+        from AppKit import NSRunningApplication
+
+        app = NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
+        name = app.localizedName() if app is not None else None
+        return f"{name} (pid {pid})" if name else f"pid {pid}"
+    except Exception:
+        log.debug("couldn't find who holds secure input", exc_info=True)
+        return "unknown"
+
+
 class VKey:
     """The cached key code for V, refreshed on the main thread before each paste."""
 
@@ -302,6 +333,7 @@ class MacPasteInjector:
         self._lock = threading.Lock()
         self._pending: list[Any] = []
         self._told_permission = False
+        self._told_secure = False  # Secure Event Input logged once per session
 
     def _board(self) -> Pasteboard:
         if self._pb is None:
@@ -327,13 +359,11 @@ class MacPasteInjector:
         if not text:
             return PasteResult(pasted=False, warning=None)
         board = self._board()
-        blocked = None
         if self._trusted() is False:
-            blocked = ACCESSIBILITY_WARNING
-        elif self._secure():
-            blocked = SECURE_INPUT_WARNING
-        if blocked is not None:
-            return self._leave_on_clipboard(board, text, blocked)
+            return self._leave_on_clipboard(board, text, ACCESSIBILITY_WARNING)
+        if not self._told_secure and self._secure():
+            self._told_secure = True
+            log.info("secure input is on (held by %s); pasting anyway", secure_input_holder())
         restore = self.cfg.restore_clipboard
         with self._lock:
             saved = None

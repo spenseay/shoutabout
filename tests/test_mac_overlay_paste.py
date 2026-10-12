@@ -14,7 +14,6 @@ from shoutabout.mac.paste import (
     ACCESSIBILITY_WARNING,
     AUTO_GENERATED,
     CONCEALED,
-    SECURE_INPUT_WARNING,
     TRANSIENT,
     MacPasteInjector,
     VKey,
@@ -295,11 +294,14 @@ def test_paste_without_accessibility_leaves_the_text_and_says_why_once():
     assert "⌘V" in paste.NO_PASTE_MESSAGE and len(paste.NO_PASTE_MESSAGE) <= 60
 
 
-def test_paste_into_a_password_field_is_refused():
-    inj, _board, poster, _timers, _ = make_injector(secure=True)
-    result = inj.paste("secret?")
-    assert not result.pasted and result.warning == SECURE_INPUT_WARNING
-    assert poster.posted == []
+def test_secure_input_held_elsewhere_doesnt_stop_the_paste(monkeypatch):
+    # IsSecureEventInputEnabled is system-wide (a password manager or a company security
+    # tool can hold it for hours) and only blocks reading keys: paste anyway, log it once.
+    monkeypatch.setattr(paste, "secure_input_holder", lambda: "Some App (pid 42)")
+    inj, board, poster, _timers, _ = make_injector(secure=True)
+    assert inj.paste("hello").pasted
+    assert inj.paste("again").pasted
+    assert len(poster.posted) == 2 and board.writes[0][0] == "hello"
 
 
 def test_paste_without_restore_and_without_concealing():
