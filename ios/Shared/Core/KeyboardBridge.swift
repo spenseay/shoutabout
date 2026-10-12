@@ -135,7 +135,7 @@ enum KeyboardStartWait {
 }
 
 /// A finished phone dictation waiting for the keyboard. Only the latest one is ever kept, and
-/// only until it's typed or `maxAge` passed, whatever Keep history says.
+/// only until it's typed or `maxAge` passed.
 struct KeyboardHandoff: Codable, Equatable, Sendable {
     var id: String
     var text: String
