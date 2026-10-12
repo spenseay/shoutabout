@@ -1,25 +1,16 @@
-"""Vocab suggestions: words the owner says often, mined locally from their dictation history
-and their project folders.
+"""Vocab suggestions: names from the owner's project folders, found locally when they ask.
 
 Nothing here changes vocab.txt on its own. Candidates wait in ``<home>/vocab-suggestions.json``
 with ``status`` ``pending`` | ``accepted`` | ``dismissed`` until the owner accepts them
 (:func:`accept` -> :func:`shoutabout.vocab.add_terms`, so they go to the top of vocab.txt) or
 dismisses them; accepted and dismissed words are never suggested again. Everything stays on
-this PC, and logs carry counts only (suggestions come from transcripts).
+this computer, and logs carry counts only.
 
-History candidates (:func:`mine_history`):
-
-a. words the LLM cleanup re-cased or corrected (raw vs cleaned text), e.g. "github" -> "GitHub";
-b. Capitalised words / 2-3 word Capitalised Phrases seen mid-sentence at least twice;
-c. CamelCase / mixed-case / letters+digits tokens (GitHub, iOS, GPT5) seen at least twice;
-
-minus existing vocab, words only ever capitalised at the start of a sentence, a built-in
-stoplist of everyday capitalised words (days, months, I, I'm, OK, ...) and anything accepted
-or dismissed before.
-
-Project candidates (:func:`seed_from_projects`): folder names, git remote repo names, package
+Candidates (:func:`seed_from_projects`): folder names, git remote repo names, package
 names (package.json, pyproject.toml, Cargo.toml, go.mod) and README ``# Titles`` of project
 folders up to two levels below the roots, as spoken forms ("chameleon-cv" -> "Chameleon CV").
+Project folders are only looked at when the owner asks ("Suggest from my project folders" in
+Teach words, ``vocab seed``), unless ``[learn] seed_projects`` is turned on.
 """
 
 from __future__ import annotations
@@ -29,12 +20,12 @@ import json
 import logging
 import os
 import re
+import sys
 import tomllib
-from collections import Counter, deque
+from collections import deque
 from collections.abc import Collection, Iterable, Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import datetime
-from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
@@ -52,13 +43,10 @@ from shoutabout.vocab import (
 log = logging.getLogger(__name__)
 
 STORE_VERSION = 1
-SOURCES = ("history", "projects")
+SOURCES = ("projects",)
 STATUSES = ("pending", "accepted", "dismissed")
 
-MIN_MENTIONS = 2  # (b) and (c) need at least this many occurrences
 MAX_PHRASE_WORDS = 3
-MAX_HISTORY_RECORDS = 20_000  # most recent records mined
-MAX_HISTORY_SUGGESTIONS = 40
 MAX_PROJECT_SUGGESTIONS = 60
 MAX_SCAN_DIRS = 4000  # directories listed per seed_from_projects() call
 MAX_DIR_ENTRIES = 3000  # entries looked at per directory
@@ -107,9 +95,9 @@ _SPECIAL_CASE = {"ios": "iOS", "macos": "macOS", "ipados": "iPadOS", "github": "
 @dataclass
 class Suggestion:
     term: str
-    source: str  # "history" | "projects"
+    source: str  # "projects" ("history": mined from dictations by earlier versions)
     count: int
-    detail: str  # e.g. "seen 3× in your dictations", "project folder Documents\\chameleon-cv"
+    detail: str  # e.g. "project folder Documents\\chameleon-cv"
     first_seen: str  # ISO 8601 local time
     status: str = "pending"  # "pending" | "accepted" | "dismissed"
     updated: str = ""
@@ -163,36 +151,7 @@ def _valid(term: str) -> str | None:
         return None
 
 
-# ------------------------------------------------------------------ history mining
-
-_OPENERS = "\"'`“‘([{«<"
-_CLOSERS = "\"'`”’)]}»>"
-_SENTENCE_END = ".!?…"
-_TRAILING = ",;:" + _SENTENCE_END + _CLOSERS
-_POSSESSIVE = re.compile(r"['’][sS]$")
-
-
-@dataclass(frozen=True)
-class _Tok:
-    text: str  # without surrounding punctuation / possessive 's
-    start: bool  # first word of a sentence (or of a quote)
-    brk: bool  # punctuation right after it: a phrase can't continue past it
-
-
-def _tokens(text: str) -> list[_Tok]:
-    out: list[_Tok] = []
-    start = True
-    for raw in text.split():
-        core = raw.strip(_OPENERS + _CLOSERS + ",;:" + _SENTENCE_END)
-        core = _POSSESSIVE.sub("", core)
-        tail = raw.rstrip(_CLOSERS)
-        ends_sentence = bool(tail) and tail[-1] in _SENTENCE_END
-        if core and any(ch.isalnum() for ch in core):
-            out.append(_Tok(core, start or raw[0] in _OPENERS, raw[-1] in _TRAILING))
-            start = ends_sentence
-        elif ends_sentence:
-            start = True
-    return out
+# ----------------------------------------------------------------- word shapes
 
 
 def _stop_key(word: str) -> str:
@@ -201,10 +160,6 @@ def _stop_key(word: str) -> str:
 
 def _is_stop(word: str) -> bool:
     return _stop_key(word) in STOPLIST
-
-
-def _is_capitalised(word: str) -> bool:
-    return len(word) >= 2 and word[0].isupper() and any(ch.isalpha() for ch in word)
 
 
 def _is_mixed_case(word: str) -> bool:
@@ -224,221 +179,6 @@ def _is_code_word(word: str) -> bool:
 
 def _distinctive(word: str) -> bool:
     return _is_mixed_case(word) or _is_code_word(word)
-
-
-@dataclass
-class _Candidate:
-    forms: Counter = field(default_factory=Counter)
-    occurrences: set = field(default_factory=set)
-    mid: int = 0  # (b) mid-sentence capitalised occurrences
-    code: int = 0  # (c) distinctive-token occurrences
-    fixes: int = 0  # (a) cleanup re-cased / corrected it
-    heard: str | None = None  # what Whisper wrote before cleanup fixed it
-    first_seen: str = ""
-    words: int = 1
-
-    def see(self, form: str, occurrence: tuple, ts: str) -> None:
-        self.forms[form] += 1
-        self.occurrences.add(occurrence)
-        if ts and (not self.first_seen or ts < self.first_seen):
-            self.first_seen = ts
-
-
-def _proper_runs(tokens: Sequence[_Tok]) -> tuple[list[list[int]], list[list[int]]]:
-    """Maximal runs (<= 3 words) of capitalised, non-stoplist words: ``(runs, tails)``.
-
-    ``runs`` start mid-sentence. A run that begins with a capitalised sentence-initial word
-    is ambiguous: "Tell Priya Raghunathan" should give "Priya Raghunathan", but "Claude Code
-    is ready" must not give "Code". Its tail (the run minus that first word) is returned in
-    ``tails``; the caller counts a tail only if it was also seen as a run of its own.
-    """
-    runs: list[list[int]] = []
-    tails: list[list[int]] = []
-    current: list[int] = []
-    tainted = False
-
-    def flush() -> None:
-        nonlocal current, tainted
-        if current and not tainted and len(current) <= MAX_PHRASE_WORDS:
-            runs.append(current)
-        elif tainted and 2 <= len(current) <= MAX_PHRASE_WORDS + 1:
-            tails.append(current[1:])
-        current, tainted = [], False
-
-    for i, tok in enumerate(tokens):
-        proper = _is_capitalised(tok.text) and not _is_stop(tok.text)
-        if tok.start:
-            flush()
-            if proper:
-                current, tainted = [i], True
-        elif proper:
-            current.append(i)
-        else:
-            flush()
-        if tok.brk:
-            flush()
-    flush()
-    return runs, tails
-
-
-def _cleanup_fixes(raw: str, text: str) -> list[tuple[list[int], str]]:
-    """Spans of cleaned-text tokens the LLM re-cased or replaced into a proper-looking word.
-
-    Returns ``[(token indices in tokens(text), heard raw words)]``.
-    """
-    raw_toks, clean_toks = _tokens(raw), _tokens(text)
-    a = [t.text.casefold() for t in raw_toks]
-    b = [t.text.casefold() for t in clean_toks]
-    heard: dict[int, str] = {}
-    for op, i1, i2, j1, j2 in SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
-        if op == "equal":
-            for k in range(i2 - i1):
-                if raw_toks[i1 + k].text != clean_toks[j1 + k].text:
-                    heard[j1 + k] = raw_toks[i1 + k].text
-        elif op == "replace":
-            said = " ".join(t.text for t in raw_toks[i1:i2])
-            for j in range(j1, j2):
-                heard[j] = said
-
-    def proper(j: int) -> bool:
-        tok = clean_toks[j]
-        word = tok.text
-        if _is_stop(word) or not (_is_capitalised(word) or _distinctive(word)):
-            return False
-        return not tok.start or _distinctive(word)
-
-    spans: list[tuple[list[int], str]] = []
-    current: list[int] = []
-
-    def flush() -> None:
-        nonlocal current
-        if current and len(current) <= MAX_PHRASE_WORDS:
-            said = " ".join(dict.fromkeys(heard[j] for j in current))
-            spans.append((current, said))
-        current = []
-
-    for j in range(len(clean_toks)):
-        if j in heard and proper(j):
-            if current and (j != current[-1] + 1 or clean_toks[current[-1]].brk):
-                flush()
-            current.append(j)
-        else:
-            flush()
-    flush()
-    return spans
-
-
-def _read_history(path: Path) -> list[dict[str, Any]]:
-    records: deque[dict[str, Any]] = deque(maxlen=MAX_HISTORY_RECORDS)
-    try:
-        with Path(path).open("r", encoding="utf-8", errors="replace") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    record = json.loads(line)
-                except ValueError:
-                    continue
-                if isinstance(record, dict):
-                    records.append(record)
-    except FileNotFoundError:
-        return []
-    except OSError as exc:
-        log.warning("couldn't read history for suggestions: %s", exc)
-        return []
-    return list(records)
-
-
-def mine_history(
-    history_path: Path, vocab_terms: Iterable[str], *, exclude: Collection[str] = ()
-) -> list[Suggestion]:
-    """Suggestions from ``history.jsonl`` (see the module docstring), best first.
-
-    ``exclude`` holds :func:`match_key` keys never to suggest (accepted/dismissed before).
-    """
-    blocked = {match_key(t) for t in vocab_terms} | set(exclude)
-    candidates: dict[str, _Candidate] = {}
-    lower_mid: Counter = Counter()  # mid-sentence lowercase uses of single words
-    deferred: list[tuple[list[str], tuple, str]] = []  # tails of sentence-initial runs
-
-    def cand(words: Sequence[str]) -> tuple[str, _Candidate]:
-        term = " ".join(words)
-        key = match_key(term)
-        c = candidates.get(key)
-        if c is None:
-            c = candidates[key] = _Candidate(words=len(words))
-        return term, c
-
-    for n, record in enumerate(_read_history(history_path)):
-        text = record.get("text")
-        raw = record.get("raw_text")
-        ts = record.get("ts") if isinstance(record.get("ts"), str) else ""
-        if not isinstance(text, str) or not text.strip():
-            continue
-        tokens = _tokens(text)
-        for tok in tokens:
-            if not tok.start and tok.text.islower():
-                lower_mid[tok.text.casefold()] += 1
-        # (b) capitalised words / phrases mid-sentence
-        runs, tails = _proper_runs(tokens)
-        for run in runs:
-            term, c = cand([tokens[i].text for i in run])
-            c.see(term, (n, run[0], len(run)), ts)
-            c.mid += 1
-        for tail in tails:
-            deferred.append(([tokens[i].text for i in tail], (n, tail[0], len(tail)), ts))
-        # (c) mixed-case / letters+digits tokens anywhere
-        for i, tok in enumerate(tokens):
-            if _distinctive(tok.text) and not _is_stop(tok.text):
-                term, c = cand([tok.text])
-                c.see(term, (n, i, 1), ts)
-                c.code += 1
-        # (a) what the LLM cleanup re-cased or corrected
-        if record.get("cleanup") == "applied" and isinstance(raw, str) and raw != text:
-            for span, said in _cleanup_fixes(raw, text):
-                term, c = cand([tokens[j].text for j in span])
-                c.see(term, (n, span[0], len(span)), ts)
-                c.fixes += 1
-                c.heard = c.heard or said
-
-    # Tails of sentence-initial runs ("Tell <Priya Raghunathan>") count once the same words
-    # were seen as a mid-sentence run somewhere else.
-    confirmed = {key for key, c in candidates.items() if c.mid}
-    for words, occurrence, ts in deferred:
-        term = " ".join(words)
-        if match_key(term) in confirmed:
-            _, c = cand(words)
-            c.see(term, occurrence, ts)
-            c.mid += 1
-
-    out: list[Suggestion] = []
-    for key, c in candidates.items():
-        if key in blocked or not key:
-            continue
-        if not (c.fixes >= 1 or c.mid >= MIN_MENTIONS or c.code >= MIN_MENTIONS):
-            continue
-        form = c.forms.most_common(1)[0][0]
-        if (
-            c.words == 1
-            and not c.fixes
-            and c.code < MIN_MENTIONS
-            and lower_mid[form.casefold()] > c.mid
-        ):
-            continue  # mostly a lowercase everyday word ("Plan" vs "plan")
-        term = _valid(form)
-        if term is None:
-            continue
-        count = len(c.occurrences)
-        if c.fixes:
-            detail = f'cleanup fixed it {c.fixes}× (Whisper heard "{c.heard}")'
-            if count > c.fixes:
-                detail += f"; seen {count}× in your dictations"
-        else:
-            detail = f"seen {count}× in your dictations"
-        out.append(Suggestion(term, "history", count, detail, c.first_seen or _now()))
-    out.sort(key=lambda s: (-s.count, s.first_seen, s.term.casefold()))
-    return out[:MAX_HISTORY_SUGGESTIONS]
 
 
 # ----------------------------------------------------------------- project seeding
@@ -472,7 +212,14 @@ _SECTION = re.compile(r"^\s*\[")
 _URL_LINE = re.compile(r"^\s*url\s*=\s*(\S+)", re.I)
 
 
-def default_project_roots() -> list[Path]:
+def default_project_roots(platform: str | None = None) -> list[Path]:
+    """Where project folders are looked for when ``[learn] project_roots`` is empty. On a
+    Mac only folders macOS doesn't guard (:data:`shoutabout.mac.platform.MAC_PROJECT_ROOTS`):
+    never ~/Documents, ~/Desktop or ~/Downloads."""
+    if (platform or sys.platform) == "darwin":
+        from shoutabout.mac.platform import mac_project_roots
+
+        return mac_project_roots()
     home = Path.home()
     names = ("Documents", "source/repos", "repos", "code", "projects")
     return [home / n for n in names if (home / n).is_dir()]
@@ -830,7 +577,7 @@ def _save(paths: Paths, suggestions: Sequence[Suggestion]) -> None:
 
 
 def pending_suggestions(paths: Paths) -> list[Suggestion]:
-    """Pending suggestions not already in vocab.txt: history first, then projects, best first."""
+    """Pending suggestions not already in vocab.txt, best first."""
     vocab = {match_key(t) for t in read_terms(paths.vocab_file)}
     pending = [s for s in load_suggestions(paths) if s.status == "pending" and s.key not in vocab]
     rank = {src: i for i, src in enumerate(SOURCES)}
@@ -840,12 +587,12 @@ def pending_suggestions(paths: Paths) -> list[Suggestion]:
 
 def refresh_suggestions(
     paths: Paths,
-    include_projects: bool = False,
+    include_projects: bool = True,
     *,
-    include_history: bool = True,
     roots: Iterable[Path] | None = None,
 ) -> int:
-    """Mine history (and projects) and merge new candidates into the store.
+    """Look through the project folders below ``roots`` (default:
+    :func:`default_project_roots`) and merge new candidates into the store.
 
     Pending suggestions get fresh counts; accepted/dismissed ones are never re-added;
     pending ones that meanwhile appeared in vocab.txt become accepted. Returns how many
@@ -862,8 +609,6 @@ def refresh_suggestions(
                 s.status, s.updated = "accepted", now
         blocked = {k for k, s in by_key.items() if s.status != "pending"}
         found: list[Suggestion] = []
-        if include_history:
-            found += mine_history(paths.history_file, vocab_terms, exclude=blocked)
         if include_projects:
             found += seed_from_projects(roots, exclude=blocked | vocab_keys)
         new = 0
@@ -886,6 +631,23 @@ def refresh_suggestions(
         sum(s.status == "pending" for s in stored),
     )
     return new
+
+
+def forget_source(paths: Paths, source: str) -> int:
+    """Drop the pending suggestions from ``source``, and where the others came from (their
+    ``detail``); accepted and dismissed words stay remembered, so they don't come back.
+    Returns how many were dropped."""
+    if not paths.suggestions_file.exists():
+        return 0
+    with file_lock(paths.suggestions_file):
+        stored = load_suggestions(paths)
+        kept = [s for s in stored if not (s.status == "pending" and s.source == source)]
+        scrub = [s for s in kept if s.source == source and s.detail]
+        for s in scrub:
+            s.detail = ""
+        if scrub or len(kept) != len(stored):
+            _save(paths, kept)
+    return len(stored) - len(kept)
 
 
 def _set_status(

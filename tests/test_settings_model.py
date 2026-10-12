@@ -20,8 +20,6 @@ from shoutabout.config import Config, load_config
 from shoutabout.config_edit import ConfigEditError, update_config
 from shoutabout.server import HubContext
 from shoutabout.settings_model import (
-    HISTORY_LABEL,
-    HISTORY_NOTE,
     SettingsModel,
     automatic_label,
     cleanup_choice,
@@ -110,7 +108,6 @@ def test_view_reads_everything(tmp_path):
     assert view.name == "DESK-1" and view.version == "0.2.0"
     assert view.cleanup == "on"  # the example config says enabled = true
     assert view.show_cleanup is False  # ...but no Ollama here: the choice stays hidden
-    assert view.history_on is False  # history is off by default
     assert (view.startup_on, view.startup_editable) == (True, False)
     assert "setup script" in view.startup_note
     assert view.loading_quality is False
@@ -170,8 +167,6 @@ def test_changes_are_saved_with_the_right_values(tmp_path):
     assert model.set_cleanup("auto")
     assert model.set_cleanup("off")
     assert not model.set_cleanup("maybe")
-    assert model.set_history(True)
-    assert model.set_history(False)
     assert saved == [
         {"dictation": {"enabled": False}},
         {"dictation": {"hotkey": "right_alt"}},
@@ -180,15 +175,8 @@ def test_changes_are_saved_with_the_right_values(tmp_path):
         {"stt": {"model": "auto", "device": "auto", "compute_type": "auto"}},
         {"cleanup": {"enabled": "auto"}},
         {"cleanup": {"enabled": False}},
-        {"history": {"enabled": True}},
-        {"history": {"enabled": False}},
     ]
     assert model.message == "Saved." and not model.error
-
-
-def test_history_switch_copy():
-    assert HISTORY_LABEL == "Keep a history of what I dictate"
-    assert HISTORY_NOTE == "Saved only on this PC."
 
 
 def test_ai_cleanup_shows_only_when_ollama_has_a_model(tmp_path):
@@ -231,30 +219,6 @@ def test_default_cleanup_available_asks_ollama(monkeypatch):
     pulled = [cfg.cleanup.model]
     assert app_services.default_cleanup_available(cfg) is True
     assert app_services.default_cleanup_available(SimpleNamespace()) is False  # never raises
-
-
-def test_history_switch_saves_to_config_and_applies_live(tmp_path):
-    """The switch writes [history] enabled through config_edit (comments kept) and the hub
-    applies it at once through its "history" reloader: no restart."""
-    svc = make_services(tmp_path)
-    reloaded = []
-    svc.on_settings_saved = lambda keys: reloaded.append(keys) or set()
-    model = SettingsModel(svc)
-    assert model.view().history_on is False
-    assert model.set_history(True)
-    assert model.message == "Saved." and not model.error
-    assert reloaded == [{"history.enabled"}]
-    assert load_config(svc.paths).history.enabled is True
-    assert model.view().history_on is True
-    text = svc.paths.config_file.read_text("utf-8")
-    assert "# Off by default. Turn it on in Settings or in the History window." in text
-    assert model.set_history(False)
-    assert load_config(svc.paths).history.enabled is False
-    assert model.view().history_on is False
-    # without a running hub (the settings command): saved, applied on the next start
-    svc.on_settings_saved = None
-    assert model.set_history(True)
-    assert model.message == "Saved. Restart ShoutAbout to apply."
 
 
 def test_restart_message_and_save_errors(tmp_path):
@@ -417,29 +381,6 @@ def test_on_settings_saved_uses_reloaders(tmp_path):
     assert restart == {"dictation.hotkey", "stt.model", "learn.enabled"}
 
 
-def test_history_setting_goes_to_the_history_reloader(tmp_path):
-    """Settings > Keep a history: hub.py's "history" reloader gets the new config."""
-    from shoutabout.config import Paths, ensure_initialized
-
-    paths = Paths(tmp_path / "home")
-    ensure_initialized(paths)
-    cfg = load_config(paths)
-    cfg.server.discovery = False
-    hub = hub_v2.start(paths, cfg, _ctx(), HubState(), with_ui=False, notify=lambda *a: None)
-    seen = []
-
-    def reload_history(new_cfg, key):
-        seen.append((key, new_cfg.history.enabled))
-        return True
-
-    hub.reloaders["history"] = reload_history
-    model = SettingsModel(hub.services)
-    assert model.set_history(True)
-    assert seen == [("history.enabled", True)]
-    assert model.message == "Saved."  # applied live, no restart
-    hub.stop()
-
-
 def test_model_info_is_cached(tmp_path):
     from shoutabout.config import Paths, ensure_initialized
 
@@ -497,3 +438,10 @@ def test_mode_choices_put_press_to_start_first():
     from shoutabout.settings_model import MODE_CHOICES
 
     assert list(MODE_CHOICES) == ["toggle", "hold"]
+
+
+def test_settings_have_no_history_switch(tmp_path):
+    """ShoutAbout keeps no history (Recent is in memory): nothing to switch on."""
+    model, _svc, _ = model_for(tmp_path)
+    assert not hasattr(model, "set_history")
+    assert not hasattr(model.view(), "history_on")

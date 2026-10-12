@@ -1,6 +1,6 @@
 """ "Talk to this PC" end to end with fakes: hotkey events in, pasted text and overlay out.
 
-The real Pipeline runs (fake engine, cleaner and injector), so the paste rules, history,
+The real Pipeline runs (fake engine, cleaner and injector), so the paste rules, Recent,
 pause and the shared busy lock are the ones the phone uses.
 """
 
@@ -104,7 +104,7 @@ class Harness:
         injector=None,
         engine=None,
         ready=True,
-        failed=None,
+        recent=None,
         mic_present=None,
         **rec,
     ):
@@ -135,7 +135,7 @@ class Harness:
             listener_factory=self._listener,
             recorder_factory=self._recorder,
             overlay_factory=lambda enabled: self.overlay,
-            failed=failed,
+            recent=recent,
             mic_present=mic_present,
         )
 
@@ -189,18 +189,17 @@ def test_tap_speak_tap_pastes(h):
     assert h.state.status == HubStatus.IDLE
 
 
-def test_route_and_history_are_local(tmp_path):
-    from shoutabout.history import HistoryLog
+def test_route_is_local_and_recent_has_it():
+    from shoutabout.recent import Recent
 
     h = Harness()
-    h.pipeline.history = HistoryLog(tmp_path / "history.jsonl", tmp_path / "audio", False)
+    h.pipeline.recent = recent = Recent()
     h.dictation.start()
     h.send(START)
     h.send(STOP)
     h.wait_overlay("done")
-    line = (tmp_path / "history.jsonl").read_text("utf-8")
-    assert '"route": "local"' in line and '"target": "pc"' in line
-    assert '"audio_file": null' in line
+    (item,) = recent.items()
+    assert (item.route, item.text, item.pasted) == ("local", "hello from the pc", True)
     h.dictation.stop()
 
 
@@ -519,33 +518,32 @@ def test_unknown_microphone_state_still_records():
     h.dictation.stop()
 
 
-def test_failed_transcription_keeps_the_recording_for_history(tmp_path):
-    from shoutabout.failed_audio import FailedRecordings
+def test_failed_transcription_keeps_the_recording_in_recent(tmp_path, monkeypatch):
+    from shoutabout.recent import Recent
 
-    failed = FailedRecordings(tmp_path / "failed")
-    h = Harness(engine=FakeEngine(fail=EngineError("CUDA out of memory")), failed=failed)
+    monkeypatch.chdir(tmp_path)
+    recent = Recent()
+    h = Harness(engine=FakeEngine(fail=EngineError("CUDA out of memory")), recent=recent)
     h.dictation.start()
     h.send(START)
     h.send(STOP)
     h.wait_overlay("error")
-    (item,) = failed.list()
+    (item,) = recent.failed()
     assert item.route == "local" and item.seconds == pytest.approx(2.0)
     assert "CUDA out of memory" in item.error
-    assert any("saved in History" in m for _, m in h.notes)
+    assert recent.samples(item.id) is not None
+    assert any("kept in Recent" in m for _, m in h.notes)
+    assert list(tmp_path.iterdir()) == []  # in memory only
     h.dictation.stop()
 
 
-def test_failed_transcription_is_not_kept_when_history_is_off(tmp_path):
-    from shoutabout.failed_audio import FailedRecordings
-
-    failed = FailedRecordings(tmp_path / "failed", enabled=False)
-    h = Harness(engine=FakeEngine(fail=EngineError("CUDA out of memory")), failed=failed)
+def test_failed_transcription_without_recent_says_nothing_about_it():
+    h = Harness(engine=FakeEngine(fail=EngineError("CUDA out of memory")))
     h.dictation.start()
     h.send(START)
     h.send(STOP)
     h.wait_overlay("error")
-    assert failed.list() == []
-    assert not any("History" in m for _, m in h.notes)
+    assert not any("Recent" in m for _, m in h.notes)
     h.dictation.stop()
 
 
@@ -557,22 +555,18 @@ def test_failed_transcription_is_not_kept_when_history_is_off(tmp_path):
         ADMIN_WINDOW_WARNING,
     ],
 )
-def test_history_keeps_the_text_when_pasting_fails(tmp_path, warning):
-    import json
-
-    from shoutabout.history import HistoryLog
+def test_recent_keeps_the_text_when_pasting_fails(warning):
+    from shoutabout.recent import Recent
 
     h = Harness(injector=FakeInjector(PasteResult(False, warning)))
-    h.pipeline.history = HistoryLog(tmp_path / "history.jsonl", tmp_path / "audio", False)
+    h.pipeline.recent = recent = Recent()
     h.dictation.start()
     h.send(START)
     h.send(STOP)
     h.wait_overlay("error")
-    (record,) = [
-        json.loads(x) for x in (tmp_path / "history.jsonl").read_text("utf-8").split("\n") if x
-    ]
-    assert record["text"] == "hello from the pc" and record["pasted"] is False
-    assert record["warning"] == warning and record["route"] == "local"
+    (item,) = recent.items()
+    assert item.text == "hello from the pc" and item.pasted is False
+    assert item.warning == warning and item.route == "local"
     h.dictation.stop()
 
 

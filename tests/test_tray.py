@@ -584,22 +584,22 @@ def test_real_tray_stop_before_run():
     assert icon._hwnd is None
 
 
-def test_history_item_sits_after_pause_and_opens_the_window():
+def test_recent_item_sits_after_pause_and_opens_the_window():
     items = tray.build_menu(
-        "ShoutAbout", HubStatus.IDLE, False, None, history=True, teaching=True, settings=True
+        "ShoutAbout", HubStatus.IDLE, False, None, recent=True, teaching=True, settings=True
     )
     assert _labels(items) == [
         "Ready",
         "-",
         "Pause",
-        "History…",
+        "Recent…",
         "Teach words…",
         "Settings…",
         "-",
         "Quit",
     ]
-    assert "History…" not in _labels(tray.build_menu("ShoutAbout", HubStatus.IDLE, False, None))
+    assert "Recent…" not in _labels(tray.build_menu("ShoutAbout", HubStatus.IDLE, False, None))
     rec = Recorder()
-    icon = tray.TrayIcon(HubState(), rec.actions(history=rec.history))
-    icon._dispatch(tray.CMD_HISTORY)
-    assert rec.event.wait(5) and rec.calls == ["history"]
+    icon = tray.TrayIcon(HubState(), rec.actions(recent=rec.recent))
+    icon._dispatch(tray.CMD_RECENT)
+    assert rec.event.wait(5) and rec.calls == ["recent"]

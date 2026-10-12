@@ -27,23 +27,21 @@ def test_example_file_equals_defaults():
     assert parse_config(example_config_text()) == Config()
 
 
-def test_example_file_writes_history_off():
+def test_example_file_keeps_no_history_and_scans_no_folders():
     text = example_config_text()
-    section = text.split("[history]", 1)[1].split("\n[", 1)[0]
-    assert "\nenabled = false\n" in section
-    assert "# Off by default. Turn it on in Settings or in the History window." in section
-    assert parse_config(text).history.enabled is False
+    assert "[history]" not in text  # ShoutAbout keeps no history (Recent is in memory)
+    section = text.split("[learn]", 1)[1].split("\n[", 1)[0]
+    assert "\nseed_projects = false " in section
+    assert parse_config(text).learn.seed_projects is False
 
 
-def test_privacy_policy_says_history_is_off_by_default():
-    """site/privacy.html (the live website) must match the app: history off by default,
-    failed recordings kept only while it's on, word suggestions from history only then."""
+def test_privacy_policy_says_folders_are_looked_at_only_when_asked():
+    """site/privacy.html (the live website) must match the app: project folders are only
+    looked at when you ask (Teach words > Suggest from my project folders)."""
     page = (Path(__file__).resolve().parents[1] / "site" / "privacy.html").read_text("utf-8")
-    assert Config().history.enabled is False
-    assert "<strong>only if you turn it on</strong> in Settings" in page
-    assert "It's off by default." in page
-    assert "kept so you can try them again, but only while history is on" in page
-    assert "only while history is on, from your dictation history" in page
+    assert Config().learn.seed_projects is False
+    assert "It only looks at them when you ask it to." in page
+    assert "from your dictation history" not in page
     assert "turned off in the settings file" not in page
 
 
@@ -58,10 +56,9 @@ def test_defaults_are_safe():
     assert cfg.server.max_upload_bytes == 25 * 1024 * 1024
     assert cfg.access.enabled is False
     assert cfg.paste.trailing_space is False
-    assert cfg.history.keep_audio is False
-    assert cfg.history.enabled is False  # nothing you dictate is kept until you turn it on
     # Vocab suggestions are on, but nothing reaches vocab.txt without the owner's approval.
-    assert (cfg.learn.enabled, cfg.learn.seed_projects, cfg.learn.notify) == (True, True, True)
+    # Project folders are only looked at when the owner asks (Teach words).
+    assert (cfg.learn.enabled, cfg.learn.seed_projects, cfg.learn.notify) == (True, False, True)
     assert cfg.learn.project_roots == []
 
 

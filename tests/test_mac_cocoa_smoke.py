@@ -202,15 +202,26 @@ def test_hub_v2_wires_the_mac_parts(monkeypatch, tmp_path):
     __import__("shoutabout.mac.platform")
     monkeypatch.setattr(hub_v2.sys, "platform", "darwin")
     ctx = types.SimpleNamespace()
+    from shoutabout.recent import Recent
+
+    recent = Recent()
     v2 = hub_v2.start(
-        Paths(tmp_path), Config(), ctx, HubState(), with_ui=True, notify=lambda t, m: None
+        Paths(tmp_path),
+        Config(),
+        ctx,
+        HubState(),
+        with_ui=True,
+        notify=lambda t, m: None,
+        recent=recent,
     )
     try:
         assert isinstance(v2.ui, MacUiBridge)
         assert isinstance(v2.advertiser, MacAdvertiser)
         assert isinstance(v2.services.startup, MacStartupManager)
         assert "right_cmd" in v2.services.hotkey_choices()
-        assert v2.services.open_teach == v2.ui.open_teach
+        assert callable(v2.services.missing_permissions)  # Home's status line
+        # Recent lives in the hub; the window process hears when it changes.
+        assert v2.services.recent is recent and v2.ui._on_recent_changed in recent._listeners
         assert ctx.pairing is v2.services.pairing and ctx.pairing.enabled
     finally:
         v2.advertiser = None  # nothing was announced

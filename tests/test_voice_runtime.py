@@ -149,7 +149,7 @@ def test_start_dictation_follows_pause(fakes, monkeypatch):
     started = []
 
     class FakeDictation:
-        def __init__(self, cfg, *, state, pipeline, notify, failed=None):
+        def __init__(self, cfg, *, state, pipeline, notify, recent=None):
             self.state = state
 
         def follow_pause(self):
@@ -180,7 +180,7 @@ def test_reload_dictation_starts_it_when_it_was_off(fakes, monkeypatch):
     made = []
 
     class FakeDictation:
-        def __init__(self, cfg, *, state, pipeline, notify, failed=None):
+        def __init__(self, cfg, *, state, pipeline, notify, recent=None):
             self.cfg = cfg
             self.reloads = []
             made.append(self)

@@ -91,11 +91,11 @@ class Choice:
     cleanup: bool
 
 
-class FakeHistory:
+class FakeRecent:
     def __init__(self) -> None:
         self.records = []
 
-    def append(self, result, audio_path=None) -> None:
+    def add(self, result) -> None:
         self.records.append(result)
 
 
@@ -108,7 +108,7 @@ class Hub:
         self.pairing = PairingManager(self.devices, clock=self.clock, code_factory=lambda: "4821")
         self.identity = IdentityStore(tmp_path / "identity.json", default_name=lambda: "DESK-1")
         self.injector = FakeInjector()
-        self.history = FakeHistory()
+        self.recent = FakeRecent()
         self.prompts = []
         self.pairing.subscribe(on_request=self.prompts.append)
         pipe = Pipeline(
@@ -133,7 +133,7 @@ class Hub:
             version="9.9.9",
             model_info=model_info,
             injector=self.injector,
-            history=self.history,
+            recent=self.recent,
             lan_url=lambda: "http://192.168.1.50:47821",
         )
         self.app = create_app(self.ctx)
@@ -633,7 +633,7 @@ def test_paste_pastes_like_a_transcription(hub, caplog):
     assert r.status_code == 200, r.text
     assert r.json() == {"status": "ok", "pasted": True}
     assert hub.injector.pasted == ["Line one line two send it"]  # one paragraph, no Enter
-    (record,) = hub.history.records
+    (record,) = hub.recent.records
     assert record.text == "Line one line two send it"
     assert record.cleanup.status == "disabled"
     assert record.target == "pc"

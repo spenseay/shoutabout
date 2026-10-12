@@ -1,11 +1,13 @@
-"""One UI thread for the setup, settings and History windows and pairing prompts.
+"""One UI thread for the ShoutAbout window, the setup window and pairing prompts.
 
 Tk objects must be created, used and freed on a single thread, and that thread must never be
 the tray's (its Win32 message loop is separate). :class:`UiHost` starts a "ui" thread on
 first use with a hidden Tk root; each window is a Toplevel of it. Any thread asks for a
-window with :meth:`open_setup`, :meth:`open_settings`, :meth:`open_history` or (from the
-pairing manager) a prompt: requests are queued and picked up by the Tk thread within 100 ms.
-When the last window closes the thread ends (and starts again on the next request).
+window with :meth:`open_window` (the one ShoutAbout window, on a page: Home, Teach words,
+Recent, Settings), :meth:`open_setup` or (from the pairing manager) a prompt: requests are
+queued and picked up by the Tk thread within 100 ms. Asking for the ShoutAbout window while
+it's open switches it to that page and brings it to the front. When the last window closes
+the thread ends (and starts again on the next request).
 
 Pairing requests go to the setup window when it's showing "Connect your iPhone" (approved
 inline there), otherwise to a small always-on-top prompt.
@@ -46,11 +48,18 @@ class UiHost:
     def open_setup(self, mode: str = "full") -> None:
         self._send("setup", mode)
 
-    def open_settings(self) -> None:
-        self._send("settings", None)
+    def open_window(self, page: str = "home") -> None:
+        """The ShoutAbout window on ``page`` ("home", "teach", "recent", "settings")."""
+        self._send("main", page)
 
-    def open_history(self) -> None:
-        self._send("history", None)
+    def open_settings(self) -> None:
+        self.open_window("settings")
+
+    def open_recent(self) -> None:
+        self.open_window("recent")
+
+    def open_teach(self) -> None:
+        self.open_window("teach")
 
     def _on_pair_request(self, prompt: Any) -> None:
         self._send("pair", prompt)
@@ -167,10 +176,8 @@ class UiHost:
     def _handle(self, kind: str, arg: Any) -> None:
         if kind == "setup":
             self._show_setup(arg)
-        elif kind == "settings":
-            self._show_settings()
-        elif kind == "history":
-            self._show_history()
+        elif kind == "main":
+            self._show_main(arg)
         elif kind == "pair":
             self._show_pair(arg)
         elif kind == "pair-done":
@@ -199,35 +206,23 @@ class UiHost:
         if pending is not None and f"pair:{pending.request_id}" not in self._windows:
             flow.offer(pending)
 
-    def _show_settings(self) -> None:
-        from shoutabout.settings_model import SettingsModel
-        from shoutabout.settings_ui import SettingsWindow
+    def _show_main(self, page: Any) -> None:
+        """The one ShoutAbout window, on ``page``; never a second copy."""
+        from shoutabout.app_window import AppWindow
 
-        existing = self._windows.get("settings")
+        existing = self._windows.get("main")
         if existing is not None:
+            existing.show(page)
             existing.bring_to_front()
             return
-        self._windows["settings"] = SettingsWindow(
+        self._windows["main"] = AppWindow(
             self._toplevel(),
-            SettingsModel(self.svc),
-            on_close=lambda: self._closed("settings"),
+            self.svc,
+            page=page or "home",
+            on_close=lambda: self._closed("main"),
             on_add_phone=lambda: self._show_setup("phone"),
         )
-        self._windows["settings"].bring_to_front()
-
-    def _show_history(self) -> None:
-        from shoutabout.history_model import HistoryModel
-        from shoutabout.history_ui import HistoryWindow
-
-        existing = self._windows.get("history")
-        if existing is not None:
-            existing.bring_to_front()
-            existing.reload()
-            return
-        self._windows["history"] = HistoryWindow(
-            self._toplevel(), HistoryModel(self.svc), on_close=lambda: self._closed("history")
-        )
-        self._windows["history"].bring_to_front()
+        self._windows["main"].bring_to_front()
 
     def _show_pair(self, prompt: Any) -> None:
         from shoutabout.approval_ui import ApprovalPrompt

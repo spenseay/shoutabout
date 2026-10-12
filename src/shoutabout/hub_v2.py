@@ -1,4 +1,4 @@
-"""The hub's v2 parts: pairing, per-device tokens, discovery, the setup and settings windows.
+"""The hub's v2 parts: pairing, per-device tokens, discovery, the ShoutAbout window.
 
 Kept out of :mod:`hub` so the hub's own changes stay small (other work edits it too).
 :func:`start` builds everything and hangs it on the server's :class:`HubContext`;
@@ -58,7 +58,7 @@ def first_run_port(paths: Paths, cfg: Config, before: InstallSnapshot) -> Config
 class V2Hub:
     paths: Paths
     services: Any  # app_services.AppServices
-    ui: Any = None  # ui_host.UiHost (None without a tray)
+    ui: Any = None  # ui_host.UiHost (macOS: mac.ui_bridge.MacUiBridge); None without a tray
     advertiser: Any = None  # discovery.Advertiser (None when [server] discovery = false)
     port: int = 0
     # "section" -> fn(new_config, "section.key") -> True if applied live. The hub registers
@@ -156,7 +156,7 @@ def start(
     *,
     with_ui: bool,
     notify: Callable[[str, str], None],
-    open_teach: Callable[[], None] | None = None,
+    recent: Any = None,
     native_prompt: Callable[[Any], None] | None = None,
 ) -> V2Hub:
     """Build the v2 parts and wire them into ``ctx`` (the server's HubContext)."""
@@ -192,8 +192,8 @@ def start(
         identity=identity,
         pairing=pairing,
         state=state,
+        recent=recent,
         lan_url=lan_url,
-        open_teach=open_teach,
         open_logs=open_logs,
         copy_hub_token=copy_hub_token,
         startup=StartupManager(),
@@ -230,10 +230,8 @@ def start(
         hub.ui = MacUiBridge(
             services, on_identity_changed=hub.announce, native_prompt=native_prompt
         )
-        services.open_teach = hub.ui.open_teach
     elif with_ui:
         from shoutabout.ui_host import UiHost
 
         hub.ui = UiHost(services)
-        services.open_history = hub.ui.open_history
     return hub

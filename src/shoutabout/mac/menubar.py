@@ -6,7 +6,7 @@ Same interface as :class:`shoutabout.tray.TrayIcon`, so the hub uses it unchange
 
 The app is an "accessory" (``LSUIElement``): no Dock icon, no app menu, just the brand
 mouth in the menu bar. The menu is :func:`shoutabout.tray.build_menu` (the same items and
-words as Windows: status, how to talk, Pause/Resume, Teach words…, Settings…, Set up…,
+words as Windows: status, how to talk, Pause/Resume, Recent…, Teach words…, Settings…, Set up…,
 Quit), plus, while a permission is missing, one line that opens the right System Settings
 pane. It is rebuilt each time it opens. Menu commands other than Quit run on a short-lived
 thread, so a slow action never freezes the menu bar.
@@ -29,6 +29,7 @@ from shoutabout.state import HubState
 from shoutabout.tray import (
     CMD_PAUSE,
     CMD_QUIT,
+    CMD_RECENT,
     CMD_SETTINGS,
     CMD_SETUP,
     CMD_TEACH,
@@ -94,6 +95,7 @@ def menu_entries(
         state.error,
         hint=hint,
         percent=state.progress,
+        recent=actions.recent is not None,
         teaching=actions.teach is not None,
         settings=actions.settings is not None,
         setup=actions.setup is not None,
@@ -334,6 +336,7 @@ class MacMenuBar:
         else:
             table = {
                 CMD_PAUSE: ("toggle_pause", self._actions.toggle_pause),
+                CMD_RECENT: ("recent", self._actions.recent),
                 CMD_TEACH: ("teach", self._actions.teach),
                 CMD_SETTINGS: ("settings", self._actions.settings),
                 CMD_SETUP: ("setup", self._actions.setup),

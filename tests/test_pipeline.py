@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import threading
 import time
 from pathlib import Path
@@ -10,7 +9,6 @@ import pytest
 from fakes import FakeCleaner, FakeEngine, FakeInjector, FakeVocabStore, fake_decode
 from shoutabout.config import Config
 from shoutabout.engine.base import EngineError, SttHints
-from shoutabout.history import HistoryLog
 from shoutabout.models import CleanupResult, HubStatus, PasteResult
 from shoutabout.pipeline import (
     NO_SPEECH_WARNING,
@@ -19,6 +17,7 @@ from shoutabout.pipeline import (
     Pipeline,
     format_log_line,
 )
+from shoutabout.recent import Recent
 from shoutabout.state import HubState
 
 AUDIO = Path("unused.m4a")
@@ -31,7 +30,7 @@ def make(
     cleaner="default",
     injector=None,
     config=None,
-    history=None,
+    recent=None,
     vocab=None,
     decode=fake_decode,
 ):
@@ -44,7 +43,7 @@ def make(
         cleaner=FakeCleaner() if cleaner == "default" else cleaner,
         injector=injector or FakeInjector(),
         state=state,
-        history=history,
+        recent=recent,
         decode=decode,
     )
     return p
@@ -361,23 +360,20 @@ def test_serialised_by_lock():
     assert p.injector.pasted == ["x"] * 5
 
 
-def test_history_appended(tmp_path):
-    hist = HistoryLog(tmp_path / "history.jsonl", tmp_path / "audio", keep_audio=False)
-    p = make(history=hist)
+def test_recent_keeps_the_result():
+    recent = Recent()
+    p = make(recent=recent)
     r = p.process_file(AUDIO, target="pc", route="lan")
-    lines = (tmp_path / "history.jsonl").read_text("utf-8").splitlines()
-    assert len(lines) == 1
-    rec = json.loads(lines[0])
-    assert rec["id"] == r.request_id
-    assert rec["stt_model"] == "fake-engine"
+    (item,) = recent.items()
+    assert (item.text, item.route) == (r.text, "lan")
 
 
-def test_history_not_appended_on_error(tmp_path):
-    hist = HistoryLog(tmp_path / "history.jsonl", tmp_path / "audio", keep_audio=False)
-    p = make(history=hist, engine=FakeEngine(fail=EngineError("x")))
+def test_recent_not_added_on_error():
+    recent = Recent()
+    p = make(recent=recent, engine=FakeEngine(fail=EngineError("x")))
     with pytest.raises(EngineError):
         p.process_file(AUDIO, target="pc", route="lan")
-    assert not (tmp_path / "history.jsonl").exists()
+    assert recent.items() == []
 
 
 def test_format_log_line():

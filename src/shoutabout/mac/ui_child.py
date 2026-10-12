@@ -1,4 +1,4 @@
-"""The window process on macOS: the shared Tk setup/settings windows and pairing prompts.
+"""The window process on macOS: the shared Tk ShoutAbout and setup windows, pairing prompts.
 
 Why a separate process: Cocoa and Tk both want the main thread (Tk on macOS owns the
 NSApplication and must run there), and the hub's main thread already runs the menu bar,
@@ -7,13 +7,17 @@ the overlay and the event loop. So the hub (:mod:`shoutabout.mac.ui_bridge`) sta
 :class:`shoutabout.ui_host.UiHost` as Windows, on *its* main thread, and talks to the hub
 over its stdin/stdout (:mod:`shoutabout.mac.uilink`):
 
-* the hub sends ``open`` (setup / settings), ``pair`` and ``pair-done`` events, ``quit``;
+* the hub sends ``open`` (``main`` with a page: the ShoutAbout window; or ``setup``),
+  ``pair`` and ``pair-done`` events, ``recent`` (Recent changed), ``quit``;
 * the windows call the hub for what only the hub can do: approve or deny a phone
   (:class:`RemotePairing`), apply saved settings live, re-announce a new name, download
-  the speech model (so only one process ever writes it), open the Teach window.
+  the speech model (so only one process ever writes it), read Recent and try a failed
+  recording again (:class:`RemoteRecent`: it lives in the hub's memory only), and how
+  the hub is doing (Home's status line).
 
-Everything else the windows need (config.toml, devices.json, identity.json, the LaunchAgent)
-is files they read and write directly, as on Windows; the hub sees changes by mtime.
+Everything else the windows need (config.toml, devices.json, identity.json, vocab.txt,
+the LaunchAgent) is files they read and write directly, as on Windows; the hub sees changes
+by mtime.
 
 When no window has been open for a moment the process says ``idle`` (with the number of
 the last hub message it handled) and the hub tells it to quit, unless it has sent
@@ -124,6 +128,53 @@ class RemotePairing:
             return False
 
 
+class RemoteRecent:
+    """The hub's :class:`shoutabout.recent.Recent`, as the Recent page uses it: the hub's
+    ``recent`` events bump :attr:`version` (the page watches it), the rest asks the hub."""
+
+    def __init__(self, link: Any) -> None:
+        self._link = link
+        self._lock = threading.Lock()
+        self._version = 0
+
+    @property
+    def version(self) -> int:
+        with self._lock:
+            return self._version
+
+    def changed(self, version: Any = None) -> None:
+        """From the hub (reader thread): Recent changed."""
+        with self._lock:
+            self._version += 1
+
+    def snapshot(self) -> dict[str, Any] | None:
+        return self._link.call("recent")
+
+    def remove_failed(self, item_id: str) -> bool:
+        return bool(self._link.call("remove_failed", id=item_id))
+
+
+def remote_retry(link: Any, *, poll_s: float = DOWNLOAD_POLL_S, timeout_s: float = 900.0):
+    """``AppServices.retry_failed`` that lets the hub transcribe (it has the engine)."""
+
+    def retry(item_id: str) -> str:
+        link.call("retry", id=item_id)
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            status = link.call("retry_status", id=item_id) or {}
+            state = status.get("state")
+            if state == "done":
+                return str(status.get("text") or "")
+            if state == "failed":
+                raise RuntimeError(str(status.get("error") or "it didn't work"))
+            if state != "running":
+                raise RuntimeError("ShoutAbout lost track of that recording.")
+            time.sleep(poll_s)
+        raise TimeoutError("That took too long.")
+
+    return retry
+
+
 def remote_download(link: Any) -> Callable[..., Any]:
     """``AppServices.download_model`` that lets the hub download (one writer only)."""
 
@@ -164,8 +215,14 @@ class ChildUiHost(UiHost):
             what = str(message.get("kind") or "")
             if what == "setup":
                 self._send("setup", str(message.get("arg") or "full"))
-            elif what:
-                self._send(what, message.get("arg"))
+            elif what == "main":
+                self._send("main", str(message.get("arg") or "home"))
+            elif what:  # a page by its own name ("settings")
+                self._send("main", what)
+        elif kind == "recent":
+            recent = getattr(self.svc, "recent", None)
+            if isinstance(recent, RemoteRecent):
+                recent.changed(message.get("version"))
         elif kind == "pair":
             self.remote.add(
                 str(message.get("request_id")),
@@ -197,18 +254,11 @@ class ChildUiHost(UiHost):
         self._session()
 
     def _handle(self, kind: str, arg: Any) -> None:
-        if kind == "settings":
-            self._show_settings()
-        elif kind in ("setup", "pair", "pair-done"):
-            super()._handle(kind, arg)
-        else:
-            opener = getattr(self, f"_show_{kind}", None)  # windows added later (history...)
-            if callable(opener):
-                opener()
-            else:
-                log.warning("unknown window %r", kind)
-                return
-        if kind not in ("pair", "pair-done"):
+        if kind not in ("main", "setup", "pair", "pair-done"):
+            log.warning("unknown window %r", kind)
+            return
+        super()._handle(kind, arg)
+        if kind in ("main", "setup"):
             self._bring_forward(kind)
 
     def _bring_forward(self, kind: str) -> None:
@@ -274,9 +324,6 @@ def mac_services(paths: Paths, link: Any, pairing: RemotePairing) -> Any:
     def identity_changed() -> None:
         link.call("identity_changed")
 
-    def open_teach() -> None:
-        link.call("open_teach")
-
     def open_logs() -> None:
         import subprocess
 
@@ -289,6 +336,14 @@ def mac_services(paths: Paths, link: Any, pairing: RemotePairing) -> Any:
 
         CocoaPasteboard().write_text(load_token(paths), (CONCEALED,))
 
+    def copy_text(text: str) -> None:  # Recent > Copy (clipboard managers skip it)
+        from shoutabout.mac.paste import CONCEALED, CocoaPasteboard
+
+        CocoaPasteboard().write_text(text, (CONCEALED,))
+
+    def hub_status() -> dict[str, Any] | None:
+        return link.call("hub_status", timeout=3.0)
+
     return AppServices(
         paths=paths,
         devices=DeviceStore(paths.devices_file),
@@ -300,9 +355,12 @@ def mac_services(paths: Paths, link: Any, pairing: RemotePairing) -> Any:
         download_model=remote_download(link),
         on_settings_saved=settings_saved,
         on_identity_changed=identity_changed,
-        open_teach=open_teach,
         open_logs=open_logs,
         copy_hub_token=copy_hub_token,
+        recent=RemoteRecent(link),
+        copy_text=copy_text,
+        retry_failed=remote_retry(link),
+        remote_status=hub_status,
         startup=MacStartupManager(),
         version=__version__,
     )
@@ -339,13 +397,6 @@ def child_logging(paths: Paths, name: str = "ui.log") -> None:
     root = logging.getLogger()
     root.addHandler(handler)
     root.setLevel(logging.INFO)
-
-
-def _open_with_finder(path: Any) -> None:
-    """``os.startfile`` for the shared windows (Teach > open vocab.txt) on a Mac."""
-    import subprocess
-
-    subprocess.Popen(["/usr/bin/open", "-t", str(path)])
 
 
 def run_child(paths: Paths) -> int:
@@ -408,20 +459,7 @@ def run_standalone(paths: Paths, kind: str, arg: Any) -> int:
     host = MainThreadUiHost(services)
     if kind == "setup":
         host.open_setup(arg or "full")
-    else:
-        host.open_settings()
+    else:  # the ShoutAbout window, on a page ("settings", "teach")
+        host.open_window(kind)
     host.run()
-    return 0
-
-
-def run_teach(paths: Paths) -> int:
-    """``shoutabout mac-teach``: the Teach window in its own process (Tk needs a main thread)."""
-    from shoutabout.mac import tkmac
-    from shoutabout.review_ui import run_review_window
-
-    child_logging(paths, "teach.log")
-    if not hasattr(os, "startfile"):
-        os.startfile = _open_with_finder  # type: ignore[attr-defined]
-    tkmac.install()
-    run_review_window(paths)
     return 0

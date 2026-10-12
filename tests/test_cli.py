@@ -32,7 +32,6 @@ INFO_KEYS = {
     "vocab_file",
     "token_file",
     "log_dir",
-    "history_file",
     "port",
     "host",
     "lan_ip",
@@ -693,54 +692,56 @@ def test_vocab_add_invalid_is_error(tmp_path, capsys):
 def test_vocab_suggest_seed_dismiss(tmp_path, capsys):
     home_dir = _vocab_home(tmp_path)
     h = str(home_dir)
-    lines = [
-        {
-            "ts": "2026-10-01T00:00:00Z",
-            "text": "I pushed it to GitHub today.",
-            "cleanup": "applied",
-        },
-        {"ts": "2026-10-02T00:00:00Z", "text": "Then GitHub went down.", "cleanup": "applied"},
-    ]
-    (home_dir / "history.jsonl").write_text("".join(json.dumps(x) + "\n" for x in lines), "utf-8")
     projects = tmp_path / "projects"
     (projects / "chameleon-cv").mkdir(parents=True)
     (projects / "chameleon-cv" / "package.json").write_text('{"name": "chameleon-cv"}', "utf-8")
+    (projects / "better_shell").mkdir(parents=True)
+    (projects / "better_shell" / "package.json").write_text('{"name": "kestrel"}', "utf-8")
+    (home_dir / "config.toml").write_text(
+        f"[learn]\nproject_roots = [{json.dumps(str(projects))}]\n", "utf-8"
+    )
 
-    # History is off by default: the dictations aren't scanned, and it says so.
+    # Nothing is looked at unless asked: suggest only lists what's waiting.
     assert cli.main(["vocab", "suggest", "--home", h, "--json"]) == 0
-    captured = capsys.readouterr()
-    assert json.loads(captured.out) == {"new": 0, "pending": []}
-    assert "History is off" in captured.err
-
-    (home_dir / "config.toml").write_text("[history]\nenabled = true\n", "utf-8")
-    assert cli.main(["vocab", "suggest", "--home", h, "--json"]) == 0
-    captured = capsys.readouterr()
-    out = json.loads(captured.out)
-    assert out["new"] == 1
-    assert [s["term"] for s in out["pending"]] == ["GitHub"]
-    assert captured.err == ""
+    assert json.loads(capsys.readouterr().out) == {"new": 0, "pending": []}
+    assert cli.main(["vocab", "suggest", "--home", h, "--projects", "--json"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["new"] == 2
+    assert sorted(s["term"] for s in out["pending"]) == ["Chameleon CV", "Kestrel"]
 
     assert cli.main(["vocab", "seed", "--home", h, str(projects)]) == 0
     out = capsys.readouterr().out
-    assert "1 new suggestion(s)" in out
+    assert "0 new suggestion(s)" in out
     assert "From your projects" in out and "Chameleon CV" in out
-    assert "GitHub" not in out  # seed shows project suggestions only
 
-    assert cli.main(["vocab", "dismiss", "--home", h, "GitHub"]) == 0
+    assert cli.main(["vocab", "dismiss", "--home", h, "Kestrel"]) == 0
     capsys.readouterr()
     assert cli.main(["vocab", "suggest", "--home", h]) == 0
     out = capsys.readouterr().out
     assert "0 new suggestion(s); 1 waiting" in out
-    assert "GitHub" not in out and "Chameleon CV" in out
+    assert "Kestrel" not in out and "Chameleon CV" in out
 
     assert cli.main(["vocab", "seed", "--home", h, str(tmp_path / "missing")]) == 1
     assert "not a folder" in capsys.readouterr().err
 
 
-def test_vocab_review_runs_the_window(tmp_path, monkeypatch):
-    from shoutabout import review_ui
+def test_vocab_review_and_settings_open_the_window(tmp_path, monkeypatch):
+    from shoutabout import ui_host
 
-    seen = []
-    monkeypatch.setattr(review_ui, "run_review_window", lambda paths: seen.append(paths.home))
+    opened = []
+
+    class FakeHost:
+        def __init__(self, services) -> None:
+            self.svc = services
+
+        def open_window(self, page="home"):
+            opened.append((page, self.svc.paths.home))
+
+        def wait(self):
+            opened.append(("wait", None))
+
+    monkeypatch.setattr(ui_host, "UiHost", FakeHost)
+    monkeypatch.setattr(cli.sys, "platform", "win32")
     assert cli.main(["vocab", "review", "--home", str(tmp_path)]) == 0
-    assert seen == [tmp_path]
+    assert cli.main(["settings", "--home", str(tmp_path)]) == 0
+    assert opened == [("teach", tmp_path), ("wait", None), ("settings", tmp_path), ("wait", None)]

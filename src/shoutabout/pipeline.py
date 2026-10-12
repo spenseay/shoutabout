@@ -1,4 +1,4 @@
-"""The transcription pipeline: decode -> STT -> normalise -> cleanup -> deliver -> history.
+"""The transcription pipeline: decode -> STT -> normalise -> cleanup -> deliver -> Recent.
 
 One request at a time (serialised by a lock): the GPU model and the paste target are
 shared resources. Errors the server maps to HTTP statuses (AudioError,
@@ -32,7 +32,7 @@ from shoutabout.state import HubState
 from shoutabout.text import normalize_whitespace
 
 if TYPE_CHECKING:
-    from shoutabout.history import HistoryLog
+    from shoutabout.recent import Recent
 
 log = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ class Pipeline:
         cleaner: Any | None,
         injector: Injector,
         state: HubState,
-        history: HistoryLog | None = None,
+        recent: Recent | None = None,
         decode: DecodeFn | None = None,
     ) -> None:
         if decode is None:
@@ -70,7 +70,7 @@ class Pipeline:
         self.cleaner = cleaner
         self.injector = injector
         self.state = state
-        self.history = history
+        self.recent = recent  # the last few results, in memory only (the Recent page)
         self._decode = decode
         # One transcription at a time across the whole hub (phone requests, "Talk to this
         # PC", text pastes): HubState owns the lock when it has one.
@@ -89,7 +89,7 @@ class Pipeline:
         extra: dict[str, Any] | None = None,
     ) -> TranscribeResult:
         """Transcribe an audio file. ``extra`` is added to the result's extras (and so to
-        history), e.g. ``{"source": "<phone name>"}``."""
+        Recent), e.g. ``{"source": "<phone name>"}``."""
         path = Path(path)
         with self._lock:
             self.state.set_status(HubStatus.TRANSCRIBING)
@@ -103,8 +103,8 @@ class Pipeline:
             except BaseException:
                 self.state.set_status(HubStatus.IDLE)
                 raise
-            if self.history is not None:
-                self.history.append(result, audio_path=path)
+            if self.recent is not None:
+                self.recent.add(result)
             self.state.set_status(HubStatus.IDLE)
             return result
 
@@ -119,7 +119,7 @@ class Pipeline:
         extra: dict[str, Any] | None = None,
     ) -> TranscribeResult:
         """Like :meth:`process_file` for samples that are already 16 kHz mono float32
-        (the PC's own microphone): same STT, cleanup, paste rules, history and lock."""
+        (the PC's own microphone): same STT, cleanup, paste rules, Recent and lock."""
         samples = np.ascontiguousarray(np.asarray(audio, dtype=np.float32).reshape(-1))
         with self._lock:
             self.state.set_status(HubStatus.TRANSCRIBING)
@@ -139,10 +139,14 @@ class Pipeline:
             except BaseException:
                 self.state.set_status(HubStatus.IDLE)
                 raise
-            if self.history is not None:
-                self.history.append(result)
+            if self.recent is not None:
+                self.recent.add(result)
             self.state.set_status(HubStatus.IDLE)
             return result
+
+    def decode(self, path: Path) -> np.ndarray:
+        """An audio file as 16 kHz mono float32 samples (what the pipeline transcribes)."""
+        return self._decode(Path(path), self.config.server.max_audio_seconds)
 
     # ---------------------------------------------------------------- stages
 

@@ -74,22 +74,16 @@ aud = []
 # Optional: only accept this service token's Client ID.
 allowed_client_ids = []
 
-[history]
-# Keep what you dictate in history.jsonl on this PC (tray > History...). If writing out a
-# recording fails, it is kept too (the last few, in the "failed" folder) so you can try again.
-# Off by default. Turn it on in Settings or in the History window.
-enabled = false
-keep_audio = false
-
 [learn]
-# Suggest words to teach ShoutAbout (tray > Teach ShoutAbout...). Suggestions come from your
-# dictation history (only while history is on) and project folders, stay on this PC, and are
-# never added without you.
+# Word suggestions for Teach words. Your project folders are only looked at when you press
+# "Suggest from my project folders"; suggestions stay on this computer and are never added
+# without you.
 enabled = true
-seed_projects = true       # also suggest project/repo names from your project folders
+seed_projects = false      # true = also look through your project folders every day by itself
 # Folders scanned 2 levels deep; empty = ~/Documents, ~/source/repos, ~/repos, ~/code, ~/projects
+# (on a Mac: ~/Developer, ~/code, ~/projects and the like, never Documents, Desktop or Downloads)
 project_roots = []
-notify = true              # one tray notification when new suggestions are waiting
+notify = true              # one notification when the daily look finds new words
 
 [dictation]
 # Talk to this PC: press the hotkey, speak, press it again; the text is pasted where you're typing.

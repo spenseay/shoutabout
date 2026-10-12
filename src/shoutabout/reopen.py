@@ -1,9 +1,12 @@
-"""Opening ShoutAbout while it already runs (Windows).
+"""Opening ShoutAbout while it already runs: the running hub shows its window (at Home).
 
-Clicking ShoutAbout in the Start menu starts a second ``ShoutAbout.exe``, which finds the
-hub's single-instance mutex taken. Instead of exiting silently it sets a named event, and
-the running hub answers by opening its settings window, so the click always shows
+**Windows.** Clicking ShoutAbout in the Start menu starts a second ``ShoutAbout.exe``, which
+finds the hub's single-instance mutex taken. Instead of exiting silently it sets a named
+event, and the running hub answers by opening its window, so the click always shows
 something. The event is auto-reset and lives in the user's session (``Local\\``).
+
+**macOS.** Finder, Spotlight and Launchpad don't start a second copy of a running app: they
+send it a "reopen" Apple event, which :func:`watch_mac` answers the same way.
 """
 
 from __future__ import annotations
@@ -12,6 +15,7 @@ import logging
 import sys
 import threading
 from collections.abc import Callable
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -77,7 +81,7 @@ def watch(on_reopen: Callable[[], None], stopping: threading.Event, name: str = 
             while not stopping.is_set():
                 if k.WaitForSingleObject(handle, POLL_MS) != WAIT_OBJECT_0:
                     continue
-                log.info("ShoutAbout was opened again: showing settings")
+                log.info("ShoutAbout was opened again: showing its window")
                 try:
                     on_reopen()
                 except Exception:
@@ -87,3 +91,55 @@ def watch(on_reopen: Callable[[], None], stopping: threading.Event, name: str = 
 
     threading.Thread(target=loop, name="reopen", daemon=True).start()
     return True
+
+
+_MAC_DELEGATE: Any = None
+
+
+def _mac_delegate_class() -> Any:
+    """The NSApplication delegate class (defined once per process)."""
+    global _MAC_DELEGATE
+    if _MAC_DELEGATE is None:
+        from Foundation import NSObject
+
+        class ShoutAboutAppDelegate(NSObject):  # type: ignore[misc]
+            def applicationShouldHandleReopen_hasVisibleWindows_(
+                self, _app: Any, _visible: bool
+            ) -> bool:
+                on_reopen = getattr(self, "on_reopen", None)
+                if on_reopen is not None:
+                    log.info("ShoutAbout was opened again: showing its window")
+                    # Off the main thread: the window lives in another process (ui_bridge).
+                    threading.Thread(
+                        target=_call, args=(on_reopen,), name="reopen", daemon=True
+                    ).start()
+                return False  # handled: AppKit has no windows of ours to show
+
+        _MAC_DELEGATE = ShoutAboutAppDelegate
+    return _MAC_DELEGATE
+
+
+def _call(fn: Callable[[], None]) -> None:
+    try:
+        fn()
+    except Exception:
+        log.exception("showing ShoutAbout after it was opened again failed")
+
+
+def watch_mac(on_reopen: Callable[[], None]) -> Any:
+    """macOS: call ``on_reopen`` (on a background thread) each time the running app is
+    opened again. Call on the main thread before the event loop runs. Returns the
+    application delegate, which the caller keeps (Cocoa holds delegates weakly); None when
+    it couldn't be installed."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        from AppKit import NSApplication
+
+        delegate = _mac_delegate_class().alloc().init()
+        delegate.on_reopen = on_reopen
+        NSApplication.sharedApplication().setDelegate_(delegate)
+    except Exception:
+        log.exception("couldn't listen for ShoutAbout being opened again")
+        return None
+    return delegate

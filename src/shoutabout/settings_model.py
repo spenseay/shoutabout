@@ -3,7 +3,7 @@
 Every change is saved the moment it's made (no Save button): config values through
 :mod:`config_edit` (comments in config.toml are kept), the computer name in identity.json,
 phones in devices.json, start-up in the Run key. The hub then hot-reloads what it can
-(dictation, cleanup, history, the name); for the rest the page says "Restart ShoutAbout to
+(dictation, cleanup, the name); for the rest the page says "Restart ShoutAbout to
 apply".
 
 The AI cleanup choice only shows when a local Ollama with a suitable model answers
@@ -26,8 +26,6 @@ CLEANUP_CHOICES = {"auto": "Automatic", "on": "On", "off": "Off"}
 MODE_CHOICES = {"toggle": "Press to start and stop", "hold": "Hold to talk"}
 NO_MIC_NOTE = "No microphone found."
 CLEANUP_NOTE = "Fixes punctuation and filler words, on this PC."
-HISTORY_LABEL = "Keep a history of what I dictate"
-HISTORY_NOTE = "Saved only on this PC."
 RESTART_NOTE = "Saved. Restart ShoutAbout to apply."
 SAVED_NOTE = "Saved."
 
@@ -121,7 +119,6 @@ class SettingsView:
     quality_note: str = ""
     cleanup: str = "auto"
     show_cleanup: bool = False  # only when Ollama with a suitable model is there
-    history_on: bool = False
     name: str = ""
     startup_on: bool = False
     startup_editable: bool = False
@@ -168,7 +165,6 @@ class SettingsModel:
             devices=devices,
             cleanup=cleanup_choice(getattr(cfg.cleanup, "enabled", "auto")),
             show_cleanup=self.cleanup_found,
-            history_on=bool(getattr(getattr(cfg, "history", None), "enabled", False)),
             name=ident.name,
             startup_on=bool(startup and startup.enabled),
             startup_editable=bool(startup and startup.editable),
@@ -294,10 +290,6 @@ class SettingsModel:
         if choice not in CLEANUP_CHOICES:
             return False
         return self._save({"cleanup": {"enabled": cleanup_value(choice)}})
-
-    def set_history(self, on: bool) -> bool:
-        """[history] enabled: the hub applies it at once (no restart)."""
-        return self._save({"history": {"enabled": bool(on)}})
 
     def rename(self, name: str) -> bool:
         try:

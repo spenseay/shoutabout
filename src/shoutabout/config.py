@@ -100,6 +100,8 @@ class Paths:
             return mac_log_dir()
         return self.home / "logs"
 
+    # Where earlier versions kept a dictation history and its audio; nothing writes them
+    # now (the ``history-gone`` migration deletes them, firstrun still looks for them).
     @property
     def history_file(self) -> Path:
         return self.home / "history.jsonl"
@@ -128,7 +130,7 @@ class Paths:
 
     @property
     def failed_dir(self) -> Path:
-        """Recordings whose transcription failed, kept for History > Try again."""
+        """Where earlier versions kept recordings that failed (now kept in memory only)."""
         return self.home / "failed"
 
     @property
@@ -282,23 +284,26 @@ class AccessConfig(_Section):
         return bool(self.team_domain and self.aud)
 
 
-class HistoryConfig(_Section):
-    # Keep what you dictate in history.jsonl (and failed recordings for History > Try again).
-    # Off by default: new installs keep nothing until the owner turns it on (Settings or the
-    # History window). Existing configs that say ``enabled = true`` keep it on.
+class LegacyHistoryConfig(_Section):
+    """``[history]`` of earlier versions. ShoutAbout keeps no history now (Recent holds the
+    last few dictations in memory); the keys still load, unused, and the ``history-gone``
+    migration removes the section."""
+
     enabled: bool = False
     keep_audio: bool = False
 
 
 class LearnConfig(_Section):
-    # Suggest vocab words mined from history.jsonl (on start, then daily; only while
-    # [history] is on). Nothing is added to vocab.txt without the owner's approval (tray >
-    # Teach ShoutAbout, or the CLI).
+    # Word suggestions, waiting in Teach words; nothing is added to vocab.txt without the
+    # owner's approval. ``enabled = false`` stops the background refresh below.
     enabled: bool = True
-    # Also suggest names of the owner's project folders (repo/package names, README titles).
-    seed_projects: bool = True
-    # Folders scanned 2 levels deep for projects. Empty = ~/Documents, ~/source/repos,
-    # ~/repos, ~/code and ~/projects (those that exist).
+    # Also look through the owner's project folders on every refresh (repo/package names,
+    # README titles). Off by default: folders are only looked at when the owner presses
+    # "Suggest from my project folders" in Teach words.
+    seed_projects: bool = False
+    # Folders scanned 2 levels deep for projects. Empty = learn.default_project_roots():
+    # ~/Documents, ~/source/repos, ~/repos, ~/code and ~/projects on Windows; on a Mac only
+    # folders macOS doesn't guard (~/Developer, ~/code, ~/projects...).
     project_roots: list[str] = Field(default_factory=list)
     # One tray notification when new suggestions are waiting.
     notify: bool = True
@@ -339,7 +344,7 @@ class Config(_Section):
     cleanup: CleanupConfig = Field(default_factory=CleanupConfig)
     paste: PasteConfig = Field(default_factory=PasteConfig)
     access: AccessConfig = Field(default_factory=AccessConfig)
-    history: HistoryConfig = Field(default_factory=HistoryConfig)
+    history: LegacyHistoryConfig = Field(default_factory=LegacyHistoryConfig)  # unused
     learn: LearnConfig = Field(default_factory=LearnConfig)
     dictation: DictationConfig = Field(default_factory=DictationConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)

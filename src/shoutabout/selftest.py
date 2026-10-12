@@ -584,41 +584,38 @@ def check_overlay(ctx: Context) -> str:
     return f"pill frames render ({first.width}x{first.height} px at 100 %, {ms:.0f} ms)"
 
 
-def check_history(ctx: Context) -> str:
-    """History and failed recordings round-trip in a scratch folder (never the real one)."""
+def check_recent(ctx: Context) -> str:
+    """Recent (the last few dictations and failed recordings, in memory) round-trips."""
     import numpy as np
 
-    from shoutabout.failed_audio import FailedRecordings
-    from shoutabout.history import HistoryLog, read_history
     from shoutabout.models import CleanupResult, Timings, TranscribeResult
+    from shoutabout.recent import Recent, items_from
 
-    folder = ctx.work / "history"
-    log_ = HistoryLog(folder / "history.jsonl", folder / "audio", keep_audio=False)
-    text = "Self-test dictation."
-    log_.append(
-        TranscribeResult(
-            text=text,
-            raw_text=text,
-            target="pc",
-            route="local",
-            pasted=False,
-            warning=None,
-            cleanup=CleanupResult(text=text, status="disabled"),
-            timings=Timings(),
+    recent = Recent(keep=3)
+    for i in range(4):
+        text = f"Self-test dictation {i}."
+        recent.add(
+            TranscribeResult(
+                text=text,
+                raw_text=text,
+                target="pc",
+                route="local",
+                pasted=False,
+                warning=None,
+                cleanup=CleanupResult(text=text, status="disabled"),
+                timings=Timings(),
+            )
         )
-    )
-    records = read_history(log_.path)
-    if not records or records[0].get("text") != text:
-        raise RuntimeError("history didn't read back")
-    failed = FailedRecordings(folder / "failed")
-    item = failed.keep_samples(np.zeros(16_000, dtype=np.float32))
-    if item is None or not item.audio.exists():
+    items, _failed = items_from(recent.snapshot())
+    if [i.text for i in items] != [f"Self-test dictation {n}." for n in (3, 2, 1)]:
+        raise RuntimeError("Recent didn't keep the newest three")
+    item = recent.keep_failed(np.full(16_000, 0.25, dtype=np.float32), error="self-test")
+    samples = recent.samples(item.id) if item is not None else None
+    if samples is None or abs(float(samples[0]) - 0.25) > 1e-3:
         raise RuntimeError("couldn't keep a failed recording")
-    log_.clear()
-    failed.clear()
-    if log_.path.exists() or failed.list():
-        raise RuntimeError("Clear history left something behind")
-    return "history writes, reads back and clears; failed recordings kept and cleared"
+    if not recent.remove_failed(item.id) or recent.failed():
+        raise RuntimeError("couldn't drop a failed recording")
+    return "keeps the newest three dictations and a failed recording, in memory"
 
 
 OBJC_SELFTEST_CLASS = "ShoutAboutSelfTestTarget"
@@ -678,7 +675,7 @@ DEFAULT_CHECKS: tuple[Check, ...] = (
     Check("hardware", check_hardware),
     Check("brand", check_brand),
     Check("overlay", check_overlay),
-    Check("history", check_history),
+    Check("recent", check_recent),
     Check("objc-callbacks", check_objc_callbacks),  # v2-codemagic
 )
 

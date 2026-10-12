@@ -79,9 +79,9 @@ def redirect_output(paths: Paths) -> bool:
     return True
 
 
-# Project folders the vocabulary suggestions may look at on a Mac. Never ~/Documents,
-# ~/Desktop or ~/Downloads: macOS guards those, and reading them makes it ask the person
-# "ShoutAbout would like to access files in your Documents folder" out of the blue.
+# Project folders "Suggest from my project folders" (Teach words) looks at on a Mac. Never
+# ~/Documents, ~/Desktop or ~/Downloads: macOS guards those, and reading them makes it ask
+# the person "ShoutAbout would like to access files in your Documents folder" out of the blue.
 MAC_PROJECT_ROOTS = (
     "~/Developer",
     "~/code",
@@ -95,27 +95,27 @@ MAC_PROJECT_ROOTS = (
 )
 
 
-def learn_defaults(home: Path | None = None) -> dict[str, Any]:
-    """``[learn]`` for a new Mac install: the unguarded project folders that exist, or no
-    project scanning at all (the default list would include ~/Documents)."""
+def mac_project_roots(home: Path | None = None) -> list[Path]:
+    """The unguarded project folders that exist (``[learn] project_roots`` left empty)."""
     base = home or Path.home()
-    found: list[str] = []
-    seen: list[Path] = []
+    found: list[Path] = []
     for root in MAC_PROJECT_ROOTS:
         path = base / root[2:]
         if not path.is_dir():
             continue
-        if any(os.path.samefile(path, other) for other in seen):
-            continue  # ~/code and ~/Code are one folder on a case-insensitive disk
-        seen.append(path)
-        found.append(root)
-    if found:
-        return {"project_roots": found}
-    return {"seed_projects": False}
+        try:
+            if any(os.path.samefile(path, other) for other in found):
+                continue  # ~/code and ~/Code are one folder on a case-insensitive disk
+        except OSError:
+            continue
+        found.append(path)
+    return found
 
 
 def first_run_defaults(paths: Paths, fresh: bool) -> None:
-    """A fresh Mac install: Right ⌘, press to start and stop, open at login (built app)."""
+    """A fresh Mac install: Right ⌘, press to start and stop, open at login (built app).
+    (Project folders are never scanned unless the person asks: ``[learn] seed_projects``
+    is off everywhere.)"""
     if not fresh:
         return
     from shoutabout.config_edit import update_config
@@ -123,7 +123,6 @@ def first_run_defaults(paths: Paths, fresh: bool) -> None:
 
     changes: dict[str, dict[str, Any]] = {
         "dictation": {"hotkey": DEFAULT_MAC_HOTKEY, "mode": DEFAULT_MAC_MODE},
-        "learn": learn_defaults(),
     }
     try:
         update_config(paths, changes)
@@ -163,11 +162,17 @@ def adapt_services(services: Any, paths: Paths, notify: Callable[[str, str], Non
         CocoaPasteboard().write_text(load_token(paths), (CONCEALED,))
         notify("Hub token copied", "")
 
+    def missing_permissions() -> list[str]:  # Home's status line
+        from shoutabout.mac.permissions import report
+
+        return report().missing()
+
     services.hotkey_choices = lambda: dict(keys.MAC_HOTKEY_CHOICES)
     services.hint_text = keys.hint_text
     services.startup = MacStartupManager()
     services.open_logs = open_logs
     services.copy_hub_token = copy_hub_token
+    services.missing_permissions = missing_permissions
 
 
 def make_advertiser() -> Any:
