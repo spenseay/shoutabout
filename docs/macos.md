@@ -190,7 +190,14 @@ missing opens "Allow access"), else `osascript`.
 
 **Opening it again** (`reopen.watch_mac`). Finder, Spotlight and Launchpad don't start a
 second copy of a running app: they send it a "reopen" Apple event. The hub's application
-delegate answers it by opening the ShoutAbout window at Home.
+delegate answers it by opening the ShoutAbout window at Home, with "Allow access" in front
+of it while the microphone or Accessibility is missing (`MacHub.reopened`).
+
+**Sharp on Retina.** Tk draws a bitmap one pixel per point, so on a Retina screen every
+picture is scaled up 2x. The windows' mouth is therefore vector shapes on Tk's canvas, which
+Aqua antialiases and draws at the backing scale (`ui_kit.Mouth`, from
+`brand.mouth_polygons`); there is one mouth per screen at most, and none in the window's
+tabs or the setup's header.
 
 **Words.** The shared windows say "PC"; the window process rewrites widget texts on their
 way to Tk ("Talk to this Mac", "Open at login", "menu bar", "log in"), sets Tk's scaling to
@@ -203,8 +210,8 @@ Dock, and on macOS `wm iconphoto` would replace its Dock icon with the windows' 
 
 | Permission | Why | How it's asked | If refused |
 |---|---|---|---|
-| Microphone | Talk to this Mac | The setup's first screen, "Allow access" (`AVCaptureDevice.requestAccess`, with the Info.plist reason; once asked or refused, System Settings > Microphone); or the first hotkey press | Pill "Mic blocked" (a notification once); menu line "Allow the microphone…"; "Try it" isn't shown |
-| Accessibility | Pasting (posting Cmd+V), and the hotkey (an ordinary event tap) | "Allow access" (`AXIsProcessTrustedWithOptions` with the prompt, which puts ShoutAbout in the list, and System Settings > Accessibility) | Every dictation is copied ("Copied · ⌘V to paste"); menu line "Allow pasting (Accessibility)…"; the hotkey starts by itself as soon as it's on |
+| Microphone | Talk to this Mac | The setup's first screen, "Allow access" (System Settings > Microphone every time, and the first time `AVCaptureDevice.requestAccess` too, with the Info.plist reason); or the first hotkey press | "Allow access" opens at every start; Home's line has **Allow**; pill "Mic blocked" (a notification once); menu line "Allow the microphone…"; "Try it" isn't shown |
+| Accessibility | Pasting (posting Cmd+V), and the hotkey (an ordinary event tap) | "Allow access" (`AXIsProcessTrustedWithOptions` with the prompt, which puts ShoutAbout in the list, and System Settings > Accessibility) | "Allow access" opens at every start; Home's line has **Allow**; every dictation is copied ("Copied · ⌘V to paste"); menu line "Allow pasting (Accessibility)…"; the hotkey starts by itself as soon as it's on |
 | Input Monitoring | Only if the hotkey can't be heard through Accessibility | Listed in "Allow access" only when Accessibility can't be read; menu line when neither is on | — |
 | Local Network (macOS 15+) | The iPhone finding and reaching the Mac | macOS asks itself when needed | Pair with the QR code (Settings > Phones > Add a phone > Scan a code) |
 | Firewall (if on) | Incoming phone connections | macOS asks when the server starts | The phone can't reach the Mac |
@@ -214,10 +221,14 @@ Dock, and on macOS `wm iconphoto` would replace its Dock icon with the windows' 
 keyboard and posts Cmd+V, and it's ShoutAbout.app as launchd started it. (The window
 process is the same executable forked by the hub, so macOS counts it as the app too.)
 Every Allow also opens System Settings at the pane, so there is always a switch to flip
-even when macOS shows no dialog. On a first run the setup asks; on later starts one
-notification says what's missing ("ShoutAbout needs access", "Click to allow …") and a
-click opens "Allow access" alone; a first-run setup closed with something still missing
-gets that notification once the window is gone. The hub's permission watcher wakes as soon
+even when macOS shows no dialog. **The launch check** (`MacHub.check_access`): without the
+microphone or Accessibility ShoutAbout can't work, so on a first run the setup opens on
+"Allow access", and at every later start (not just once) "Allow access" opens alone, with a
+notification as a second signal ("ShoutAbout needs access", "Click to allow …"; a click
+opens the screen too). Opening ShoutAbout again while something is missing shows it in
+front of the window, and Home's line for a missing permission has an **Allow** button. A
+first-run setup closed with something still missing gets the notification once the window
+is gone. The hub's permission watcher wakes as soon
 as the setup sees a change and (re)starts the hotkey listener, also when Input Monitoring
 turns on after a listen-only tap was made (such a tap hears nothing until it is made
 again), so "Try it" works right after Allow, without relaunching.

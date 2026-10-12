@@ -329,8 +329,16 @@ the overlay and the model choice is **not verified**.
   - Not verified.
 - [ ] **Mac: opening ShoutAbout again shows Home.**
   - Steps: with ShoutAbout running (menu bar), open it again from Finder (Applications), Spotlight and Launchpad.
-  - Expected: each time the ShoutAbout window appears at Home (an open one comes to the front); no second copy starts.
+  - Expected: each time the ShoutAbout window appears at Home (an open one comes to the front); no second copy starts. With Accessibility (or the microphone) turned off in System Settings, "Allow access" appears in front of it.
   - Not verified on a Mac (the reopen answer is unit-tested with stand-in PyObjC modules).
+- [ ] **Mac: every start checks access.**
+  - Steps: turn ShoutAbout off under System Settings > Privacy & Security > Accessibility, quit ShoutAbout and open it again (not a first run). Click **Allow** on each line. Then open the ShoutAbout window (menu bar > Settings…, then Home).
+  - Expected: the "Allow access" window opens by itself at start (plus a "ShoutAbout needs access" notification, if macOS shows it). Allow on Accessibility shows macOS's "would like to control this computer" prompt and opens System Settings at Accessibility with ShoutAbout in the list; Allow on Microphone opens System Settings at Microphone (and, the first time, macOS's own dialog). While something is missing, Home's red line has an **Allow** button that opens the same window. Once both are on, the window moves on by itself and Home's line goes.
+  - Not verified on a Mac (unit-tested with fakes on Windows).
+- [ ] **Mac: the mouth is sharp on Retina, once per screen.**
+  - Steps: on a Retina Mac, open the ShoutAbout window (Home, Teach words, Recent, Settings), Set up… (each screen) and the pairing prompt; zoom in with the accessibility zoom.
+  - Expected: the mouth's edges are as smooth as text (no blocky or blurry edge); no screen shows two mouths (no small one in the tabs or above a setup title); the talking animation is smooth.
+  - Not verified on a Mac (the vector outline is compared with the brand rasterizer in tests; Windows screenshots in build/ui-shots).
 - [ ] **No microphone** (a PC without one, like the build PC).
   - Steps: tap Right Ctrl three times; open Set up… > step 2.
   - Expected: a red "No mic" pill each time, but only one notification; the setup card says "No microphone found on this PC. Use your iPhone, or plug in a mic." and starts off. Plug a mic in and tap again: it records.

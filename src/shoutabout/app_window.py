@@ -166,7 +166,7 @@ class HomePage:
         line = tk.Frame(middle, bg=kit.YELLOW)
         line.pack(pady=(round(14 * s), 0))
         self.note = tk.Label(line, text="", font=f.small_bold, bg=kit.YELLOW, fg=kit.BLACK)
-        self.note.pack(side="left")
+        self.note.pack(side="left", fill="y")  # as tall as the Allow button beside it
         self.note.bind("<Button-1>", self.clicked_line)
         # A missing macOS permission: "Allow" opens the setup's "Allow access" screen.
         self.allow_button = kit.button(line, ALLOW_BUTTON, self.allow, f)

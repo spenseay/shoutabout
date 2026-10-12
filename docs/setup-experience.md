@@ -4,7 +4,14 @@ The promise: a person who has never heard of Whisper finishes setup in about a m
 very small app, so the windows stay small too: as few screens as possible, one line of help
 at most, no tours ("look for the icon next to the clock") and no disclaimers. Every screen
 looks like the brand: Shout Yellow ground, black type, a red rule under the headline, the
-talking mouth.
+talking mouth, shown once at most per screen (never a second, small one in a header or the
+window's tabs; a screen without a mouth is fine).
+
+The mouth is sharp at any scale: on a Mac it's vector shapes on Tk's canvas (antialiased and
+drawn at the screen's backing scale, so Retina gets 2x detail), from the brand's own
+outlines (`brand.mouth_polygons`); on Windows, where Tk's canvas isn't antialiased, it's a
+supersampled bitmap rendered at the real pixel size (the windows are DPI aware). The window
+icon is drawn at the screen's icon size (48 px at 150 %).
 
 Code: the logic and every line of copy are in `setup_flow.py`, `settings_model.py` and
 `recent_model.py` (no Tk, unit-tested); `setup_ui.py`, `app_window.py` (the ShoutAbout
@@ -41,7 +48,7 @@ macOS allows it (read about once a second), and **Allow**:
 
 | Line | Allow does |
 |---|---|
-| **Microphone** to hear you | macOS's own "would like to access the microphone" dialog; once asked (or refused), System Settings > Privacy & Security > Microphone |
+| **Microphone** to hear you | System Settings > Privacy & Security > Microphone, every time; the first time also macOS's own "would like to access the microphone" dialog (which puts ShoutAbout in that list) |
 | **Accessibility** for Right ⌘ Command and pasting | macOS's "would like to control this computer" prompt (it puts ShoutAbout in the list) and System Settings > … > Accessibility |
 | **Input Monitoring** for Right ⌘ Command | only listed when Accessibility can't be read at all; System Settings > … > Input Monitoring |
 
@@ -54,9 +61,12 @@ and the last screen says "Almost there" / "Talk to this Mac needs access first."
 still works when the hotkey does: "Then press ⌘V to paste it."
 
 The hub asks macOS, not the window (`mac/access.py`): it's the process that records, taps
-the keyboard and pastes. Clicking a ShoutAbout notification while something is missing opens
-the same screen alone (`SetupFlow(mode="allow")`; Skip closes it, and once everything is
-allowed it says how to talk).
+the keyboard and pastes. Without the microphone or Accessibility ShoutAbout can't work, so
+the same screen opens alone (`SetupFlow(mode="allow")`; Skip closes it, and once everything
+is allowed it says how to talk) whenever one is missing: at **every start** (not just the
+first; a notification says it too), when ShoutAbout is **opened again** while it runs (in
+front of the ShoutAbout window), from Home's **Allow** button, and from a click on the
+notification.
 
 ## Screen 1: "Getting ready"
 
@@ -124,7 +134,8 @@ elsewhere.
 One window, "ShoutAbout", with a row of tabs: **Home**, **Teach words**, **Recent**,
 **Settings**. Tray > **Recent…**, **Teach words…** and **Settings…** open it on that page; an
 open window comes to the front on that page, never a second copy. Opening ShoutAbout again
-while it runs (the Start menu; on a Mac Finder, Spotlight or Launchpad) shows it at Home.
+while it runs (the Start menu; on a Mac Finder, Spotlight or Launchpad) shows it at Home (on
+a Mac with "Allow access" in front of it while the microphone or Accessibility is missing).
 Ctrl+Tab and Ctrl+Shift+Tab switch pages; Esc closes it. `shoutabout settings` and
 `shoutabout vocab review` open it on Settings and Teach words.
 
@@ -133,11 +144,12 @@ approval prompt stay separate windows.
 
 ### Home
 
-The mouth, how to talk ("Press Right Ctrl, talk, press it again."; hold mode: "Hold F8, talk,
-let go."), and at most one line when something needs attention, most important first: the
-hub's error, a missing macOS permission ("Allow the microphone in System Settings."), "No
-microphone found.", "Talk to this PC is off." ("this Mac" on a Mac), "Getting ready… 42%",
-"Paused.".
+The mouth (the window's only one: the tabs have none), how to talk ("Press Right Ctrl, talk,
+press it again."; hold mode: "Hold F8, talk, let go."), and at most one line when something
+needs attention, most important first: the hub's error, a missing macOS permission ("The
+microphone isn't allowed." / "Pasting isn't allowed (Accessibility)." with an **Allow**
+button beside it; the line is clickable too: both open "Allow access"), "No microphone
+found.", "Talk to this PC is off." ("this Mac" on a Mac), "Getting ready… 42%", "Paused.".
 
 ### Teach words
 
