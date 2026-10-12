@@ -1,6 +1,7 @@
-"""The brand mouth in the Tk windows: sharp at any scale (vector shapes on a Mac's canvas,
-bitmaps at the real pixel size on Windows), the same art either way, and the window icon at
-the screen's icon size. Real Tk runs with --run-windows."""
+"""The brand mouth in the Tk windows: sharp at any scale (on a Mac an AppKit view over a
+canvas of the same shapes, tests/test_mac_native_mouth.py; bitmaps at the real pixel size on
+Windows), the same art either way, and the window icon at the screen's icon size. Real Tk
+runs with --run-windows."""
 
 from __future__ import annotations
 
@@ -17,7 +18,8 @@ from shoutabout import ui_kit as kit
 
 
 def test_the_vector_mouth_is_for_macos():
-    """Aqua's canvas is antialiased and Retina-sharp; Windows' (GDI) isn't."""
+    """The canvas (under its AppKit view) is the Mac's; Windows' canvas (GDI) isn't
+    antialiased, so it gets bitmaps."""
     assert kit.VECTOR_MOUTH is (sys.platform == "darwin")
 
 
@@ -48,14 +50,14 @@ def test_the_vector_stills_and_frames():
     ajar = kit.mouth_shapes(190, brand.AJAR, False)
     assert [color for _c, color in open_mouth] == ["#0A0A0A", "#FF1A1A", "#FFFFFF"]
     assert [color for _c, color in ajar] == ["#0A0A0A", "#FFFFFF"]  # no tongue at rest
-    for shapes in (open_mouth, ajar, *kit._mouth_vectors(190, 12)):
+    talking = [kit.mouth_shapes(190, height, True) for height in kit.talk_heights(12)]
+    for shapes in (open_mouth, ajar, *talking):
         xs = [x for coords, _c in shapes for x in coords[0::2]]
         ys = [y for coords, _c in shapes for y in coords[1::2]]
         assert min(xs) >= 0 and max(xs) <= w and min(ys) >= 0 and max(ys) <= h
         assert (min(ys) + max(ys)) / 2 == pytest.approx(h / 2, abs=0.5)  # centred
         assert all(len(coords) >= 6 for coords, _c in shapes)  # a polygon each
         assert min(len(coords) // 2 for coords, _c in shapes[:1]) >= 48  # smooth curves
-    assert len(kit._mouth_vectors(190, 12)) == 12
 
 
 def test_the_window_icon_is_drawn_at_the_screens_icon_size(monkeypatch):

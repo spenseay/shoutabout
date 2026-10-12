@@ -107,15 +107,22 @@ def ui_scale(widget: Any) -> float:
 #
 # How the mouth stays sharp at any scale:
 #
-# * macOS: Tk draws a PhotoImage one pixel per *point*, so on a Retina screen every bitmap is
-#   scaled up 2x (soft edges). The canvas there is antialiased and drawn at the screen's
-#   backing scale, so the mouth is vector shapes on a canvas (brand.mouth_polygons: the
-#   brand's own outlines, curves sampled finely), sharp at 1x, 2x or 3x.
+# * macOS: Tk 8.6 draws a PhotoImage one pixel per *point* (a Retina screen scales it up 2x:
+#   soft), and its canvas rounds polygon corners to whole points (a curve turns into 1-point
+#   steps: pixelated). So the mouth is an AppKit view over a canvas, drawn at the screen's
+#   backing scale (:mod:`shoutabout.mac.native_mouth`, hooked in through
+#   :data:`native_mouth`); the canvas keeps the brand's outlines as polygons
+#   (brand.mouth_polygons), shown only if that view can't attach.
 # * Windows: Tk's canvas isn't antialiased (GDI), so the mouth stays a supersampled bitmap,
 #   rendered at the real size in screen pixels (callers pass ``N * ui_scale``: the process is
 #   DPI aware, so a bitmap pixel is a screen pixel at 100, 125, 150 or 200 %).
 
 VECTOR_MOUTH = sys.platform == "darwin"
+
+# Set by shoutabout.mac.tkmac in the Mac window process: makes a vector mouth's native view
+# (called with the Mouth; returns an object whose ``show(opening, tongue)`` is True while
+# that view shows the mouth, so the canvas hides its polygons).
+native_mouth: Callable[[Any], Any] | None = None
 
 
 def photo(master: Any, image: brand.Image) -> Any:
@@ -186,14 +193,10 @@ def mouth_shapes(width: int, opening: float, tongue: bool) -> Shapes:
     )
 
 
-def _mouth_vectors(width: int, n: int) -> tuple[Shapes, ...]:
-    return tuple(mouth_shapes(width, h, True) for h in talk_heights(n))
-
-
 class Mouth:
     """The brand mouth: still (ajar, or open with its tongue) or talking (saTalk, 12 frames x
-    133 ms). Vector shapes on a canvas on macOS, a bitmap label on Windows (see above);
-    ``widget`` (alias ``label``) is the Tk widget either way."""
+    133 ms). On macOS a canvas (with its native view over it), a bitmap label on Windows
+    (see above); ``widget`` (alias ``label``) is the Tk widget either way."""
 
     def __init__(
         self,
@@ -208,9 +211,12 @@ class Mouth:
 
         self.vector = VECTOR_MOUTH if vector is None else bool(vector)
         self.width, self.height = mouth_box(width)
-        self._frames: list[Any] = []
+        self.bg = bg
+        self._frames: list[Any] = []  # PhotoImages, or (opening, tongue) for the canvas
         self._still: Any = None
         self._ajar: Any = None
+        self._current: Any = None
+        self._native: Any = None
         self._items: list[Any] = []
         self._job: Any = None
         self._i = 0
@@ -230,9 +236,14 @@ class Mouth:
         self.label = self.widget
         try:  # cosmetic: never let artwork stop a window from opening
             if self.vector:
-                self._frames = list(_mouth_vectors(self.width, frames))
-                self._still = mouth_shapes(self.width, brand.OPEN, True)
-                self._ajar = mouth_shapes(self.width, brand.AJAR, False)
+                self._frames = [(h, True) for h in talk_heights(frames)]
+                self._still = (brand.OPEN, True)
+                self._ajar = (brand.AJAR, False)
+                if native_mouth is not None:
+                    try:
+                        self._native = native_mouth(self)
+                    except Exception:
+                        log.debug("no native view for the mouth", exc_info=True)
             else:
                 self._frames = [photo(parent, img) for img in _mouth_images(self.width, frames)]
                 self._still = photo(parent, _still_mouth(self.width, brand.OPEN))
@@ -250,19 +261,35 @@ class Mouth:
         return self
 
     def _show(self, frame: Any) -> None:
+        self._current = frame
         if not self.vector:
             self.widget.configure(image=frame)
             return
         canvas = self.widget
-        while len(self._items) < len(frame):
+        shapes = mouth_shapes(self.width, *frame)
+        covered = False
+        if self._native is not None:
+            try:
+                covered = bool(self._native.show(*frame))
+            except Exception:
+                log.debug("the mouth's native view failed", exc_info=True)
+                self._native = None
+        while len(self._items) < len(shapes):
             self._items.append(canvas.create_polygon(0, 0, 0, 0, 0, 0, outline="", width=0))
         for i, item in enumerate(self._items):
-            if i < len(frame):
-                coords, color = frame[i]
+            if i < len(shapes):
+                coords, color = shapes[i]
                 canvas.coords(item, *coords)
-                canvas.itemconfigure(item, fill=color, state="normal")
+                state = "hidden" if covered else "normal"
+                canvas.itemconfigure(item, fill=color, state=state)
             else:
                 canvas.itemconfigure(item, state="hidden")
+
+    def redraw(self) -> None:
+        """Show the current frame again (the native view came or went)."""
+        if self._current is not None:
+            with contextlib.suppress(Exception):
+                self._show(self._current)
 
     def talk(self) -> None:
         if self._job is None and self._frames:

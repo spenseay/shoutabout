@@ -193,11 +193,18 @@ second copy of a running app: they send it a "reopen" Apple event. The hub's app
 delegate answers it by opening the ShoutAbout window at Home, with "Allow access" in front
 of it while the microphone or Accessibility is missing (`MacHub.reopened`).
 
-**Sharp on Retina.** Tk draws a bitmap one pixel per point, so on a Retina screen every
-picture is scaled up 2x. The windows' mouth is therefore vector shapes on Tk's canvas, which
-Aqua antialiases and draws at the backing scale (`ui_kit.Mouth`, from
-`brand.mouth_polygons`); there is one mouth per screen at most, and none in the window's
-tabs or the setup's header.
+**Sharp on Retina.** Tk 8.6 draws a bitmap one pixel per point, so on a Retina screen every
+picture is scaled up 2x (soft), and its canvas rounds every polygon corner to a whole point
+before drawing, so curves come out as 1-point steps (1.0.4's mouth looked pixelated). The
+windows' mouth is therefore an `NSImageView` laid over its canvas, showing the brand's own
+rendering at the window's backing scale, one image pixel per screen pixel
+(`mac/native_mouth.py`, hooked into `ui_kit.Mouth` by `tkmac.install`). The view finds the
+Tk window's `NSWindow` by position and title, follows the canvas through the window's
+`<Map>`/`<Unmap>`/`<Configure>` events (pages are shown and hidden by their frames) and
+goes with the canvas's `<Destroy>`; the canvas's polygons (`brand.mouth_polygons`) are
+hidden under it and only show if it can't attach. The Mac self-test opens a small window
+and checks that the view attaches over the canvas at the screen's scale. There is one
+mouth per screen at most, and none in the window's tabs or the setup's header.
 
 **Words.** The shared windows say "PC"; the window process rewrites widget texts on their
 way to Tk ("Talk to this Mac", "Open at login", "menu bar", "log in"), sets Tk's scaling to
