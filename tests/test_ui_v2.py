@@ -119,10 +119,16 @@ def test_every_opener_reaches_the_one_window_on_its_page(host, monkeypatch):
     made = []
 
     class FakeAppWindow(FakeWindow):
-        def __init__(self, window, services, *, page, on_close, on_add_phone) -> None:
+        def __init__(
+            self, window, services, *, page, on_close, on_add_phone, on_allow_access
+        ) -> None:
             super().__init__()
             self.first, self.on_close, self.on_add_phone = page, on_close, on_add_phone
+            self.on_allow_access = on_allow_access
             made.append(self)
+
+    shown_setup: list[str] = []
+    monkeypatch.setattr(host, "_show_setup", shown_setup.append)
 
     monkeypatch.setattr(app_window, "AppWindow", FakeAppWindow)
     host.open_window()  # opened again while running: Home
@@ -133,6 +139,9 @@ def test_every_opener_reaches_the_one_window_on_its_page(host, monkeypatch):
     assert window.first == "home"
     assert window.pages == ["teach", "recent", "settings"]
     assert window.fronted == 4 and host.is_open("main")
+    window.on_allow_access()  # Home's "Allow" (a missing macOS permission)
+    window.on_add_phone()
+    assert shown_setup == ["allow", "phone"]
     window.on_close()
     assert not host.is_open("main")
     host.open_settings()
@@ -263,13 +272,17 @@ def tk_root():
 
 
 @pytest.mark.windows
-def test_setup_window_renders_every_screen(tmp_path, tk_root):
+@pytest.mark.parametrize("vector", [False, True], ids=["bitmap-mouth", "vector-mouth"])
+def test_setup_window_renders_every_screen(tmp_path, tk_root, monkeypatch, vector):
+    """Every screen, each with the brand mouth once at most (none in the header)."""
     import tkinter as tk
 
+    from shoutabout import ui_kit
     from shoutabout.setup_flow import SetupFlow
     from shoutabout.setup_ui import SetupWindow
-    from v2_fakes import inline_runner
+    from v2_fakes import inline_runner, shown_marks
 
+    monkeypatch.setattr(ui_kit, "VECTOR_MOUTH", vector)
     svc = make_services(tmp_path)
     flow = SetupFlow(svc, runner=inline_runner)
     top = tk.Toplevel(tk_root)
@@ -280,6 +293,7 @@ def test_setup_window_renders_every_screen(tmp_path, tk_root):
     # The model is already here: "Getting ready" moves on to "Try it" by itself.
     assert flow.phase == "ready" and flow.screen == "try"
     assert "TRY IT" in _texts(win.outer)
+    assert shown_marks(top) == 0
     box = win._widgets["box"]
     box.insert("1.0", "This is my first dictation.")
     _pump(tk_root, 0.3)
@@ -287,16 +301,20 @@ def test_setup_window_renders_every_screen(tmp_path, tk_root):
     texts = _texts(win.outer)
     assert "Press Right Ctrl, talk, press it again." in texts
     assert "Connect your iPhone" in texts and "Done" in texts
+    assert shown_marks(top) == 1  # the big mouth beside the words
     flow.connect_phone()
     _pump(tk_root, 0.3)
     assert "CONNECT YOUR IPHONE" in _texts(win.outer)
+    assert shown_marks(top) == 1  # the small talking mouth by "Waiting for your iPhone…"
     prompt = svc.pairing.request("Sam's iPhone", PHONE, "192.168.1.5")
     assert flow.offer(prompt)
     _pump(tk_root, 0.3)
     assert "4821" in _texts(win.outer)
+    assert shown_marks(top) == 0
     flow.deny()
     flow.toggle_qr()
     _pump(tk_root, 0.3)
+    assert shown_marks(top) == 1  # the QR code: no mouth
     flow.toggle_qr()
     _pump(tk_root, 0.3)
     every = " ".join(_texts(win.outer)).lower()
@@ -314,7 +332,7 @@ def test_setup_window_allow_access_screen(tmp_path, tk_root):
     from shoutabout import setup_flow
     from shoutabout.setup_flow import SetupFlow
     from shoutabout.setup_ui import SetupWindow
-    from v2_fakes import FakeAccess, inline_runner
+    from v2_fakes import FakeAccess, inline_runner, shown_marks
 
     access = FakeAccess()
     svc = make_services(tmp_path, permissions=access)
@@ -326,6 +344,7 @@ def test_setup_window_allow_access_screen(tmp_path, tk_root):
     texts = _texts(win.outer)
     assert "ALLOW ACCESS" in texts and "Microphone" in texts and "Accessibility" in texts
     assert texts.count("Allow") == 2 and "Skip" in texts
+    assert shown_marks(top) == 0  # just the lines (no mouth, no icon in the header)
     allow = [w for w in _widgets(win.outer) if _text(w) == "Allow"][1]
     allow.invoke()  # Accessibility: System Settings opens
     _pump(tk_root, 0.3)
@@ -442,6 +461,9 @@ def test_approval_prompt_arms_counts_down_and_expires(tmp_path, tk_root):
         seconds_left=svc.pairing.seconds_left,
         arm_delay_ms=200,
     )
+    from v2_fakes import shown_marks
+
+    assert shown_marks(top) == 1  # the talking mouth, once
     win.allow()  # not armed yet: ignored
     assert not win.closed and svc.devices.list() == []
     _pump(tk_root, 0.4)

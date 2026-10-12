@@ -167,3 +167,21 @@ def make_services(
 
         svc.save_settings = save  # type: ignore[method-assign]
     return svc
+
+
+def shown_marks(widget: Any) -> int:
+    """How many brand marks show in ``widget``'s tree: a mouth drawn on a canvas (polygons:
+    macOS) or any picture in a label or button (the bitmap mouth, an icon). Widgets that
+    aren't laid out (a hidden page, a button not packed) don't count."""
+    total = 0
+    for child in widget.winfo_children():
+        if child.winfo_manager():
+            total += _is_mark(child) + shown_marks(child)
+    return total
+
+
+def _is_mark(widget: Any) -> bool:
+    kind = widget.winfo_class()
+    if kind == "Canvas":
+        return any(widget.type(i) == "polygon" for i in widget.find_all())
+    return kind in ("Label", "Button") and bool(str(widget.cget("image")))

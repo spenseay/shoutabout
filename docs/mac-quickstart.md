@@ -37,7 +37,7 @@ opens on **"Allow access"**, with one line for each thing macOS has to allow:
 
 | Line | Click **Allow**, then |
 |---|---|
-| **Microphone** | macOS asks **"ShoutAbout" would like to access the microphone.** → **Allow** |
+| **Microphone** | macOS asks **"ShoutAbout" would like to access the microphone.** → **Allow** (System Settings opens at Privacy & Security > Microphone too: if there's no dialog, turn on the switch next to **ShoutAbout** there) |
 | **Accessibility** | System Settings opens at Privacy & Security > Accessibility (macOS may also show **"ShoutAbout" would like to control this computer…**): turn on the switch next to **ShoutAbout** (type your Mac password if asked) |
 
 Each line gets a tick as soon as macOS allows it; when both have one, the window comes back
@@ -55,9 +55,10 @@ macOS may also ask:
 | **Allow "ShoutAbout" to find devices on local networks?** (only on some macOS versions) | **Allow** (the iPhone needs it to find your Mac) |
 | **Do you want the application "ShoutAbout.app" to accept incoming network connections?** (only if the firewall is on) | **Allow** |
 
-Later, if something is missing, ShoutAbout says so when it starts (**"ShoutAbout needs
-access"**; click it to get the same window), and the menu bar mouth shows a line like
-**Allow pasting (Accessibility)…**. macOS's **"Background Items Added"** notice is normal
+Later, if something is missing, the same **"Allow access"** window opens every time
+ShoutAbout starts (and when you open ShoutAbout again) until it's allowed; the ShoutAbout
+window's Home says what's missing with an **Allow** button, and the menu bar mouth shows a
+line like **Allow pasting (Accessibility)…**. macOS's **"Background Items Added"** notice is normal
 too (that's ShoutAbout opening at login; you can turn it off in ShoutAbout's Settings).
 
 ## 4. The setup window

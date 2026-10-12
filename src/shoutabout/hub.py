@@ -330,7 +330,8 @@ def _run(
         if v2.ui is not None:  # opened again from Finder, Spotlight or Launchpad: the window
             from shoutabout.reopen import watch_mac
 
-            mac_reopen = watch_mac(v2.ui.open_window)  # noqa: F841 - Cocoa holds it weakly
+            ui = v2.ui  # ("Allow access" in front of it while a permission is missing)
+            mac_reopen = watch_mac(lambda: mac_hub.reopened(ui))  # noqa: F841 - held weakly
         import signal
 
         signal.signal(signal.SIGTERM, lambda *_: request_quit())  # log out, pkill: quit cleanly

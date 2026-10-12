@@ -302,12 +302,13 @@ class Polygon(Shape):
     """A convex polygon through ``points`` (in order, either way round). Rotated and
     sheared shapes become polygons (see :func:`rounded_rect_points`)."""
 
-    __slots__ = ("edges", "y0", "y1")
+    __slots__ = ("edges", "points", "y0", "y1")
 
     def __init__(self, points: Sequence[tuple[float, float]]) -> None:
         pts = [(float(x), float(y)) for x, y in points]
         if len(pts) < 3:
             raise ValueError("a polygon needs at least 3 points")
+        self.points = tuple(pts)
         self.y0 = min(y for _, y in pts)
         self.y1 = max(y for _, y in pts)
         edges = []
@@ -587,6 +588,156 @@ def mouth_image(
     height = max(1, math.ceil(width * opening / REF_W))
     layers = mouth_layers(0, 0, width, opening, throat=throat, teeth=teeth, tongue=tongue)
     return rasterize(width, height, layers, samples=samples)
+
+
+# -------------------------------------------------------------------------- vectors
+# The same shapes as filled outlines, for drawing on a vector canvas. The macOS windows use
+# them: Tk's canvas on a Mac is antialiased and drawn at the screen's backing scale, so the
+# mouth stays sharp on a Retina screen, where a bitmap is drawn one pixel per point (2x up).
+
+Point = tuple[float, float]
+CURVE_POINTS = 96  # points per half ellipse: within 0.05 px of the curve at 800 px wide
+FAR = 1e6  # how far a half-plane (:func:`above`) reaches, as a polygon
+SEAM_OVERLAP = 0.5  # how far the throat reaches under the teeth and the tongue (px)
+
+
+def _finite(v: float) -> float:
+    return max(-FAR, min(FAR, v))
+
+
+def shape_points(shape: Shape, n: int = CURVE_POINTS) -> list[Point]:
+    """The outline of a convex ``shape`` as a polygon (``n`` points per half ellipse; an
+    :class:`Intersect` is clipped from its parts). Empty when the shape is."""
+    if isinstance(shape, Egg):
+        if shape.rx <= 0 or (shape.ry_top <= 0 and shape.ry_bottom <= 0):
+            return []
+        pts = []
+        for i in range(n):  # the top half, left to right over the top
+            a = math.pi + math.pi * i / n
+            pts.append((shape.cx + shape.rx * math.cos(a), shape.cy + shape.ry_top * math.sin(a)))
+        for i in range(n):  # the bottom half, right to left under it
+            a = math.pi * i / n
+            pts.append(
+                (shape.cx + shape.rx * math.cos(a), shape.cy + shape.ry_bottom * math.sin(a))
+            )
+        return pts
+    if isinstance(shape, RoundRect):
+        if shape.x1 <= shape.x0 or shape.y1 <= shape.y0:
+            return []
+        steps = max(2, n // 4)
+        return rounded_rect_points(shape.x0, shape.y0, shape.x1, shape.y1, (shape.r,) * 4, steps)
+    if isinstance(shape, Rect):
+        x0, y0, x1, y1 = (_finite(v) for v in (shape.x0, shape.y0, shape.x1, shape.y1))
+        if x1 <= x0 or y1 <= y0:
+            return []
+        return [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    if isinstance(shape, Polygon):
+        return list(shape.points)
+    if isinstance(shape, Intersect):
+        if not shape.shapes:
+            return []
+        pts = shape_points(shape.shapes[0], n)
+        for other in shape.shapes[1:]:
+            pts = clip_convex(pts, shape_points(other, n))
+        return pts
+    raise TypeError(f"no outline for {type(shape).__name__}")
+
+
+def _area2(pts: Sequence[Point]) -> float:
+    """Twice the signed area (shoelace)."""
+    pairs = zip(pts, [*pts[1:], pts[0]], strict=True)
+    return sum(ax * by - bx * ay for (ax, ay), (bx, by) in pairs)
+
+
+def clip_convex(subject: Sequence[Point], clip: Sequence[Point]) -> list[Point]:
+    """The part of polygon ``subject`` inside the convex polygon ``clip`` (Sutherland-
+    Hodgman; either winding). Empty when they don't overlap."""
+    if len(subject) < 3 or len(clip) < 3:
+        return []
+    area = _area2(clip)
+    if area == 0:
+        return []
+    sign = 1.0 if area > 0 else -1.0
+    out = list(subject)
+    for (ax, ay), (bx, by) in zip(clip, [*clip[1:], clip[0]], strict=True):
+        if len(out) < 3:
+            return []
+        dx, dy = bx - ax, by - ay
+        points, out = out, []
+        sides = [sign * (dx * (py - ay) - dy * (px - ax)) for px, py in points]
+        for i, (cur, s_cur) in enumerate(zip(points, sides, strict=True)):
+            prev, s_prev = points[i - 1], sides[i - 1]
+            if (s_cur >= 0) != (s_prev >= 0):  # the edge prev -> cur crosses the line
+                t = s_prev / (s_prev - s_cur)
+                out.append((prev[0] + t * (cur[0] - prev[0]), prev[1] + t * (cur[1] - prev[1])))
+            if s_cur >= 0:
+                out.append(cur)
+    return out if len(out) >= 3 else []
+
+
+def _tongue_line(blob: Egg, outline: Egg) -> float:
+    """The line y below which the tongue covers the outline's whole width (it pokes out of
+    the bottom of the mouth there)."""
+
+    def covered(y: float) -> bool:
+        mouth, tongue = outline.span(y), blob.span(y)
+        if mouth is None:
+            return True
+        return tongue is not None and tongue[0] <= mouth[0] and tongue[1] >= mouth[1]
+
+    lo, hi = blob.cy, outline.cy + outline.ry_bottom
+    if covered(lo):
+        return lo
+    for _ in range(48):
+        mid = (lo + hi) / 2
+        if covered(mid):
+            hi = mid
+        else:
+            lo = mid
+    return hi
+
+
+def mouth_polygons(
+    x: float,
+    y: float,
+    w: float,
+    opening: float = OPEN,
+    *,
+    throat: RGB = BLACK,
+    teeth: RGB = WHITE,
+    tongue: RGB | None = RED,
+    n: int = CURVE_POINTS,
+    overlap: float = SEAM_OVERLAP,
+) -> list[tuple[list[Point], RGB]]:
+    """:func:`mouth_layers` as filled polygons, bottom to top: ``[(points, colour)]``.
+
+    A canvas antialiases each polygon against what is already under it, so a throat drawn
+    whole would leave a dark fringe along the outer edge of the teeth and the tongue (the
+    rasterizer above resolves overlapping layers exactly; a canvas can't). The throat is
+    therefore only the band between the teeth line and the line where the tongue fills the
+    mouth's width, reaching ``overlap`` px under both (so no seam shows either)."""
+    layers = mouth_layers(x, y, w, opening, throat=throat, teeth=teeth, tongue=tongue)
+    outline = layers[0].shape
+    assert isinstance(outline, Egg)
+    egg = shape_points(outline, n)
+    top, bottom = -FAR, FAR
+    out: list[tuple[list[Point], RGB]] = []
+    for layer in layers[1:]:
+        shape = layer.shape
+        assert isinstance(shape, Intersect)
+        first, second = shape.shapes[:2]
+        if isinstance(second, Rect):  # the teeth: Intersect(outline, above(teeth line))
+            top = second.y1 - overlap
+        else:  # the tongue: Intersect(blob, outline)
+            assert isinstance(first, Egg)
+            bottom = _tongue_line(first, outline) + overlap
+        pts = shape_points(shape, n)
+        if pts:
+            out.append((pts, layer.color))
+    body = clip_convex(egg, shape_points(Rect(-FAR, top, FAR, bottom)))
+    if body:
+        out.insert(0, (body, layers[0].color))
+    return out
 
 
 # ----------------------------------------------------------------------- tray icons

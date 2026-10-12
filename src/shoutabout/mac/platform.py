@@ -10,8 +10,9 @@ voice_runtime.py and inject/__init__.py is marked ``# v2-macos``).
   :class:`shoutabout.local_dictation.LocalDictation`;
 * :class:`MacHub`: the menu bar, the permission lines in it, the one place that asks macOS
   for permissions (:class:`shoutabout.mac.access.HubAccess`, also behind the setup's
-  "Allow access" screen), a notice at start when something is missing (clicking a
-  ShoutAbout notification then opens that screen), the native fallback pairing prompt, and
+  "Allow access" screen), the launch check (the microphone or Accessibility not allowed:
+  "Allow access" opens at every start, and when ShoutAbout is opened again while it runs,
+  plus a notification whose click opens it too), the native fallback pairing prompt, and
   a watcher that (re)starts the hotkey listener as soon as a permission for it is allowed
   (no restart needed).
 """
@@ -165,10 +166,11 @@ def adapt_services(services: Any, paths: Paths, notify: Callable[[str, str], Non
         CocoaPasteboard().write_text(load_token(paths), (CONCEALED,))
         notify("Hub token copied", "")
 
-    def missing_permissions() -> list[str]:  # Home's status line
+    def missing_permissions() -> list[str]:  # Home's status line (and its "Allow")
+        from shoutabout.mac import access
         from shoutabout.mac.permissions import report
 
-        return report().missing()
+        return access.missing(access.status_of(report()))  # what "Allow access" lists
 
     services.hotkey_choices = lambda: dict(keys.MAC_HOTKEY_CHOICES)
     services.hint_text = keys.hint_text
@@ -255,6 +257,10 @@ def _hotkey_grants(report: Any) -> tuple[bool, bool]:
     return report.accessibility is True, report.input_monitoring is True
 
 
+def _in_background(work: Callable[[], None], name: str) -> None:
+    threading.Thread(target=work, name=name, daemon=True).start()
+
+
 _NOTICE_DELEGATE: Any = None
 
 
@@ -331,9 +337,13 @@ class MacHub:
     # -- start-up
 
     def start_permissions(self, voice: Any, v2: Any, *, first_run: bool) -> None:
-        """Hand the setup window its "Allow access" screen, say what's missing (on a first
-        run only once the setup window is gone: it opens on that screen), and start the
-        watcher."""
+        """Hand the setup window its "Allow access" screen, check what macOS allows, and
+        start the watcher.
+
+        Every start: when the microphone or Accessibility (pasting and the hotkey) isn't
+        allowed, ShoutAbout can't work, so "Allow access" opens by itself, with the
+        notification as a second signal (:meth:`check_access`). A first run's setup window
+        opens on that screen anyway; the notification then waits until it is gone."""
         self._voice = voice
         self._ui = getattr(v2, "ui", None)
         services = getattr(v2, "services", None)
@@ -350,8 +360,47 @@ class MacHub:
         if first_run and self._ui is not None:
             self._told = False  # said once the setup window is gone (tell_after_setup)
         else:
-            self.tell_missing(now)
+            self.check_access(now)
         self.watch_permissions(voice)
+
+    def check_access(self, status: Any = None) -> bool:
+        """The launch check: something ShoutAbout needs isn't allowed -> the setup's "Allow
+        access" screen, and the notification. True if something is missing."""
+        from shoutabout.mac import access
+
+        status = status if status is not None else self.access.status()
+        if not access.missing(status):
+            self._told = True
+            return False
+        log.info("missing permissions at start: %s", ", ".join(access.missing(status)))
+        self.open_allow()
+        self.tell_missing(status)
+        return True
+
+    def open_allow(self, ui: Any = None) -> bool:
+        """Open the setup's "Allow access" screen (off this thread: it may start the window
+        process). False without windows."""
+        ui = ui if ui is not None else self._ui
+        if ui is None:
+            return False
+        _in_background(lambda: ui.open_setup("allow"), "open-allow")
+        return True
+
+    def reopened(self, ui: Any) -> None:
+        """ShoutAbout opened again while it runs (Finder, Spotlight, Launchpad, the Dock):
+        the ShoutAbout window at Home, with "Allow access" in front of it while the
+        microphone or Accessibility isn't allowed. (Called off the main thread.)"""
+        from shoutabout.mac import access
+
+        try:
+            missing = access.missing(self.access.status())
+        except Exception:
+            log.exception("couldn't read the permissions")
+            missing = []
+        ui.open_window("home")
+        if missing:
+            log.info("opened again with permissions missing: %s", ", ".join(missing))
+            ui.open_setup("allow")
 
     def tell_missing(self, status: Any = None) -> bool:
         """One notification when a permission is missing ("Click to allow …"; the click
@@ -408,10 +457,7 @@ class MacHub:
         except Exception:
             log.exception("couldn't read the permissions")
             return
-        # Off the main thread: opening the window may start the window process.
-        threading.Thread(
-            target=lambda: ui.open_setup("allow"), name="open-allow", daemon=True
-        ).start()
+        self.open_allow(ui)
 
     # -- the hotkey watcher
 

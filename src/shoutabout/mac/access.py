@@ -150,9 +150,10 @@ class HubAccess:
         return now
 
     def ask(self, which: str) -> str:
-        """One "Allow": macOS's own dialog where it has one, and System Settings at the
-        pane otherwise (or as well). Returns "asked" (a dialog), "opened" (System Settings)
-        or "granted" (nothing to do)."""
+        """One "Allow": System Settings at the exact pane (Privacy & Security > Microphone,
+        Accessibility...), every time, so there is always a switch to turn on, plus macOS's
+        own request where it has one. Returns "opened" (System Settings) or "granted"
+        (nothing to do)."""
         api = self._api
         if which == "microphone":
             state = api.microphone_status()
@@ -161,11 +162,10 @@ class HubAccess:
             with self._lock:
                 first = which not in self._asked
                 self._asked.add(which)
-            # Not asked yet: macOS's dialog. Asked already (the dialog may be gone or
-            # never have shown) or refused: the switch in System Settings.
+            # Not asked yet: macOS's dialog as well (asking is also what lists ShoutAbout
+            # under Microphone). Once asked, or refused, only the switch can change it.
             if state == "undetermined" and first and api.request_microphone():
                 log.info("asked macOS for the microphone")
-                return "asked"
             api.open_settings("microphone")
             return "opened"
         if which == "accessibility":
@@ -195,9 +195,16 @@ class RemoteAccess:
     """:class:`HubAccess` for the window process: the hub answers over the link. If the
     hub can't, "Allow" still opens System Settings from here."""
 
-    def __init__(self, link: Any, *, open_pane: Callable[[str], Any] | None = None) -> None:
+    def __init__(
+        self,
+        link: Any,
+        *,
+        open_pane: Callable[[str], Any] | None = None,
+        prompt_accessibility: Callable[[], Any] | None = None,
+    ) -> None:
         self._link = link
         self._open_pane = open_pane
+        self._prompt_accessibility = prompt_accessibility
 
     def status(self) -> Status | None:
         try:
@@ -212,6 +219,16 @@ class RemoteAccess:
             return str(self._link.call("allow", which=which))
         except Exception as exc:
             log.warning("the hub couldn't ask for %s (%s); opening System Settings", which, exc)
+        if which == "accessibility":  # this process is the app too: list it under the pane
+            try:
+                if self._prompt_accessibility is not None:
+                    self._prompt_accessibility()
+                else:
+                    from shoutabout.mac.permissions import accessibility_trusted
+
+                    accessibility_trusted(prompt=True)
+            except Exception:
+                log.debug("couldn't ask for Accessibility from the window", exc_info=True)
         open_pane = self._open_pane
         if open_pane is None:
             from shoutabout.mac.permissions import open_settings as open_pane

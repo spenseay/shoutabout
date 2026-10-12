@@ -104,6 +104,24 @@ def test_home_view_reads_the_hub(tmp_path):
     assert aw.home_view(svc).talk == "Hold F8, talk, let go."
 
 
+def test_home_offers_allow_for_a_missing_mac_permission(tmp_path):
+    svc = make_services(tmp_path)
+    svc.state = HubState()
+    svc.state.set_status(HubStatus.IDLE)
+    assert not aw.home_view(svc).allow
+    svc.missing_permissions = lambda: ["accessibility"]
+    view = aw.home_view(svc)
+    assert view.note == aw.PERMISSION_NOTES["accessibility"] and view.urgent and view.allow
+    svc.missing_permissions = lambda: ["microphone", "accessibility"]
+    assert aw.home_view(svc).note == aw.PERMISSION_NOTES["microphone"]  # the first to allow
+    # a worse problem: no Allow for it
+    svc.state.set_status(HubStatus.ERROR, "Couldn't listen on port 47821")
+    view = aw.home_view(svc)
+    assert view.note.startswith("Couldn't listen") and view.urgent and not view.allow
+    # Never "System Settings" in the line: its button opens "Allow access", which opens them.
+    assert not any("System Settings" in note for note in aw.PERMISSION_NOTES.values())
+
+
 def test_hub_status_here_on_a_mac_and_standalone(tmp_path):
     svc = make_services(tmp_path)
     assert svc.hub_status() is None  # no hub in this process (shoutabout settings)
@@ -200,11 +218,16 @@ def _pump(root, seconds: float) -> None:
 
 
 @pytest.mark.windows
-def test_the_window_has_every_page(tmp_path, monkeypatch):
+@pytest.mark.parametrize("vector", [False, True], ids=["bitmap-mouth", "vector-mouth"])
+def test_the_window_has_every_page(tmp_path, monkeypatch, vector):
+    """Every page, and the brand mouth once at most: Home's (no small one in the tabs).
+    The macOS vector mouth runs here too (Tk's canvas is the same API, just not smooth)."""
     tk = pytest.importorskip("tkinter")
     from shoutabout.recent import Recent
+    from v2_fakes import shown_marks
 
     monkeypatch.setattr(aw.AppWindow, "bring_to_front", lambda self: None)  # keep focus
+    monkeypatch.setattr(aw.kit, "VECTOR_MOUTH", vector)
     try:
         root = tk.Tk()
     except tk.TclError as exc:  # no display, or Tcl not ready for another interpreter
@@ -231,6 +254,7 @@ def test_the_window_has_every_page(tmp_path, monkeypatch):
             win.show(name)
             _pump(root, 0.2)
             assert win.current == name
+            assert shown_marks(top) == (1 if name == "home" else 0), name
             button, bar = win._tabs[name]
             assert bar["bg"] == aw.kit.RED and button["fg"] == aw.kit.BLACK
             others = [b for key, (_b, b) in win._tabs.items() if key != name]
@@ -251,5 +275,49 @@ def test_the_window_has_every_page(tmp_path, monkeypatch):
         win.close()
         assert closed == [1] and win.pages == {}
         assert not top.winfo_exists()
+    finally:
+        root.destroy()
+
+
+@pytest.mark.windows
+def test_homes_allow_opens_allow_access(tmp_path, monkeypatch):
+    """A missing macOS permission on Home: the red line and an "Allow" button (the line is
+    clickable too) that open the setup's "Allow access" screen."""
+    tk = pytest.importorskip("tkinter")
+    monkeypatch.setattr(aw.AppWindow, "bring_to_front", lambda self: None)
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip(f"no Tk: {exc}")
+    root.withdraw()
+    try:
+        svc = make_services(tmp_path)
+        svc.state = HubState()
+        svc.state.set_status(HubStatus.IDLE)
+        svc.missing_permissions = lambda: ["accessibility"]
+        asked: list[int] = []
+        top = tk.Toplevel(root)
+        win = aw.AppWindow(
+            top, svc, on_allow_access=lambda: asked.append(1), load_in_background=False
+        )
+        home = win.pages["home"]
+        assert home.view.allow and home.note["text"] == aw.PERMISSION_NOTES["accessibility"]
+        assert home.allow_button.winfo_manager() == "pack"
+        assert home.allow_button["text"] == aw.ALLOW_BUTTON
+        home.allow_button.invoke()
+        assert home.note.bind("<Button-1>") and home.note["cursor"] == "hand2"
+        home.clicked_line()  # (a withdrawn window gets no real clicks)
+        assert asked == [1, 1]
+        svc.missing_permissions = lambda: []  # allowed: the line and the button go
+        home.render(aw.home_view(svc))
+        assert not home.allow_button.winfo_manager() and home.note["text"] == ""
+        home.clicked_line()
+        assert asked == [1, 1] and home.note["cursor"] == ""
+        win.close()
+        # No way to open "Allow access" (no handler): no button either.
+        svc.missing_permissions = lambda: ["microphone"]
+        win = aw.AppWindow(tk.Toplevel(root), svc, load_in_background=False)
+        assert not win.pages["home"].allow_button.winfo_manager()
+        win.close()
     finally:
         root.destroy()

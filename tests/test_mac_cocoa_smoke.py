@@ -204,20 +204,24 @@ def test_mac_hub_start_notices_and_clicks(cocoa, monkeypatch, tmp_path):
     opened: list[str] = []
     ui = types.SimpleNamespace(open_setup=opened.append, running=False)
     v2 = types.SimpleNamespace(ui=ui, services=types.SimpleNamespace(permissions=None))
+    import time
+
+    def opened_twice() -> None:
+        for _ in range(100):
+            if len(opened) >= 2:
+                return
+            time.sleep(0.01)
+
     hub.start_permissions(None, v2, first_run=False)
     assert v2.services.permissions is hub.access
+    # Something missing at start: "Allow access" opens, and the notice says it too.
     assert told == [("ShoutAbout needs access", "Click to allow Accessibility.")]
     center = modules["Foundation"].NSUserNotificationCenter.defaultUserNotificationCenter()
     delegate = center.setDelegate_.call_args.args[0]
     assert delegate.userNotificationCenter_shouldPresentNotification_(center, None) is True
     delegate.userNotificationCenter_didActivateNotification_(center, None)
-    import time
-
-    for _ in range(50):
-        if opened:
-            break
-        time.sleep(0.01)
-    assert opened == ["allow"]  # the click opens "Allow access"
+    opened_twice()
+    assert opened == ["allow", "allow"]  # at start, then the click
     # A first run says nothing at start (the setup opens on "Allow access")...
     told.clear()
     first = platform.MacHub(Paths(tmp_path), HubState(), lambda t, m: told.append((t, m)))

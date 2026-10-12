@@ -82,8 +82,7 @@ class SetupWindow:
         window.protocol("WM_DELETE_WINDOW", self.close)
         window.bind("<Escape>", lambda _e: self.close())
         try:  # cosmetic only
-            self._icon = kit.app_icon_photo(window, 32)
-            window.iconphoto(False, self._icon)
+            self._icon = kit.set_window_icon(window)
         except Exception:
             log.debug("couldn't set the window icon", exc_info=True)
 
@@ -169,13 +168,13 @@ class SetupWindow:
         self._widgets = {}
 
     def _header(self) -> None:
+        """The name and the screen's title. No mouth here: a screen shows the brand mouth
+        once at most, and the screens that have one show it big, beside their words."""
         import tkinter as tk
 
         f, fonts = self.flow, self.fonts
         top = tk.Frame(self.outer, bg=kit.YELLOW)
         top.pack(fill="x", pady=(round(22 * self.scale), 0))
-        if self._icon is not None:
-            tk.Label(top, image=self._icon, bg=kit.YELLOW).pack(side="left", padx=(0, 8))
         tk.Label(top, text="SHOUTABOUT", font=fonts.small_bold, bg=kit.YELLOW, fg=kit.BLACK).pack(
             side="left"
         )
