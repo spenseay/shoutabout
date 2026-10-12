@@ -141,7 +141,7 @@ class HomePage:
         self.fonts = kit.Fonts(tkfont.families(parent))
         self.results: queue.Queue = queue.Queue()
         self._asking = False
-        self._next: Any = None  # the next refresh's timer
+        self._jobs: dict[str, Any] = {}  # pending after() jobs
         self.view: HomeView | None = None
         s, f = self.scale, self.fonts
 
@@ -156,13 +156,14 @@ class HomePage:
             self.refresh()
         else:
             self.render(home_view(services))
-        self.win.after(POLL_MS, self._poll)
+        self._jobs["poll"] = self.win.after(POLL_MS, self._poll)
 
     def close(self) -> None:
         if self.closed:
             return
         self.closed = True
         self.mouth.stop()
+        kit.cancel_jobs(self.win, self._jobs)
         with contextlib.suppress(Exception):
             self.win.destroy()
 
@@ -201,13 +202,13 @@ class HomePage:
             if view is not None:
                 self.render(view)
             if self.visible:  # one timer at a time: showing the page again doesn't add one
-                if self._next is not None:
-                    self.win.after_cancel(self._next)
-                self._next = self.win.after(HOME_REFRESH_MS, self._tick)
-        self.win.after(POLL_MS, self._poll)
+                if "next" in self._jobs:
+                    self.win.after_cancel(self._jobs["next"])
+                self._jobs["next"] = self.win.after(HOME_REFRESH_MS, self._tick)
+        self._jobs["poll"] = self.win.after(POLL_MS, self._poll)
 
     def _tick(self) -> None:
-        self._next = None
+        self._jobs.pop("next", None)
         if self.visible:
             self.refresh()
 
@@ -229,7 +230,7 @@ class HomePage:
         if view.busy:
             self.mouth.talk()
         else:
-            self.mouth.stop()
+            self.mouth.stop(open_mouth=True)  # the brand mouth, at rest
 
 
 # ----------------------------------------------------------------------- the window

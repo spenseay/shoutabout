@@ -85,6 +85,15 @@ def enable_dpi_awareness() -> None:
         ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))  # type: ignore[attr-defined]
 
 
+def cancel_jobs(widget: Any, jobs: dict[str, Any]) -> None:
+    """Cancel a page's pending ``after`` jobs as it closes (a job left behind fires on a
+    destroyed widget, and Tk prints "invalid command name")."""
+    for job in jobs.values():
+        with contextlib.suppress(Exception):
+            widget.after_cancel(job)
+    jobs.clear()
+
+
 def ui_scale(widget: Any) -> float:
     """96-dpi pixels -> screen pixels (fonts scale by themselves)."""
     try:

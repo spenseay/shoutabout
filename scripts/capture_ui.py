@@ -1,7 +1,7 @@
-"""Render the setup screens, the settings and History windows, the pairing prompt and the
-mouth pill with FAKE data and save PNGs of them (for docs and reviews). Nothing real is
-touched: a throw-away config dir, fake hardware, model choices and dictations, no hub, no
-microphone, no clipboard, no network.
+"""Render the setup screens, the ShoutAbout window's pages (Home, Teach words, Recent,
+Settings), the pairing prompt and the mouth pill with FAKE data and save PNGs of them (for
+docs and reviews). Nothing real is touched: a throw-away config dir, fake hardware, model
+choices and dictations, no hub, no microphone, no clipboard, no network.
 
 Usage (Windows, from the repo root):
     .venv\\Scripts\\python.exe scripts\\capture_ui.py OUT_DIR [NAME ...]
@@ -82,9 +82,7 @@ def fake_services(home: Path) -> AppServices:
         has_microphone=lambda: True,
         cleanup_available=lambda _cfg: False,  # never ask a real Ollama
         copy_text=lambda _text: None,  # never the real clipboard
-        open_history=lambda: None,
         version="0.2.0",
-        open_teach=lambda: None,
         open_logs=lambda: None,
         copy_hub_token=lambda: None,
         # A source checkout started by the v1 logon task: shown read-only.
@@ -198,12 +196,12 @@ def setup_shot(name: str, svc: AppServices, root) -> None:
 
 SAMPLE_DICTATIONS = [
     (
-        0,
+        2,
         "local",
         None,
-        "Okay so here is the plan for today. I want to finish the History window, then build the "
+        "Okay so here is the plan for today. I want to finish the window, then build the "
         "installer and run the self-test, and after lunch go through the laptop feedback one item "
-        "at a time so nothing slips. If the build is green by four we ship it to the laptop.",
+        "at a time so nothing slips.",
         True,
     ),
     (14, "lan", "Sam's iPhone", "Pick up oat milk and the good coffee on the way home.", True),
@@ -215,42 +213,102 @@ SAMPLE_DICTATIONS = [
         "show up instantly.",
         False,
     ),
-    (60 * 20, "local", None, "Meeting notes: Better Shell release moves to Thursday.", True),
-    (60 * 26, "tunnel", None, "Remind me to call the dentist tomorrow morning.", True),
 ]
 
 
-def history_services(svc: AppServices) -> None:
-    """Made-up dictations and one failed recording in the throw-away config dir."""
-    import json
+def recent_services(svc: AppServices) -> None:
+    """Made-up dictations and one failed recording, in memory (as the hub keeps them)."""
+    import dataclasses
     from datetime import datetime, timedelta
 
     import numpy as np
 
+    from shoutabout.models import CleanupResult, Timings, TranscribeResult
+    from shoutabout.recent import Recent
+
+    recent = Recent()
     now = datetime.now().astimezone()
-    lines = []
     for minutes, route, source, text, pasted in reversed(SAMPLE_DICTATIONS):
-        lines.append(
-            json.dumps(
-                {
-                    "ts": (now - timedelta(minutes=minutes)).isoformat(timespec="seconds"),
-                    "id": f"{minutes:012d}",
-                    "route": route,
-                    "target": "pc",
-                    "raw_text": text,
-                    "text": text,
-                    "pasted": pasted,
-                    "warning": None if pasted else "The PC is locked — text is on your clipboard.",
-                    "source": source,
-                }
+        recent.add(
+            TranscribeResult(
+                text=text,
+                raw_text=text,
+                target="pc",
+                route=route,
+                pasted=pasted,
+                warning=None if pasted else "The PC is locked â€” text is on your clipboard.",
+                cleanup=CleanupResult(text=text, status="disabled"),
+                timings=Timings(),
+                extra={"source": source},
             )
         )
-    svc.paths.history_file.write_text("\n".join(lines) + "\n", "utf-8")
-    svc.failed_recordings().keep_samples(
+        stamp = (now - timedelta(minutes=minutes)).isoformat(timespec="seconds")
+        recent._items[0] = dataclasses.replace(recent._items[0], ts=stamp)
+    recent.keep_failed(
         np.zeros(16_000 * 125, dtype=np.float32) + 0.01,
         error="The speech engine ran out of graphics memory (CUDA out of memory).",
     )
+    svc.recent = recent
     svc.retry_failed = lambda _id: ""  # the button is live; nothing is clicked
+
+
+def teach_services(svc: AppServices) -> None:
+    """A few taught words and suggestions from (made-up) project folders."""
+    from shoutabout.learn import Suggestion, _save
+
+    svc.paths.vocab_file.write_text(
+        "# Words ShoutAbout should spell right (top = first in line)\n"
+        "Priya Raghunathan\nChameleon CV\nBetter Shell\nKeyzPZ\niOS\n",
+        "utf-8",
+    )
+    rows = [
+        ("Rocket Launcher", "package name in Developer/webstuff"),
+        ("Paperclip", "git remote of Developer/paperclip-src"),
+        ("Nested AI Tool", "package name in Developer/group/nested-ai-tool"),
+        ("Plot Twist", "project folder Developer/plot-twist-beta"),
+    ]
+    _save(
+        svc.paths,
+        [Suggestion(t, "projects", 1, d, "2026-10-11T09:00:00-07:00") for t, d in rows],
+    )
+
+
+def home_services(svc: AppServices, name: str) -> None:
+    from shoutabout.models import HubStatus
+    from shoutabout.state import HubState, Progress
+
+    state = HubState()
+    if name == "home-getting-ready":
+        state.set_progress(Progress(672_000_000, 1_600_000_000))
+    else:
+        state.set_status(HubStatus.IDLE)
+    if name == "home-no-mic":
+        svc.has_microphone = lambda: False
+    svc.state = state
+
+
+def window_shot(name: str, svc: AppServices, root):
+    """The ShoutAbout window on one page (returned: closing it stops its pages' timers)."""
+    from shoutabout.app_window import AppWindow
+
+    page = name.removeprefix("window-")
+    if page.startswith("home"):
+        home_services(svc, page)
+    elif page == "teach":
+        teach_services(svc)
+    elif page == "recent":
+        recent_services(svc)
+    elif page.startswith("settings"):
+        # Only with Ollama and a cleanup model does Settings show AI cleanup.
+        svc.cleanup_available = lambda _cfg, on=page == "settings-ai-cleanup": on
+        svc.devices.add("Sam's iPhone", "6f1c2a8e-0b7d-4a43-9d5e-2c1b0a9f8e7d")
+        svc.devices.add("Work iPhone", "0d5e9b1a-7c3f-4e2d-8a6b-1f0e9d8c7b6a")
+        svc.devices.touch(svc.devices.list()[0].key)
+    window = AppWindow(root, svc, page=page.split("-")[0], load_in_background=False)
+    if page.startswith("settings"):
+        window.pages["settings"].model.message = "Saved."
+        window.pages["settings"].reload()
+    return window
 
 
 def overlay_shots(out_dir: Path, scale: float = 1.5) -> None:
@@ -339,9 +397,13 @@ def main() -> int:
         "setup-4-phone-approve",
         "setup-4-phone-qr",
         "setup-add-phone",
-        "settings",
-        "settings-ai-cleanup",
-        "history",
+        "window-home",
+        "window-home-getting-ready",
+        "window-home-no-mic",
+        "window-teach",
+        "window-recent",
+        "window-settings",
+        "window-settings-ai-cleanup",
         "approval-prompt",
         "overlay-top",
     ]
@@ -358,29 +420,11 @@ def main() -> int:
             svc = fake_services(tmp / name)
             root = tk.Tk()
             root.withdraw()
+            window = None
             if name.startswith("setup"):
                 setup_shot(name, svc, root)
-            elif name.startswith("settings"):
-                from shoutabout.settings_model import SettingsModel
-                from shoutabout.settings_ui import SettingsWindow
-
-                # Only with Ollama and a cleanup model does Settings show AI cleanup.
-                svc.cleanup_available = lambda _cfg, on=name == "settings-ai-cleanup": on
-
-                svc.devices.add("Sam's iPhone", "6f1c2a8e-0b7d-4a43-9d5e-2c1b0a9f8e7d")
-                svc.devices.add("Work iPhone", "0d5e9b1a-7c3f-4e2d-8a6b-1f0e9d8c7b6a")
-                key = svc.devices.list()[0].key
-                svc.devices.touch(key)
-                model = SettingsModel(svc)
-                model.load_models()
-                model.message = "Saved."
-                SettingsWindow(root, model, load_in_background=False)
-            elif name == "history":
-                from shoutabout.history_model import HistoryModel
-                from shoutabout.history_ui import HistoryWindow
-
-                history_services(svc)
-                HistoryWindow(root, HistoryModel(svc), load_in_background=False)
+            elif name.startswith("window-"):
+                window = window_shot(name, svc, root)
             elif name == "approval-prompt":
                 from shoutabout.approval_ui import ApprovalPrompt
 
@@ -399,12 +443,15 @@ def main() -> int:
             root.deiconify()
             done = threading.Event()
 
-            def shoot(root=root, name=name, done=done) -> None:
+            def shoot(root=root, name=name, done=done, window=window) -> None:
                 try:
                     capture(root, out_dir / f"{name}.png")
                 finally:
                     done.set()
-                    root.destroy()
+                    if window is not None:
+                        window.close()  # destroys root too
+                    else:
+                        root.destroy()
 
             root.after(1800, shoot)
             root.mainloop()

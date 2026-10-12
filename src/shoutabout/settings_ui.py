@@ -91,6 +91,7 @@ class SettingsPage:
         self._pending: dict[int, Callable[[Any, BaseException | None], None]] = {}
         self._job = 0
         self._confirm: str | None = None
+        self._jobs: dict[str, Any] = {}  # pending after() jobs
         # The page scrolls when the screen is short (a 1080p laptop at 150 % is 720 px high).
         frame = tk.Frame(parent, bg=kit.YELLOW)
         frame.pack(fill="both", expand=True)
@@ -111,7 +112,10 @@ class SettingsPage:
         self.render()
         if load_in_background:
             self.run_async(model.load_models, lambda _r, _e: self.reload())
-        self.win.after(POLL_MS, self._poll)
+        else:  # tests and screenshots: everything at once
+            model.load_models()
+            self.reload()
+        self._jobs["poll"] = self.win.after(POLL_MS, self._poll)
 
     # ------------------------------------------------------------ plumbing
 
@@ -120,6 +124,7 @@ class SettingsPage:
             return
         self.closed = True
         self._pending.clear()
+        kit.cancel_jobs(self.win, self._jobs)
         with contextlib.suppress(Exception):
             self.win.destroy()
 
@@ -165,7 +170,7 @@ class SettingsPage:
         except Exception:
             log.exception("settings window update failed")
         if not self.closed:
-            self.win.after(POLL_MS, self._poll)
+            self._jobs["poll"] = self.win.after(POLL_MS, self._poll)
 
     def _fit_scroll(self) -> None:
         """Scroll region = the page; the scrollbar shows only when the page doesn't fit."""

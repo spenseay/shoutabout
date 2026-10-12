@@ -96,6 +96,14 @@ def suggest_from_projects(paths: Paths) -> int:
     return refresh_suggestions(paths, include_projects=True, roots=roots)
 
 
+def read_words(paths: Paths) -> tuple[list[Suggestion], list[str]]:
+    """(pending suggestions, vocab terms in priority order)."""
+    from shoutabout.learn import pending_suggestions
+    from shoutabout.vocab import read_terms
+
+    return pending_suggestions(paths), read_terms(paths.vocab_file)
+
+
 def open_file(path: Path) -> None:
     """Open a text file in the person's editor."""
     if hasattr(os, "startfile"):
@@ -121,14 +129,18 @@ class TeachPage:
         self.scale = kit.ui_scale(parent)
         self.fonts = kit.Fonts(tkfont.families(parent))
         self.results: queue.Queue = queue.Queue()
-        self.busy = 0
+        self._pending: dict[int, Callable[[Any, BaseException | None], None]] = {}
+        self._job = 0
+        self._jobs: dict[str, Any] = {}  # pending after() jobs
         self.scanning = False
         self.suggestion_vars: list[tuple[Any, Suggestion]] = []
         self.vocab_terms: list[str] = []
         self.build()
         if load_in_background:
             self.reload()
-        self.win.after(POLL_MS, self._poll)
+        else:
+            self._show_data(read_words(paths), None)
+        self._jobs["poll"] = self.win.after(POLL_MS, self._poll)
 
     # -------------------------------------------------------------- plumbing
 
@@ -136,6 +148,8 @@ class TeachPage:
         if self.closed:
             return
         self.closed = True
+        self._pending.clear()
+        kit.cancel_jobs(self.win, self._jobs)
         with contextlib.suppress(Exception):
             self.win.destroy()
 
@@ -150,22 +164,26 @@ class TeachPage:
             return
         try:
             while True:
-                callback, result, error = self.results.get_nowait()
-                self.busy = max(0, self.busy - 1)
-                callback(result, error)
+                job, result, error = self.results.get_nowait()
+                done = self._pending.pop(job, None)
+                if done is not None:
+                    done(result, error)
         except queue.Empty:
             pass
         except Exception:
             log.exception("Teach words page update failed")
         if not self.closed:
-            self.win.after(POLL_MS, self._poll)
+            self._jobs["poll"] = self.win.after(POLL_MS, self._poll)
 
     def run_async(
         self, work: Callable[[], Any], done: Callable[[Any, BaseException | None], None]
     ) -> None:
         """Run ``work`` off the UI thread; ``done(result, error)`` runs back on it. The
-        worker never holds a Tk object (freeing one off-thread aborts the process)."""
-        self.busy += 1
+        worker holds only ``work`` and the queue, never this page or a widget: freeing a
+        Tk object off its thread aborts the process."""
+        self._job += 1
+        job = self._job
+        self._pending[job] = done
         results = self.results
 
         def worker() -> None:
@@ -174,7 +192,7 @@ class TeachPage:
             except Exception as exc:  # reported on the page
                 log.exception("Teach words action failed")
                 result, error = None, exc
-            results.put((done, result, error))
+            results.put((job, result, error))
 
         threading.Thread(target=worker, name="teach-worker", daemon=True).start()
 
@@ -256,7 +274,8 @@ class TeachPage:
         self.vocab_title = tk.Label(
             body, text="YOUR WORDS", font=f.small_bold, bg=kit.YELLOW, fg=kit.BLACK, anchor="w"
         )
-        self.vocab_title.grid(row=0, column=1, sticky="ew", pady=(0, round(4 * s)))
+        # sticky "s": level with SUGGESTIONS (its row is as tall as the scan button)
+        self.vocab_title.grid(row=0, column=1, sticky="sew", pady=(0, round(4 * s)))
         vframe = tk.Frame(body, bg=kit.PAPER, highlightthickness=2, highlightbackground=kit.BLACK)
         vframe.grid(row=1, column=1, sticky="nsew")
         vscroll = tk.Scrollbar(vframe, orient="vertical")
@@ -299,16 +318,10 @@ class TeachPage:
     # -------------------------------------------------------------- data
 
     def reload(self) -> None:
-        """Re-read pending suggestions and vocab (off the UI thread)."""
-        from shoutabout.learn import pending_suggestions
-        from shoutabout.vocab import read_terms
-
+        """Re-read pending suggestions and vocab (off the UI thread; the worker gets only
+        the paths, never this page)."""
         paths = self.paths
-
-        def work() -> tuple[list[Suggestion], list[str]]:
-            return pending_suggestions(paths), read_terms(paths.vocab_file)
-
-        self.run_async(work, self._show_data)
+        self.run_async(lambda: read_words(paths), self._show_data)
 
     def _show_data(self, result: Any, error: BaseException | None) -> None:
         if self.closed:

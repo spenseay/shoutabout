@@ -49,6 +49,7 @@ class RecentPage:
         self._cards: dict[str, Any] = {}  # entry key -> card frame (kept across reloads)
         self._texts: dict[str, Any] = {}  # entry key -> its Text widget
         self._failed_key: Any = None
+        self._jobs: dict[str, Any] = {}  # pending after() jobs
         s = self.scale
 
         outer = tk.Frame(parent, bg=kit.YELLOW)
@@ -84,8 +85,8 @@ class RecentPage:
         else:
             model.load()
             self.render()
-        self.win.after(POLL_MS, self._poll)
-        self.win.after(WATCH_MS, self._watch)
+        self._jobs["poll"] = self.win.after(POLL_MS, self._poll)
+        self._jobs["watch"] = self.win.after(WATCH_MS, self._watch)
 
     # ------------------------------------------------------------ plumbing
 
@@ -94,6 +95,7 @@ class RecentPage:
             return
         self.closed = True
         self._pending.clear()
+        kit.cancel_jobs(self.win, self._jobs)
         with contextlib.suppress(Exception):
             self.win.destroy()
 
@@ -134,7 +136,7 @@ class RecentPage:
         except Exception:
             log.exception("Recent page update failed")
         if not self.closed:
-            self.win.after(POLL_MS, self._poll)
+            self._jobs["poll"] = self.win.after(POLL_MS, self._poll)
 
     def _watch(self) -> None:
         """A new dictation (or a failed recording) since the last look: reload."""
@@ -146,7 +148,7 @@ class RecentPage:
                 self.reload()
         except Exception:
             log.exception("watching Recent failed")
-        self.win.after(WATCH_MS, self._watch)
+        self._jobs["watch"] = self.win.after(WATCH_MS, self._watch)
 
     def reload(self) -> None:
         if self.closed:
