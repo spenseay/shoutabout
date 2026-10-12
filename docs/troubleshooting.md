@@ -28,8 +28,9 @@ Get-Content "$env:APPDATA\shoutabout\logs\stdout.log" -Tail 60        # stray ou
 
 - Each request logs one line: `transcribe id=... route=... target=... pasted=... cleanup=... total=...`.
 - Each rejection logs one line: `rejected route=... ip=... status=... reason=...`.
-- Per-request outcomes, including cleanup reasons, are in `history.jsonl` when history is on
-  (it's off by default; [history.md](history.md)).
+- A cleanup fallback logs one line with the reason: `cleanup fell back to the raw transcript: ...`.
+- ShoutAbout keeps no history: tray > **Recent…** has the text of the last 3 dictations
+  ([history.md](history.md)).
 - `scripts\test-routes.ps1` runs scripted `curl.exe` checks against each route.
 - To watch the hub in a console, stop the task first (only one hub may run), then run it in the
   foreground:
@@ -230,8 +231,8 @@ Check these in order.
    device-to-device traffic. Put the phone and PC on the main network, or turn off client
    isolation.
 9. **Wrong IP.**
-   - Run `.\.venv\Scripts\python.exe -m shoutabout info`, or use tray > Show LAN URL, to get
-     the current URL. Check the port in it too: it must match the Shortcut's `LanURL`.
+   - Run `.\.venv\Scripts\python.exe -m shoutabout info` to get the current URL. Check the
+     port in it too: it must match the Shortcut's `LanURL`.
    - DHCP can hand out a new address. Create a **DHCP reservation** on the router, then update
      the Shortcut.
    - If the hub shows the address of the wrong adapter (Hyper-V, WSL or VPN), set
@@ -411,7 +412,7 @@ All hub errors are JSON `{"detail": "..."}`, and `hub.log` has a matching `rejec
 |---|---|---|
 | 400 | `missing 'file' upload` / `no-file` | A form upload without a `file` part. Just before the `rejected` line, `hub.log` shows `no file upload; content-type='application/x-www-form-urlencoded' form fields: ...`: iOS silently dropped the File field of a **Form** request body. Import a fresh Dictate from `make-shortcuts`, or set **Request Body** to **File** = Recorded Audio ([ios-shortcuts.md Appendix A.6](ios-shortcuts.md#a6-send-it-two-request-actions)). |
 | 400 | `empty upload` / `no-file` | A raw-body upload with no bytes: the Shortcut sent an empty variable instead of the Record Audio output. |
-| 401 | `missing or invalid bearer token` / `bad-bearer` | The Shortcut's `Authorization` header is wrong. It must be exactly `Bearer <token>`. Common slips: a missing "Bearer ", a stray space or newline, or an old token after `init --rotate-token`. Re-copy with `.\.venv\Scripts\python.exe -m shoutabout token --qr` or tray > Copy hub token, and paste it into Dictate's **Hub token** Text action, which both branches use (in a hand-built Dictate, the `HubToken` Text action). |
+| 401 | `missing or invalid bearer token` / `bad-bearer` | The Shortcut's `Authorization` header is wrong. It must be exactly `Bearer <token>`. Common slips: a missing "Bearer ", a stray space or newline, or an old token after `init --rotate-token`. Re-copy with `.\.venv\Scripts\python.exe -m shoutabout token --qr` or Settings > Copy hub token (Shortcuts), and paste it into Dictate's **Hub token** Text action, which both branches use (in a hand-built Dictate, the `HubToken` Text action). |
 | 403 | `forbidden` / `source-not-allowed` | The source IP is neither loopback nor in `lan_networks` (see the LAN section). |
 | 403 | `Cloudflare Access JWT ...` | See the tunnel section. |
 | 413 | `upload too large (max 25 MB)` or an audio-too-long message | Over `max_upload_mb` (25) or `max_audio_seconds` (600). Raise them in `config.toml` if you really dictate longer. |
@@ -471,7 +472,7 @@ curl.exe -s -H "Authorization: Bearer $tok" -H "Content-Type: audio/x-m4a" --dat
 
 `pasted: true` means the hub sent the paste chord to the foreground window. It does **not** mean
 the app inserted the text: no app reports that back. The text is always in the HTTP response
-(so the Shortcut can show it) and in `history.jsonl`.
+(so the Shortcut can show it) and in tray > **Recent…**.
 
 ### Text pasted into the wrong window, or nowhere
 
@@ -501,7 +502,7 @@ mode while away from the desk.
 Ctrl+V. Shift+Ctrl+V means "paste as plain text" in browsers, and Win+V opens clipboard history.
 
 **Fix:** don't hold modifier keys when the dictation lands. If the paste was lost, copy the text
-from the phone notification, or from `history.jsonl`.
+from the phone notification, or from tray > **Recent…**.
 
 ### Nothing happens in Git Bash, MSYS2, Cygwin (mintty) or PuTTY
 
@@ -586,15 +587,13 @@ clipboard instead.
 
 ## Cleanup fell back to the raw transcript
 
-The response and history show `cleanup: "fallback"`. Find the reason in either place:
+The response shows `cleanup: "fallback"`, and `hub.log` has the reason:
 
 ```powershell
-Get-Content "$env:APPDATA\shoutabout\history.jsonl" -Encoding UTF8 | ForEach-Object { $_ | ConvertFrom-Json } |
-  Where-Object cleanup -eq 'fallback' | Select-Object ts, cleanup_reason -Last 20
 Select-String -Path "$env:APPDATA\shoutabout\logs\hub.log" -Pattern 'cleanup fell back' | Select-Object -Last 20
 ```
 
-| `cleanup_reason` | Cause | Fix |
+| Reason | Cause | Fix |
 |---|---|---|
 | `ollama unreachable: ConnectError` | Ollama isn't running | Start the Ollama app from the Start menu, or run `ollama serve`. Check with `curl.exe -s http://127.0.0.1:11434/api/version`. Make sure Ollama starts at logon. |
 | `ollama error: HTTP 404 ... not found` | The model isn't pulled, or the tag has a typo | `ollama pull qwen3:4b-instruct-2507-q4_K_M` (the tag must match `[cleanup] model` exactly). |
@@ -623,7 +622,8 @@ flags outputs that answered instead of cleaning.
 ### A name or term keeps coming out wrong
 
 **Fix:**
-1. Add it to `vocab.txt`: tray > Open vocab file, or `%APPDATA%\shoutabout\vocab.txt`.
+1. Add it to `vocab.txt`: tray > **Teach words…** (or **Open vocab.txt** there), or
+   `%APPDATA%\shoutabout\vocab.txt`.
    - One term per line, spelled and cased exactly as you want it, e.g. `Better Shell`.
    - Changes apply on the next request, with no restart.
 2. **Order sets priority.** Put the terms that matter most at the top.
@@ -680,9 +680,7 @@ missing, check the overflow area, then restart the task.
 **Fix:**
 1. Check that `[paste] exclude_from_history = true` and restart the hub.
 2. Third-party clipboard managers may ignore the exclusion formats (see above).
-3. **Show LAN URL** in the tray copies the URL **without** exclusion on purpose; that one is
-   expected in history.
-4. If a transcript still appears, note the time and the target app and report it. Then clear the
+3. If a transcript still appears, note the time and the target app and report it. Then clear the
    history from Win+V (`...` > Clear all).
 
 ---
@@ -738,7 +736,7 @@ Get-ChildItem -Recurse .\scripts | Unblock-File
 **Fix:** always type `curl.exe`. The real curl ships with Windows 10 1803+ and Windows 11.
 Likewise, `sc` is an alias for `Set-Content`, so use `sc.exe` for service commands.
 
-### `ConvertFrom-Json` mangles non-ASCII text from `history.jsonl`
+### `ConvertFrom-Json` mangles non-ASCII text from ShoutAbout's `.json` files
 
 **Cause:** in 5.1, `Get-Content` defaults to the ANSI code page.
 

@@ -6,9 +6,10 @@ at most, no tours ("look for the icon next to the clock") and no disclaimers. Ev
 looks like the brand: Shout Yellow ground, black type, a red rule under the headline, the
 talking mouth.
 
-Code: the logic and every line of copy are in `setup_flow.py` and `settings_model.py` (no
-Tk, unit-tested); `setup_ui.py`, `settings_ui.py` and `approval_ui.py` only draw them.
-`ui_host.py` runs all three on one UI thread.
+Code: the logic and every line of copy are in `setup_flow.py`, `settings_model.py` and
+`recent_model.py` (no Tk, unit-tested); `setup_ui.py`, `app_window.py` (the ShoutAbout
+window), `settings_ui.py`, `recent_ui.py`, `review_ui.py` and `approval_ui.py` draw them.
+`ui_host.py` runs them all on one UI thread.
 
 To see the screens with made-up data (nothing real is touched):
 
@@ -92,7 +93,43 @@ It never takes the keyboard focus, no key answers it, Allow arms after one secon
 it means Don't allow, and it disappears when the request expires (120 s) or is answered
 elsewhere.
 
-## Settings (tray > Settings…)
+## The ShoutAbout window
+
+One window, "ShoutAbout", with a row of tabs: **Home**, **Teach words**, **Recent**,
+**Settings**. Tray > **Recent…**, **Teach words…** and **Settings…** open it on that page; an
+open window comes to the front on that page, never a second copy. Opening ShoutAbout again
+while it runs (the Start menu; on a Mac Finder, Spotlight or Launchpad) shows it at Home.
+Ctrl+Tab and Ctrl+Shift+Tab switch pages; Esc closes it. `shoutabout settings` and
+`shoutabout vocab review` open it on Settings and Teach words.
+
+The setup window, Settings > **Add a phone** (setup's "Connect your iPhone" screen) and the
+approval prompt stay separate windows.
+
+### Home
+
+The mouth, how to talk ("Press Right Ctrl, talk, press it again."; hold mode: "Hold F8, talk,
+let go."), and at most one line when something needs attention, most important first: the
+hub's error, a missing macOS permission ("Allow the microphone in System Settings."), "No
+microphone found.", "Talk to this PC is off." ("this Mac" on a Mac), "Getting ready… 42%",
+"Paused.".
+
+### Teach words
+
+A box to add a word (Enter puts it at the top of `vocab.txt`), **SUGGESTIONS** with
+checkboxes (**Add selected**, **Dismiss**) and a small **Suggest from my project folders**
+button, and **YOUR WORDS** in priority order (**Remove**, **Open vocab.txt**). Details:
+[vocab.md](vocab.md).
+
+### Recent
+
+The last 3 dictations meant for this computer, newest first: "14:03 · This PC" (or the
+phone's name; "Not pasted" or "Written out later" when that's so), the text (selectable) and
+**Copy**. Above them, only when there are some, **Couldn't write these out**: recordings the
+speech engine failed on, with the length, the reason, **Try again** (never pastes; the text
+appears at the top) and **Delete**. All in memory only; the page updates by itself within
+about a second. Details: [history.md](history.md).
+
+### Settings
 
 One short page (it scrolls on small screens). Every change saves at once; the bottom line
 says "Saved." or "Saved. Restart ShoutAbout to apply."
@@ -103,9 +140,8 @@ says "Saved." or "Saved. Restart ShoutAbout to apply."
 | Phones | Each paired phone: name, "Used 5 minutes ago" / "Used yesterday" / "Not used yet", **Remove** (asks "Sure? Remove" first; revokes at once). **Add a phone**. |
 | Quality | "Automatic: Best (NVIDIA GeForce RTX 4080 SUPER)" or a fixed Best / Balanced / Light; a hand-set model shows as "Custom: … (config.toml)" and is never overwritten unless you pick something. "Needs a 1,600 MB download. ShoutAbout gets it next time it starts." when the choice isn't downloaded. Needs a restart. |
 | AI cleanup | **Only shown when a local Ollama answers with a suitable model** (`AppServices.cleanup_available`, looked for off the UI thread when the window opens); nothing anywhere asks people to install Ollama. **Automatic / On / Off**; "Fixes punctuation and filler words, on this PC." "Automatic" (the default) already turns it on by itself when Ollama is there. Applied live when the cleanup model was loaded at start, else after a restart. |
-| History | **Keep a history of what I dictate** switch (`[history] enabled`), **off by default**; "Saved only on this PC." Applied live (the hub's `history` reloader). |
 | This PC | **Name** (what the iPhone lists; re-announced at once) and **Start with Windows** (the installed app: a per-user Run entry; a source checkout: shown read-only, e.g. "Starts when you sign in (setup script task).") |
-| Footer | **History…**, **Teach words…**, the version, and small links: Open log folder, Copy hub token (Shortcuts). |
+| Footer | Small links: Open log folder, Copy hub token (Shortcuts); the version. |
 
 ## The tray menu
 
@@ -115,7 +151,7 @@ Press Right Ctrl to talk,        "Paused", "Needs attention: …" (greyed: infor
   and again to stop.
 -----------------
 Pause / Resume
-History…
+Recent…
 Teach words…
 Settings…
 Set up…
@@ -123,30 +159,9 @@ Set up…
 Quit
 ```
 
-The old items (open vocab file, open log folder, copy hub token, show LAN URL) moved to the
-settings window (logs and token) or the Teach window (vocab), or are covered by pairing.
-
-## History (tray > History…, or Settings > History…)
-
-So a long dictation is never lost. Same look as the other windows: the mouth icon, **HISTORY**
-and "Saved only on this PC." over the red rule.
-
-* A **Search** box (every word you type must appear; any case).
-* One card per dictation, newest first: "Today 14:03 · This PC" (or the phone's name, e.g.
-  "Sam's iPhone"; "Not pasted" when the paste didn't happen), the full text wrapped, and
-  **Copy**. The newest 150 matches are drawn; the count says when there are more.
-* **Couldn't write these out** (only when there are some): recordings whose transcription failed,
-  "Today 14:03 · This PC · 2 min 05 s", the reason, **Try again** (transcribes it with the
-  running hub, never pastes: the new text appears at the top of the list, marked "Written out
-  later") and **Delete**.
-* **Clear history** asks "Sure? Clear everything" (three seconds), then deletes
-  `history.jsonl` and every kept recording.
-* History is off by default (`[history] enabled = false`). Then: "History is off." / "Turn it
-  on to keep what you dictate, and recordings that fail." / **Turn history on** (applied
-  live; Settings has the same switch).
-
-`python -m shoutabout history` opens it without the hub (Try again then says "Start ShoutAbout
-first, then try again."). Details: [history.md](history.md).
+Recent…, Teach words… and Settings… open the ShoutAbout window on that page. The old items
+(open vocab file, open log folder, copy hub token, show LAN URL) moved to Settings (logs and
+token) or Teach words (vocab), or are covered by pairing.
 
 ## Fresh-install details
 

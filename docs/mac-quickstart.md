@@ -54,7 +54,7 @@ goes away once Accessibility is on), and macOS's **"Background Items Added"** no
 
 ## 4. The setup window
 
-The ShoutAbout window opens by itself:
+The setup window opens by itself:
 
 1. **"Getting ready"**: it downloads the speech model (about 490 MB, a minute or two) and
    moves on by itself.

@@ -3,7 +3,8 @@
 The same product as on Windows, as a menu bar app for Apple Silicon Macs: **Talk to this
 Mac** (tap Right ⌘, talk, tap Right ⌘ again; the mouth pill at the top centre), pairing the
 iPhone app over Bonjour with Allow + code (the v2 protocol, unchanged), the automatic model
-choice, the setup window on first run, Settings, Teach words, and Open at login.
+choice, the setup window on first run, the ShoutAbout window (Home, Teach words, Recent,
+Settings), and Open at login.
 
 The step-by-step for a person installing it is [mac-quickstart.md](mac-quickstart.md).
 
@@ -82,14 +83,15 @@ shared modules only gained small hooks marked `# v2-macos`.
 ```
 ShoutAbout.app (main process, "hub")                     window process ("mac-ui", on demand)
  main thread: NSApplication (accessory) event loop        main thread: Tk (UiHost)
-   menu bar icon + menu (mac/menubar.py)                    setup, settings, pairing prompt
-   mouth pill NSPanel (mac/overlay_mac.py)                  (the shared Tk windows, unchanged,
-   native pairing alert (fallback only)                      with mac/tkmac.py's tweaks)
- server, engine, warmer, learn threads (as Windows)  <---- JSON lines on stdin/stdout ---->
- "hotkey-hook": CGEventTap + CFRunLoop (mac/eventtap.py)     approve/deny, settings saved,
- "hotkey": HotkeyMachine worker (hotkey.py, shared)          downloads, open Teach
- "permissions": turns the hotkey on once allowed          Teach window: its own process
- dns-sd (child, behind a watchdog shell)                    ("mac-teach", review_ui)
+   menu bar icon + menu (mac/menubar.py)                    the ShoutAbout window (Home, Teach
+   mouth pill NSPanel (mac/overlay_mac.py)                  words, Recent, Settings), setup,
+   native pairing alert (fallback only)                     pairing prompt (the shared Tk
+   app delegate: "reopen" -> the window at Home             windows, with mac/tkmac.py's tweaks)
+ Recent (memory), server, engine, warmer, learn      <---- JSON lines on stdin/stdout ---->
+ "hotkey-hook": CGEventTap + CFRunLoop (mac/eventtap.py)     open a page, pair, Recent changed;
+ "hotkey": HotkeyMachine worker (hotkey.py, shared)          approve/deny, settings saved,
+ "permissions": turns the hotkey on once allowed             downloads, Recent, Try again,
+ dns-sd (child, behind a watchdog shell)                     hub status (for Home)
 ```
 
 **Why two processes.** Cocoa needs the main thread for the menu bar, the overlay and
@@ -97,10 +99,13 @@ NSApplication's event loop; Tk on macOS also needs the main thread and owns NSAp
 itself. Running both event loops in one process is fragile, so the hub is a pure Cocoa app
 and the Tk windows (written for Windows, tested there) run in a child process with their
 own main thread. They talk over the child's stdin/stdout (`mac/uilink.py`): the hub sends
-`open`/`pair`/`pair-done`/`quit`; the windows call the hub for what only it can do
-(approve or deny a phone, apply saved settings live, re-announce a new name, download the
-speech model, open Teach). Files the windows edit directly (config.toml, devices.json,
-identity.json, the LaunchAgent) are re-read by the hub by mtime, as on Windows. The child
+`open` (the ShoutAbout window on a page, or setup)/`pair`/`pair-done`/`recent`/`quit`; the
+windows call the hub for what only it can do (approve or deny a phone, apply saved settings
+live, re-announce a new name, download the speech model, read Recent, Try again, the hub's
+status for Home). Recent lives in the hub's memory only: the window process asks for it, and
+the hub sends `recent` each time it changes, so an open Recent page shows a new dictation at
+once. Files the windows edit directly (config.toml, devices.json, identity.json, the
+LaunchAgent) are re-read by the hub by mtime, as on Windows. The child
 quits when it has had no window for 1.5 s and the hub agrees (it compares message numbers,
 so a request in flight is never lost), and when the hub goes away (the pipe closes). If
 Tk can't start, pairing still works: a phone's request falls back to a native NSAlert
@@ -170,10 +175,15 @@ runs `…/ShoutAbout.app/Contents/MacOS/ShoutAbout run` at login (`RunAtLoad`, n
 a new install of the built app; Settings > This Mac switches it.
 
 **Menu** (`mac/menubar.py`). The Windows tray menu (`tray.build_menu`): status, how to
-talk, Pause/Resume, Teach words…, Settings…, Set up…, Quit, plus a line per missing
+talk, Pause/Resume, Recent…, Teach words…, Settings…, Set up…, Quit, plus a line per missing
 permission ("Allow pasting (Accessibility)…") that opens the right System Settings pane.
+Recent…, Teach words… and Settings… open the ShoutAbout window on that page.
 The icon is the brand tray tile (36 px at 18 pt), with the Windows states and animations.
 Notifications use `NSUserNotificationCenter`, else `osascript`.
+
+**Opening it again** (`reopen.watch_mac`). Finder, Spotlight and Launchpad don't start a
+second copy of a running app: they send it a "reopen" Apple event. The hub's application
+delegate answers it by opening the ShoutAbout window at Home.
 
 **Words.** The shared windows say "PC"; the window process rewrites widget texts on their
 way to Tk ("Talk to this Mac", "Open at login", "menu bar", "log in"), sets Tk's scaling to
@@ -205,8 +215,8 @@ microphone=…, accessibility=…, input monitoring=…`).
 | What | Where |
 |---|---|
 | The app | `/Applications/ShoutAbout.app` (or `~/Applications`) |
-| Settings, hub token, vocab, history, devices | `~/Library/Application Support/ShoutAbout/` |
-| Logs | `~/Library/Logs/ShoutAbout/hub.log` (rotating), `ui.log` (the window process), `teach.log`, and `stdout.log` (stray output and tracebacks of all of them) |
+| Settings, hub token, vocab, devices | `~/Library/Application Support/ShoutAbout/` |
+| Logs | `~/Library/Logs/ShoutAbout/hub.log` (rotating), `ui.log` (the window process), and `stdout.log` (stray output and tracebacks of both) |
 | Open at login | `~/Library/LaunchAgents/fyi.shoutabout.mac.plist` |
 | Speech model | `~/.cache/huggingface/hub` (shared with other apps) |
 | Single instance | `~/Library/Application Support/ShoutAbout/hub.lock` (an `flock`) |
@@ -276,11 +286,12 @@ COLLECT (BUNDLE is macOS only), which caught one real bug.
 
 **Not verified at all (macOS only):** every PyObjC/AppKit/Quartz call (status item, menu
 delegate, NSPanel, CGImage, text drawing, event tap creation and callbacks, CGEventPost,
-NSPasteboard, AVFoundation, AX checks, NSAlert, notifications), Tk on macOS (the windows'
-look, the label buttons, activation of the window process), `dns-sd`/`afconvert` for
-real, the LaunchAgent at login, PyInstaller on macOS with uv's Python, codesign, the
-self-test in the built app, and speech speed on Apple Silicon. The first run on a Mac is
-the test; [mac-quickstart.md](mac-quickstart.md) says which logs to send.
+NSPasteboard, AVFoundation, AX checks, NSAlert, notifications, the reopen Apple event), Tk
+on macOS (the windows' look, the label buttons, activation of the window process),
+`dns-sd`/`afconvert` for real, the LaunchAgent at login, PyInstaller on macOS with uv's
+Python, codesign, the self-test in the built app, and speech speed on Apple Silicon. The
+first run on a Mac is the test; [mac-quickstart.md](mac-quickstart.md) says which logs to
+send.
 
 ## Troubleshooting
 

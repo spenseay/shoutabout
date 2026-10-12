@@ -21,7 +21,8 @@ Download and help: **[shoutabout.fyi](https://shoutabout.fyi)**. Open source und
 - The website (`site/`, static, on Cloudflare Pages) and the go-live plan:
   [docs/launch/LAUNCH.md](docs/launch/LAUNCH.md), hosting: [docs/launch/hosting.md](docs/launch/hosting.md)
 - Getting started (installer, about a minute): [below](#getting-started)
-- The setup and settings windows: [docs/setup-experience.md](docs/setup-experience.md)
+- The setup window and the ShoutAbout window (Home, Teach words, Recent, Settings):
+  [docs/setup-experience.md](docs/setup-experience.md)
 - The phone protocol (discovery, pairing, device tokens): [docs/protocol.md](docs/protocol.md)
 - Install from source (developers): [SETUP.md](SETUP.md)
 - iPhone Shortcuts: [docs/ios-shortcuts.md](docs/ios-shortcuts.md)
@@ -33,7 +34,7 @@ Download and help: **[shoutabout.fyi](https://shoutabout.fyi)**. Open source und
 - Internals: [docs/architecture.md](docs/architecture.md)
 - Problems: [docs/troubleshooting.md](docs/troubleshooting.md)
 - Owner test list: [docs/manual-test-checklist.md](docs/manual-test-checklist.md)
-- History file: [docs/history.md](docs/history.md)
+- Recent (no history is kept): [docs/history.md](docs/history.md)
 - Other transports (LAN-only, Tailscale, product ideas): [docs/networking-alternatives.md](docs/networking-alternatives.md)
 - Talk to this PC (hotkey dictation, no phone): [docs/local-dictation.md](docs/local-dictation.md)
 - Automatic model choice, tiers and benchmarks: [docs/models.md](docs/models.md)
@@ -50,9 +51,9 @@ Download and help: **[shoutabout.fyi](https://shoutabout.fyi)**. Open source und
    Click **More info**, then **Run anyway**.
 
 Windows 10 (1809 or later) or 11, 64-bit. An NVIDIA GPU makes transcription fast, but it isn't
-needed. To remove ShoutAbout, use **Settings > Apps**. Your settings, vocabulary and history are
-kept unless you tick the box to remove them. Details, including what the installer changes on
-your PC: [docs/installer.md](docs/installer.md).
+needed. To remove ShoutAbout, use **Settings > Apps**. Your settings and vocabulary are kept
+unless you tick the box to remove them. Details, including what the installer changes on your
+PC: [docs/installer.md](docs/installer.md).
 
 ## Mac (Apple Silicon, macOS 14+)
 
@@ -77,11 +78,10 @@ With the Windows installer there is nothing to configure by hand:
    app on the phone (same Wi-Fi): it finds the PC by itself. The PC asks "Sam's iPhone wants
    to dictate to this PC. Code 4821"; if the phone shows the same code, click **Allow**.
 
-Later: tray > **Settings…** (hotkey, phones, quality, history (off by default), the PC's name,
-start with Windows; AI clean-up too, when a local Ollama is there) and tray > **Set up…** to
-run the steps again. Details:
-[docs/setup-experience.md](docs/setup-experience.md). Everything stays on your devices: no
-accounts, no cloud speech or AI.
+Later: tray > **Settings…** (hotkey, phones, quality, the PC's name, start with Windows; AI
+clean-up too, when a local Ollama is there) and tray > **Set up…** to run the steps again.
+Details: [docs/setup-experience.md](docs/setup-experience.md). Everything stays on your
+devices: no accounts, no cloud speech or AI.
 
 Running from source (the v1 way, with the setup script, Cloudflare and iPhone Shortcuts) is
 still supported: see [Quick start](#quick-start) and [SETUP.md](SETUP.md).
@@ -136,7 +136,7 @@ source-IP check (every path) -> rate limit -> auth-failure lockout -> bearer tok
       normalise     all whitespace -> single spaces (one paragraph, never a newline)
       cleanup       Ollama + safety guard; raw transcript on timeout/error/rejection
       deliver       target=pc and not paused: clipboard + Ctrl+V, clipboard restored
-      history       append one line to history.jsonl
+      recent        target=pc: kept in memory (the last 3, tray > Recent…)
  -> JSON response
 ```
 
@@ -145,8 +145,8 @@ source-IP check (every path) -> rate limit -> auth-failure lockout -> bearer tok
 - **Talk to this PC.** Press Right Ctrl, speak, press it again: the text is pasted into the
   window you're typing in, no phone needed (Right Ctrl + C and other shortcuts still work as
   always; "Hold to talk" is an option). A small animated mouth pops up at the top of the screen
-  the instant it's listening; Esc cancels. Same vocabulary, cleanup, paste rules and history
-  as phone dictation ([docs/local-dictation.md](docs/local-dictation.md)).
+  the instant it's listening; Esc cancels. Same vocabulary, cleanup and paste rules as phone
+  dictation ([docs/local-dictation.md](docs/local-dictation.md)).
 - **Automatic model choice.** The PC detects its graphics card, processor and memory and picks
   the speech model, device and precision itself ("Best quality", "Balanced" or "Light"),
   downloads it on first run with progress (resumable), and turns the LLM cleanup on only when
@@ -178,10 +178,10 @@ source-IP check (every path) -> rate limit -> auth-failure lockout -> bearer tok
   - Enter is never pressed, and the output is always a single paragraph.
   - Admin windows are detected. The text is left on the clipboard and a toast tells you.
 - **Teach it your words.**
-  - Add a word from the iPhone (**Teach ShoutAbout** shortcut), the tray (**Teach ShoutAbout…**)
+  - Add a word from the iPhone (**Teach ShoutAbout** shortcut), the tray (**Teach words…**)
     or `vocab add`.
-  - ShoutAbout also suggests names from your project folders, and from your dictations while
-    history is on. This is all local, and nothing is added without your OK
+  - **Suggest from my project folders** (in Teach words) suggests names from your projects,
+    only when you press it. This is all local, and nothing is added without your OK
     ([docs/vocab.md](docs/vocab.md)).
 - **Tray icon.** The brand mouth shows the status:
   - grey and humming while starting;
@@ -191,21 +191,20 @@ source-IP check (every path) -> rate limit -> auth-failure lockout -> bearer tok
   - red on error.
 
   The menu is short: the status ("Ready", "Getting ready… 42%", "Paused"…), how to talk
-  ("Press Right Ctrl to talk, and again to stop."), Pause/Resume, History…, Teach words…,
+  ("Press Right Ctrl to talk, and again to stop."), Pause/Resume, Recent…, Teach words…,
   Settings…, Set up… and Quit.
-- **History (off by default).** Turn it on in Settings (**Keep a history of what I dictate**)
-  or in the History window. Then everything you dictate (from this PC or a phone) is kept on
-  this PC and listed in tray > **History…**, newest first, with Copy and search, so a long
-  dictation is never lost. If transcribing a recording fails, the recording is kept too, with
-  **Try again** (only while history is on). **Clear history** deletes it all
-  ([docs/history.md](docs/history.md)).
+- **One window.** Home, Teach words, Recent and Settings are tabs of one ShoutAbout window;
+  the tray items open it on that page. Opening ShoutAbout again while it runs shows it at
+  Home: how to talk, and one line when something needs attention.
+- **Recent, no history.** The last 3 dictations meant for this PC, newest first, with Copy, so
+  text that landed in the wrong spot isn't lost. If the speech engine fails after a recording,
+  the recording waits there too, with **Try again**. All in memory: nothing is written to disk,
+  and it's gone when ShoutAbout quits ([docs/history.md](docs/history.md)).
 - **Pairing without typing.** The PC announces itself on the Wi-Fi (DNS-SD
   `_shoutabout._tcp`). The iPhone app finds it, asks to pair, and the PC shows a prompt with
   a 4-digit code. Each phone gets its own token (stored hashed) that Settings can revoke
   ([docs/protocol.md](docs/protocol.md)).
 - **Toasts** use the tray's own balloon notifications, so there are no extra dependencies.
-- **History.** With history on, each request writes a `history.jsonl` line with the raw and
-  final text, the cleanup outcome and timings ([docs/history.md](docs/history.md)).
 - **CLI.**
   - `doctor` checks the whole setup end to end.
   - `transcribe` runs test files and scores them against a manifest.
@@ -263,14 +262,15 @@ Next:
 - **Tray menu** (click the ShoutAbout icon on the PC):
   - **Pause / Resume** stops pasting on the PC. The text still comes back to the phone, with a
     warning.
-  - **Teach words…**, **Settings…** (phones, hotkey, quality, history, the log folder, the hub
-    token for Shortcuts), **Set up…**, **Quit**.
+  - **Recent…**, **Teach words…**, **Settings…** (phones, hotkey, quality, the log folder, the
+    hub token for Shortcuts) open the ShoutAbout window on that page. **Set up…**, **Quit**.
   - The icon shows the state: grey starting, green idle, blue transcribing, amber paused, red
     error.
-- **Vocabulary:** add names and jargon to `vocab.txt` (tray > **Open vocab file**), one term per
-  line, most important first. Saving is enough; it reloads without a restart.
-- **History:** off by default. Once you turn it on (Settings, or the History window), every
-  dictation is a line in `history.jsonl` ([docs/history.md](docs/history.md)).
+- **Vocabulary:** add names and jargon to `vocab.txt` (tray > **Teach words…** >
+  **Open vocab.txt**), one term per line, most important first. Saving is enough; it reloads
+  without a restart.
+- **Recent:** tray > **Recent…** has the last 3 dictations, with Copy
+  ([docs/history.md](docs/history.md)).
 
 ## Repository layout
 
@@ -297,7 +297,7 @@ shoutabout/
     hub.py                         long-running process: tray + server + loader + warmer threads
     server.py                      FastAPI app, source-IP middleware, error mapping
     security.py                    route classification, bearer check, Access JWT, rate limiter
-    pipeline.py                    decode -> STT -> cleanup -> paste -> history
+    pipeline.py                    decode -> STT -> cleanup -> paste -> Recent
     audio.py                       decoder chain -> 16 kHz mono: WAV, Media Foundation, PyAV
     wavdecode.py  resample.py      numpy WAV reader; anti-aliasing polyphase resampler
     mfdecode.py                    Windows Media Foundation decoding through ctypes
@@ -308,7 +308,7 @@ shoutabout/
     inject/                        Injector protocol; Windows clipboard + SendInput paste
     tray.py  icons.py  brand.py    ctypes tray icon (animated brand mouth), menu, balloon toasts;
                                    pure-Python brand renderer (see docs/brand.md, assets in brand/)
-    history.py                     history.jsonl writer
+    recent.py  recent_ui.py        Recent: the last 3 dictations, in memory only; its page
     doctor.py                      setup checks
     shortcuts.py                   four iPhone shortcuts as plists or Cherri source (`make-shortcuts`)
     pairing.py                     pairing QR payload for the iPhone app (`pair`)
@@ -316,7 +316,8 @@ shoutabout/
     pair_requests.py  devices.py   phone pairing requests; per-device tokens (devices.json)
     identity.py                    installation id + friendly name (identity.json)
     setup_flow.py  setup_ui.py     first-run setup window (logic / Tk view)
-    settings_model.py settings_ui.py  settings window (logic / Tk view)
+    app_window.py  review_ui.py    the ShoutAbout window (Home, tabs); the Teach words page
+    settings_model.py settings_ui.py  the Settings page (logic / Tk view)
     approval_ui.py  ui_host.py  ui_kit.py  pairing prompt, the UI thread, brand widgets
     app_services.py  hub_v2.py     what the windows need; the hub's v2 wiring
     config_edit.py  firstrun.py  winstartup.py  comment-keeping config edits, first run, Run key
@@ -350,13 +351,13 @@ console script inside the venv is equivalent.
 <br>• The default tries RoutineHub's HubSign directly. It currently refuses clients other than Cherri, and we don't impersonate Cherri, so it exits 1 with a hint.
 <br>• `--format cherri` lets the official Cherri playground or compiler sign the files legitimately. Those builds ask once for the pairing text (`pair`) instead of three separate secrets.
 <br>• `--no-sign` writes unsigned `.plist` files for `shortcuts sign --mode anyone` on a Mac. |
-| `transcribe FILE... [--no-cleanup] [--json]` | Transcribes files, folders or globs and prints the raw text, cleaned text and timings. If a `manifest.json` sits next to the files, it also scores word accuracy and vocabulary hits. It never pastes and never writes history. |
+| `transcribe FILE... [--no-cleanup] [--json]` | Transcribes files, folders or globs and prints the raw text, cleaned text and timings. If a `manifest.json` sits next to the files, it also scores word accuracy and vocabulary hits. It never pastes. |
 | `benchmark [--models a,b] [--runs N] [--stt FILE...]` | Benchmarks the cleanup LLMs (median/p90 latency, guard accept rate, answered-instead-of-cleaned flags). With `--stt` it benchmarks the STT instead: load time, decode/STT ms per file, real-time factor, VRAM and RSS. |
 | `setup [--phone]` | Opens the setup window (`--phone`: just the add-a-phone step). Pairing requests are answered by the running hub, so use tray > Set up… when it runs. |
-| `settings` | Opens the settings window. |
+| `settings` | Opens the ShoutAbout window on Settings. |
 | `devices list [--json] \| remove NAME_OR_ID` | Lists paired phones (name, id, paired, last used; never tokens) or unpairs one, which revokes its token at once. |
 | `doctor [--skip-model] [--skip-ollama] [--skip-tunnel] [--url URL] [--cf-client-id ID --cf-client-secret S]` | Checks everything and prints `[PASS]`, `[WARN]`, `[FAIL]` or `[SKIP]` with a fix hint for each check. It exits 1 on any FAIL. The service token can also come from `SHOUTABOUT_CF_CLIENT_ID` and `SHOUTABOUT_CF_CLIENT_SECRET`. |
-| `vocab list\|add\|remove\|dismiss\|suggest [--projects]\|seed [ROOT...]\|review` | Teach, review and edit the vocabulary. `suggest` mines your dictation history while history is on (plus project folders with `--projects`), and `review` opens the Teach ShoutAbout window ([docs/vocab.md](docs/vocab.md)). Run it from a normal terminal, not from inside an app that redirects `%APPDATA%`. |
+| `vocab list\|add\|remove\|dismiss\|suggest [--projects]\|seed [ROOT...]\|review` | Teach, review and edit the vocabulary. `suggest` lists the suggestions waiting (`--projects` looks through your project folders first), `seed` looks through project folders, and `review` opens Teach words in the ShoutAbout window ([docs/vocab.md](docs/vocab.md)). Run it from a normal terminal, not from inside an app that redirects `%APPDATA%`. |
 | `download-model` | Fetches the Whisper model into the cache (about 1.6 GB the first time). |
 | `encode-m4a SRC DST [--bitrate N]` | Developer helper: encodes any audio file as AAC `.m4a` to mimic an iPhone recording. Needs PyAV, so it works from a source checkout only (the installed app has no FFmpeg). |
 
@@ -414,7 +415,7 @@ The config file is `%APPDATA%\shoutabout\config.toml`.
 | `model` | `"auto"` | `"auto"` picks it from the hardware ([docs/models.md](docs/models.md)). Or a faster-whisper model name such as `"large-v3-turbo"` (maps to `mobiuslabsgmbh/faster-whisper-large-v3-turbo` on Hugging Face), or a path to a CTranslate2 model folder. v1 configs say `"large-v3-turbo"` and keep working exactly as before. |
 | `device` | `"auto"` | `"auto"`, `"cuda"` or `"cpu"`. |
 | `compute_type` | `"auto"` | `"auto"`, or a CTranslate2 compute type on CUDA (`"float16"`, `"int8_float16"`...). |
-| `tier` | `"auto"` | With the three above on `"auto"`: `"best"`, `"balanced"` or `"light"` forces that setup (the settings window's override). |
+| `tier` | `"auto"` | With the three above on `"auto"`: `"best"`, `"balanced"` or `"light"` forces that setup (Settings > Quality). |
 | `cpu_fallback` | `false` | If CUDA fails to load: `false` stops with a clear error, `true` runs on the CPU (slow) and logs a warning. With `device = "auto"` the fallback is always on. |
 | `cpu_compute_type` | `"int8"` | Compute type used on the CPU. |
 | `language` | `"en"` | Fixed language, so language detection never runs. |
@@ -474,17 +475,18 @@ Cloudflare Access JWT validation on the tunnel route. It is enabled only when bo
 | `overlay` | `true` | Shows the mouth pill at the top of the screen. |
 | `max_seconds` | `600` | Stops listening after this long (5-600). |
 
-### `[learn]`, `[history]` and `[logging]`
+### `[learn]` and `[logging]`
 
 | Key | Default | Meaning |
 |---|---|---|
-| `learn.enabled` | `true` | Suggests words to teach ShoutAbout from your dictation history (only while `history.enabled` is on). Checked at startup and every 24 h. |
-| `learn.seed_projects` | `true` | Also suggests project and repo names found in your project folders. |
-| `learn.project_roots` | `[]` | Folders scanned two levels deep. Empty means `~/Documents`, `~/source/repos`, `~/repos`, `~/code` and `~/projects`. |
-| `learn.notify` | `true` | Shows one tray notification when new suggestions are waiting. |
-| `history.enabled` | `false` | Appends one JSON line per request to `history.jsonl`, and keeps recordings that fail for **Try again**. Off by default for new installs; **Settings > Keep a history of what I dictate** or the History window turn it on (applied at once). Configs from earlier versions that say `true` stay on. |
-| `history.keep_audio` | `false` | Also keeps each uploaded audio file in `audio\`. |
+| `learn.enabled` | `true` | `false` turns the daily look below off even with `seed_projects = true`. **Suggest from my project folders** and the CLI still work. |
+| `learn.seed_projects` | `false` | Project folders are only looked at when you press **Suggest from my project folders** in Teach words (or run `vocab seed`). `true` also looks by itself, 90 s after start and every 24 h. An upgrade switches `true` off once; setting it again afterwards sticks. |
+| `learn.project_roots` | `[]` | Folders scanned two levels deep. Empty means `~/Documents`, `~/source/repos`, `~/repos`, `~/code` and `~/projects` (those that exist); on a Mac only folders macOS doesn't guard (`~/Developer`, `~/code`, `~/projects`, `~/src`, `~/git`…), never Documents, Desktop or Downloads. |
+| `learn.notify` | `true` | One notification when the daily look finds new words. |
 | `logging.level` | `"INFO"` | `DEBUG`, `INFO`, `WARNING` or `ERROR`. |
+
+A `[history]` section from an earlier version still loads (ignored) until the first start of
+this version removes it.
 
 ### Files in `%APPDATA%\shoutabout\`
 
@@ -493,15 +495,17 @@ Cloudflare Access JWT validation on the tunnel route. It is enabled only when bo
 | `config.toml` | Settings (above). |
 | `vocab.txt` | Vocabulary, one term per line. `#` starts a comment line, and order sets priority. It hot-reloads. |
 | `hub_token.txt` | Hub bearer token: 256 bits, 43 URL-safe characters. `init --rotate-token` replaces it. |
-| `history.jsonl` | Request history, only while history is on ([docs/history.md](docs/history.md)). |
 | `vocab-suggestions.json` | Pending, accepted and dismissed word suggestions ([docs/vocab.md](docs/vocab.md)). |
-| `audio\` | Only present with `keep_audio = true`. |
 | `logs\hub.log` | Hub log, rotating at 5 MB with 5 backups. |
 | `logs\stdout.log` | Stray stdout/stderr under `pythonw` (download progress, library prints). |
 | `install-state.json` | Written by the setup scripts: repo path, port, task and firewall names, public hostname, tunnel mode, what was created. |
 | `devices.json` | Paired phones: name, id, paired/last used, and the SHA-256 of each phone's token (never the token). |
 | `identity.json` | This installation's id (a UUID, announced on the network) and the custom PC name, if set. |
 | `setup_complete` | Written when the setup window was finished or skipped (or for an install that predates it). |
+| `migrations.json` | Which one-time upgrades have run. |
+
+ShoutAbout writes nothing you dictate here. An earlier version's `history.jsonl`, `audio\` and
+`failed\` are deleted once on upgrade ([docs/history.md](docs/history.md)).
 
 ## API (summary)
 
@@ -608,9 +612,9 @@ in [docs/architecture.md](docs/architecture.md).
   - Request log lines contain IDs, routes, sizes and timings, but no text and no tokens.
   - Rejections log the reason, not the credential.
   - Cleanup fallbacks log the reason, not the transcript.
-- **Local history, off by default.** Nothing you dictate is kept until you turn history on.
-  Then `history.jsonl` holds transcript text and stays on the PC. Audio is not kept unless you
-  turn that on too.
+- **No history.** Nothing you dictate is written to disk. Recent keeps the last 3 dictations
+  (and up to 3 recordings the speech engine couldn't write out) in memory, gone when
+  ShoutAbout quits.
 - **Secrets live in `%APPDATA%\shoutabout`, never in the repo.**
   - The hub token is in `hub_token.txt`.
   - The Access service-token secret exists only in Cloudflare and in the iPhone Shortcut.
@@ -638,8 +642,7 @@ in [docs/architecture.md](docs/architecture.md).
 - After the first download, the engine loads the Whisper model with `local_files_only=True`, so
   starting the hub makes no request to huggingface.co. It only goes online if the model isn't
   in the cache.
-- History is off by default. When you turn it on, the history (text) and optional audio stay
-  in `%APPDATA%\shoutabout`. You can delete them at any time
+- No dictation history is kept. Recent holds the last 3 dictations in memory only
   ([docs/history.md](docs/history.md)).
 
 ## Performance
@@ -672,8 +675,8 @@ How to measure:
   - `timings_ms` in the response (`decode`, `stt`, `cleanup`, `paste`, `total`). These are
     hub-side numbers and exclude the upload.
   - The `transcribe ...` line in `hub.log`.
-  - `history.jsonl`, which has ready-made PowerShell queries in
-    [docs/history.md](docs/history.md).
+  - A ready-made PowerShell query over those lines in
+    [docs/history.md](docs/history.md#measuring).
 - **Offline:**
   - STT: `python -m shoutabout benchmark --stt test-audio\*.m4a --runs 5` reports load time,
     decode/STT ms, real-time factor, GPU memory before and after load, and RSS.
@@ -802,11 +805,10 @@ How to measure:
     "Very High" is uncompressed and makes the upload much bigger.
 21. **The `qr` command moves secrets to the phone** through the camera: the hub token and the
     service-token ID and secret. No cloud clipboard, email or notes app is involved.
-22. **History is off by default, and JSONL without audio when on.** Nothing you dictate is
-    kept unless you ask for it. Text is enough for the future correction UI, while audio is
-    large and more sensitive.
+22. **No dictation history.** Nothing you dictate is written to disk. Recent keeps the last 3
+    dictations in memory, enough to get back text that landed in the wrong spot.
 23. **Config lives in `%APPDATA%` (Roaming) for simplicity.** That is one well-known folder for
-    config, token, vocab, history and logs. Roaming profiles don't apply on a home PC.
+    config, token, vocab and logs. Roaming profiles don't apply on a home PC.
 24. **No spoken commands anywhere.** "New line", "period" and "send it" stay as words. Dictating
     into a terminal must never submit or format anything, and the prompt, few-shot examples and
     guard enforce this.
@@ -855,7 +857,7 @@ status is in [docs/manual-test-checklist.md](docs/manual-test-checklist.md).
 - **Whole hub over HTTP:** real engine + Ollama, on `127.0.0.1` only (port 8799, scratch
   config), so every request was the `tunnel` route with `target=phone`.
   - `/health`, 401 without a token, and 200 with all fields and timings.
-  - `history.jsonl` written, including a guard fallback.
+  - A guard fallback, with its reason.
   - Launched with `pythonw.exe` and the tray, like the scheduled task, with no console
     crashes; graceful Quit through the tray window.
 - **Transcription quality and speed:**
@@ -884,7 +886,7 @@ status is in [docs/manual-test-checklist.md](docs/manual-test-checklist.md).
 - Cloudflare Access JWT validation, using a locally generated RSA key and a fake JWKS (never
   a real Cloudflare token).
 - Route rules and public-IP rejection; rate limiting and lockout.
-- The 413/415/422/503 paths; pause behaviour; the history schema; config validation; the CLI.
+- The 413/415/422/503 paths; pause behaviour; Recent; config validation; the CLI.
 
 **Not run during the build (needs you, your phone or your Cloudflare account):**
 - `setup.ps1` / `setup-admin.ps1` / `setup-cloudflare.ps1` / `uninstall.ps1` /
@@ -907,8 +909,6 @@ status is in [docs/manual-test-checklist.md](docs/manual-test-checklist.md).
 ## Future phases (context only, not commitments)
 
 - An NVIDIA Parakeet TDT engine behind the same `SpeechEngine` protocol.
-- A correction UI built on `history.jsonl`: review raw vs cleaned text and promote fixes into
-  `vocab.txt`.
 - Pairing and transport: QR-code pairing, mDNS discovery, per-device keys with revocation, and
   an end-to-end-encrypted relay for remote use
   ([docs/networking-alternatives.md](docs/networking-alternatives.md)).

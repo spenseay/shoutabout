@@ -133,7 +133,7 @@ transport should need no accounts, no DNS and no port forwarding:
 3. **Per-device keys and revocation.**
    - Each paired phone gets its own key, stored hashed on the PC. Any phone can be revoked from
      the tray without re-pairing the others.
-   - History and logs record which device sent each request.
+   - Recent shows which phone sent each dictation.
 4. **End-to-end-encrypted relay for remote use.**
    ```
    phone app ==(Noise IK over WebSocket/HTTPS)==> relay <==(outbound WebSocket)== hub on the PC
