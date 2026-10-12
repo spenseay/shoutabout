@@ -109,16 +109,19 @@ class FakeApi:
         return True
 
 
-def test_microphone_dialog_first_then_system_settings():
+def test_microphone_allow_always_opens_its_pane_and_asks_macos_once():
+    """Every Allow opens Privacy & Security > Microphone (a switch to turn on, even when
+    macOS shows no dialog); the first one also asks macOS, which shows its dialog and puts
+    ShoutAbout in that list."""
     api = FakeApi()
     hub = HubAccess(api=api)
-    assert hub.ask("microphone") == "asked"  # macOS's own dialog
-    assert api.calls == [("request_microphone",)]
-    # Asked already (the dialog may never have shown): System Settings, every time.
     assert hub.ask("microphone") == "opened"
-    assert api.calls[-1] == ("open", "microphone")
-    api.mic = "denied"
+    assert api.calls == [("request_microphone",), ("open", "microphone")]
+    assert hub.ask("microphone") == "opened"  # asked already: the pane
+    assert api.calls[2:] == [("open", "microphone")]
+    api.mic, api.calls = "denied", []
     assert HubAccess(api=api).ask("microphone") == "opened"
+    assert api.calls == [("open", "microphone")]  # refused: only the switch changes it
     api.mic = "granted"
     assert hub.ask("microphone") == "granted"
 
@@ -179,19 +182,58 @@ class FakeLink:
 
 
 def test_remote_access_asks_the_hub():
-    link = FakeLink({"permissions": st(), "allow": "asked"})
+    link = FakeLink({"permissions": st(), "allow": "opened"})
     remote = RemoteAccess(link)
     assert remote.status() == st()
-    assert remote.ask("microphone") == "asked"
+    assert remote.ask("microphone") == "opened"
     assert link.calls[-1] == ("allow", {"which": "microphone"})
 
 
 def test_remote_access_falls_back_to_system_settings():
     opened: list[str] = []
-    remote = RemoteAccess(FakeLink(fail=True), open_pane=opened.append)
+    prompted: list[int] = []
+    remote = RemoteAccess(
+        FakeLink(fail=True),
+        open_pane=opened.append,
+        prompt_accessibility=lambda: prompted.append(1),
+    )
     assert remote.status() is None  # unknown: the setup doesn't block on it
+    # Accessibility: the prompt (it lists ShoutAbout under the pane) and the pane
     assert remote.ask("accessibility") == "opened" and opened == ["accessibility"]
+    assert prompted == [1]
+    assert remote.ask("microphone") == "opened" and opened[-1] == "microphone"
+    assert prompted == [1]
     assert RemoteAccess(FakeLink({"permissions": "junk"})).status() is None
+
+
+def test_allow_opens_the_exact_privacy_panes(monkeypatch):
+    monkeypatch.setattr(permissions, "_on_mac", lambda: True)
+    seen: list[list[str]] = []
+    for key in ("microphone", "accessibility"):
+        assert permissions.open_settings(key, run=seen.append) is True
+    pane = "x-apple.systempreferences:com.apple.preference.security?"
+    assert seen == [
+        ["/usr/bin/open", pane + "Privacy_Microphone"],  # Privacy & Security > Microphone
+        ["/usr/bin/open", pane + "Privacy_Accessibility"],  # ... > Accessibility
+    ]
+
+
+def test_the_accessibility_prompt_flag_is_passed(monkeypatch):
+    """Allow > Accessibility calls AXIsProcessTrustedWithOptions with the prompt flag (that
+    is what adds ShoutAbout to the Accessibility list)."""
+    import sys
+
+    seen: list[dict] = []
+    fake = SimpleNamespace(
+        kAXTrustedCheckOptionPrompt="AXTrustedCheckOptionPrompt",
+        AXIsProcessTrustedWithOptions=lambda options: seen.append(options) or False,
+        AXIsProcessTrusted=lambda: False,
+    )
+    monkeypatch.setitem(sys.modules, "ApplicationServices", fake)
+    monkeypatch.setattr(permissions, "_on_mac", lambda: True)
+    assert permissions.accessibility_trusted(prompt=True) is False
+    assert seen == [{"AXTrustedCheckOptionPrompt": True}]
+    assert permissions.accessibility_trusted() is False and len(seen) == 1
 
 
 # ------------------------------------------------------------------ menu lines
@@ -297,6 +339,110 @@ def test_watcher_wakes_at_once(tmp_path, monkeypatch):
         assert voice.reloads == 1
     finally:
         hub.stop()
+
+
+# ------------------------------------------------------------------ the launch check
+
+
+class FakeUi:
+    """The hub's window handle (MacUiBridge), recorded."""
+
+    def __init__(self) -> None:
+        self.opened: list[tuple[str, str]] = []
+        self.running = False
+
+    def open_setup(self, mode: str = "full") -> None:
+        self.opened.append(("setup", mode))
+
+    def open_window(self, page: str = "home") -> None:
+        self.opened.append(("main", page))
+
+
+def launched(tmp_path, monkeypatch, report: PermissionReport, *, first_run: bool = False):
+    """A MacHub started with ``report`` as macOS's answer: (hub, ui, notifications)."""
+    notes: list[tuple[str, str]] = []
+    hub = platform.MacHub(Paths(tmp_path), HubState(), lambda t, m: notes.append((t, m)))
+    monkeypatch.setattr(permissions, "report", lambda: report)
+    monkeypatch.setattr(platform, "_in_background", lambda work, _name: work())
+    monkeypatch.setattr(hub, "listen_for_clicks", lambda: None)
+    monkeypatch.setattr(hub, "watch_permissions", lambda _voice: None)
+    ui = FakeUi()
+    v2 = SimpleNamespace(ui=ui, services=SimpleNamespace(permissions=None))
+    hub.start_permissions(FakeVoice(), v2, first_run=first_run)
+    assert v2.services.permissions is hub.access  # the setup's "Allow access" asks the hub
+    return hub, ui, notes
+
+
+@pytest.mark.parametrize(
+    "report",
+    [
+        PermissionReport("granted", False, None),  # no Accessibility: no paste, no hotkey
+        PermissionReport("denied", True, None),  # the microphone refused
+        PermissionReport("undetermined", True, None),  # the microphone never asked
+        PermissionReport("undetermined", False, False),
+    ],
+)
+def test_every_start_opens_allow_access_while_something_is_missing(tmp_path, monkeypatch, report):
+    """Not just the first run: without the microphone or Accessibility ShoutAbout can't
+    work, so every start opens "Allow access" (the notification is a second signal)."""
+    _hub, ui, notes = launched(tmp_path, monkeypatch, report)
+    assert ui.opened == [("setup", "allow")]
+    assert len(notes) == 1 and notes[0][0] == access.NOTICE_TITLE
+
+
+def test_a_start_with_everything_allowed_opens_nothing(tmp_path, monkeypatch):
+    _hub, ui, notes = launched(tmp_path, monkeypatch, PermissionReport("granted", True, None))
+    assert ui.opened == [] and notes == []
+    _hub, ui, notes = launched(tmp_path, monkeypatch, PermissionReport("unknown", None, None))
+    assert ui.opened == [] and notes == []  # can't tell: never in the way
+
+
+def test_a_first_run_leaves_it_to_the_setup_window(tmp_path, monkeypatch):
+    """The first-run setup opens on "Allow access" by itself; the notice waits until that
+    window is gone (and comes once)."""
+    hub, ui, notes = launched(
+        tmp_path, monkeypatch, PermissionReport("granted", False, None), first_run=True
+    )
+    assert ui.opened == [] and notes == []
+    ui.running = True
+    assert not hub.tell_after_setup()
+    ui.running = False
+    assert hub.tell_after_setup() and len(notes) == 1
+    assert not hub.tell_after_setup()
+
+
+def test_opened_again_shows_allow_access_first_while_something_is_missing(tmp_path, monkeypatch):
+    now = {"report": PermissionReport("granted", True, None)}
+    hub, ui, _notes = launched(tmp_path, monkeypatch, now["report"])
+    monkeypatch.setattr(permissions, "report", lambda: now["report"])
+    hub.reopened(ui)
+    assert ui.opened == [("main", "home")]  # all allowed: just the window
+    ui.opened.clear()
+    now["report"] = PermissionReport("granted", False, None)
+    hub.reopened(ui)
+    assert ui.opened == [("main", "home"), ("setup", "allow")]  # "Allow access" in front
+
+
+def test_clicking_the_notice_opens_allow_access(tmp_path, monkeypatch):
+    hub, ui, _notes = launched(tmp_path, monkeypatch, PermissionReport("granted", True, None))
+    hub.notice_clicked()
+    assert ui.opened == []  # nothing missing (any more): nothing to open
+    monkeypatch.setattr(permissions, "report", lambda: PermissionReport("denied", True, None))
+    hub.notice_clicked()
+    assert ui.opened == [("setup", "allow")]
+
+
+def test_homes_line_lists_what_allow_access_lists(tmp_path, monkeypatch):
+    """Home's status line (and its Allow) follows the same rule as the launch check: a
+    microphone macOS hasn't asked about yet is missing too."""
+    services = SimpleNamespace()
+    platform.adapt_services(services, Paths(tmp_path), lambda t, m: None)
+    monkeypatch.setattr(
+        permissions, "report", lambda: PermissionReport("undetermined", False, None)
+    )
+    assert services.missing_permissions() == ["microphone", "accessibility"]
+    monkeypatch.setattr(permissions, "report", lambda: PermissionReport("granted", True, None))
+    assert services.missing_permissions() == []
 
 
 # ------------------------------------------------------------------ the menu bar icon

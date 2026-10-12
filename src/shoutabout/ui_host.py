@@ -221,6 +221,7 @@ class UiHost:
             page=page or "home",
             on_close=lambda: self._closed("main"),
             on_add_phone=lambda: self._show_setup("phone"),
+            on_allow_access=lambda: self._show_setup("allow"),  # Home's "Allow" (macOS)
         )
         self._windows["main"].bring_to_front()
 

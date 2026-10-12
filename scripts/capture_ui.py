@@ -326,7 +326,13 @@ def window_shot(name: str, svc: AppServices, root):
         svc.devices.add("Sam's iPhone", "6f1c2a8e-0b7d-4a43-9d5e-2c1b0a9f8e7d")
         svc.devices.add("Work iPhone", "0d5e9b1a-7c3f-4e2d-8a6b-1f0e9d8c7b6a")
         svc.devices.touch(svc.devices.list()[0].key)
-    window = AppWindow(root, svc, page=page.split("-")[0], load_in_background=False)
+    window = AppWindow(
+        root,
+        svc,
+        page=page.split("-")[0],
+        load_in_background=False,
+        on_allow_access=lambda: None,  # Home's "Allow" shows (nothing opens)
+    )
     if page.startswith("settings"):
         window.pages["settings"].model.message = "Saved."
         window.pages["settings"].reload()

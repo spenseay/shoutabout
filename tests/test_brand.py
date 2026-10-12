@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import struct
 import time
 import zlib
@@ -388,6 +389,100 @@ def test_rounded_rect_points_follow_each_corner_radius():
     pill = brand.rounded_rect_points(0, 0, 30, 10, (99, 99, 99, 99))
     assert brand.Polygon(pill).span(5) == pytest.approx((0, 30))
     assert (0, 0) in brand.rounded_rect_points(0, 0, 4, 4, (0, 1, 1, 1))
+
+
+# ------------------------------------------------------------------------ vectors
+
+
+def test_clip_convex_either_winding():
+    square = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
+    band = brand.shape_points(brand.Rect(-brand.FAR, 3, brand.FAR, 7))
+    clipped = brand.clip_convex(square, band)
+    assert sorted(clipped) == [(0, 3), (0, 7), (10, 3), (10, 7)]
+    assert sorted(brand.clip_convex(square, band[::-1])) == sorted(clipped)
+    assert brand.clip_convex(square, [(20, 20), (30, 20), (30, 30)]) == []  # apart
+    assert brand.clip_convex(square, [(0, 0), (1, 1)]) == []
+    half = brand.clip_convex(square, [(10, 0), (15, 5), (10, 10), (5, 5)])  # a diamond
+    assert abs(brand._area2(half)) / 2 == pytest.approx(25)  # its left half is inside
+
+
+def test_shape_points_outline_each_shape():
+    egg = brand.Egg(50, 40, 50, 30, 50)
+    pts = brand.shape_points(egg, 48)
+    assert len(pts) == 96
+    xs, ys = [x for x, _ in pts], [y for _, y in pts]
+    assert (min(xs), max(xs), min(ys), max(ys)) == pytest.approx((0, 100, 10, 90))
+    for x, y in pts:  # every point is on the outline
+        ry = egg.ry_top if y < egg.cy else egg.ry_bottom
+        assert ((x - 50) / 50) ** 2 + ((y - 40) / ry) ** 2 == pytest.approx(1)
+    assert brand.shape_points(brand.Rect(0, 0, 2, 3)) == [(0, 0), (2, 0), (2, 3), (0, 3)]
+    assert brand.shape_points(brand.Rect(0, 0, 0, 3)) == []
+    pill = brand.shape_points(brand.RoundRect(0, 0, 30, 10, 5))
+    assert brand.Polygon(pill).span(5) == pytest.approx((0, 30))
+    assert brand.shape_points(brand.Polygon([(0, 0), (4, 0), (0, 4)])) == [(0, 0), (4, 0), (0, 4)]
+    top = brand.shape_points(brand.Intersect(egg, brand.above(40)))
+    assert max(y for _, y in top) == pytest.approx(40) and min(y for _, y in top) == 10
+    with pytest.raises(TypeError):
+        brand.shape_points(brand.Shape())
+
+
+def _premultiplied(img: brand.Image) -> list[float]:
+    px = img.rgba
+    return [
+        px[i + k] * px[i + 3] / 255 if k < 3 else px[i + 3]
+        for i in range(0, len(px), 4)
+        for k in range(4)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("width", "opening", "tongue"),
+    [
+        (36, brand.OPEN, True),
+        (54, brand.OPEN, True),
+        (190, brand.OPEN, True),
+        (190, brand.AJAR, False),
+        (150, 40, True),  # saTalk's most shut frame
+        (300, 84, True),
+    ],
+)
+def test_mouth_polygons_draw_the_same_mouth(width, opening, tongue):
+    """The vector mouth (the macOS windows' canvas) is the brand mouth: painted one polygon
+    over another it matches the rasterized mark to well under a pixel along every edge."""
+    color = brand.RED if tongue else None
+    polygons = brand.mouth_polygons(0, 0, width, opening, tongue=color)
+    assert [c for _p, c in polygons] == (
+        [brand.BLACK, brand.RED, brand.WHITE] if tongue else [brand.BLACK, brand.WHITE]
+    )
+    height = math.ceil(width * opening / brand.REF_W)
+    drawn = brand.rasterize(
+        width, height, [brand.Layer(brand.Polygon(p), c) for p, c in polygons], samples=8
+    )
+    mark = brand.mouth_image(width, opening, tongue=color, samples=8)
+    diffs = [abs(a - b) for a, b in zip(_premultiplied(drawn), _premultiplied(mark), strict=True)]
+    assert sum(diffs) / len(diffs) < 0.1
+    assert max(diffs) <= 255 / 8  # one sub-scanline at most, at a curve's very tip
+
+
+def test_mouth_polygons_leave_no_throat_under_an_outer_edge():
+    """A canvas antialiases each polygon over the last, so the throat stops short of the
+    teeth's and the tongue's outer edges (no dark fringe) and only just reaches under them
+    (no seam)."""
+    w, opening = 170.0, brand.OPEN
+    h = w * opening / brand.REF_W
+    throat, tongue, teeth = (p for p, _c in brand.mouth_polygons(0, 0, w, opening))
+    line = brand.teeth_depth(w, h)
+    assert min(y for _, y in throat) == pytest.approx(line - brand.SEAM_OVERLAP)
+    assert max(y for _, y in teeth) == pytest.approx(line)
+    bottom = max(y for _, y in throat)
+    assert bottom < h - 1  # the bottom of the mouth there is tongue only
+    # just under the throat's bottom the tongue fills the mouth's whole width
+    outline = brand.Egg(w / 2, brand.TOP_RY * h, w / 2, brand.TOP_RY * h, brand.BOTTOM_RY * h)
+    edge = outline.span(bottom)
+    tongue_xs = [x for x, y in tongue if abs(y - bottom) < 2]
+    assert min(tongue_xs) <= edge[0] + 0.5 and max(tongue_xs) >= edge[1] - 0.5
+    no_tongue = brand.mouth_polygons(0, 0, w, brand.AJAR, tongue=None)
+    assert max(y for _, y in no_tongue[0][0]) == pytest.approx(w * brand.AJAR / brand.REF_W)
 
 
 # ---------------------------------------------------------------------------- PNG

@@ -35,11 +35,14 @@ POLL_MS = 120
 HOME_REFRESH_MS = 1000
 
 NO_MIC_NOTE = "No microphone found."
+# A permission macOS hasn't given (Home shows the line with an "Allow" button: it opens the
+# setup's "Allow access" screen).
 PERMISSION_NOTES = {
-    "microphone": "Allow the microphone in System Settings.",
-    "accessibility": "Allow pasting in System Settings (Accessibility).",
-    "input_monitoring": "Allow the key in System Settings (Input Monitoring).",
+    "microphone": "The microphone isn't allowed.",
+    "accessibility": "Pasting isn't allowed (Accessibility).",
+    "input_monitoring": "The shortcut key isn't allowed (Input Monitoring).",
 }
+ALLOW_BUTTON = "Allow"
 ERROR_MAX = 90
 
 
@@ -59,6 +62,7 @@ class HomeView:
     note: str = ""  # at most one line when something needs attention
     urgent: bool = False  # the note is a problem (drawn in red), not just news
     busy: bool = False  # getting ready, listening or writing: the mouth talks
+    allow: bool = False  # the note is a missing macOS permission: "Allow" opens Allow access
 
 
 def device_word(platform: str | None = None) -> str:
@@ -122,6 +126,7 @@ def home_view(svc: AppServices) -> HomeView:
         note=note,
         urgent=urgent,
         busy=phase in ("starting", "preparing", "listening", "transcribing"),
+        allow=urgent and note in PERMISSION_NOTES.values(),
     )
 
 
@@ -129,12 +134,20 @@ def home_view(svc: AppServices) -> HomeView:
 
 
 class HomePage:
-    def __init__(self, parent: Any, services: AppServices, *, load_in_background: bool = True):
+    def __init__(
+        self,
+        parent: Any,
+        services: AppServices,
+        *,
+        load_in_background: bool = True,
+        on_allow: Callable[[], None] | None = None,
+    ):
         import tkinter as tk
         import tkinter.font as tkfont
 
         self.win = parent
         self.svc = services
+        self.on_allow = on_allow
         self.closed = False
         self.visible = True
         self.scale = kit.ui_scale(parent)
@@ -150,8 +163,13 @@ class HomePage:
         self.mouth = kit.Mouth(middle, round(190 * s)).pack(pady=(0, round(26 * s)))
         self.talk = tk.Label(middle, text="", font=f.big, bg=kit.YELLOW, fg=kit.BLACK)
         self.talk.pack()
-        self.note = tk.Label(middle, text="", font=f.small_bold, bg=kit.YELLOW, fg=kit.BLACK)
-        self.note.pack(pady=(round(14 * s), 0))
+        line = tk.Frame(middle, bg=kit.YELLOW)
+        line.pack(pady=(round(14 * s), 0))
+        self.note = tk.Label(line, text="", font=f.small_bold, bg=kit.YELLOW, fg=kit.BLACK)
+        self.note.pack(side="left")
+        self.note.bind("<Button-1>", self.clicked_line)
+        # A missing macOS permission: "Allow" opens the setup's "Allow access" screen.
+        self.allow_button = kit.button(line, ALLOW_BUTTON, self.allow, f)
         if load_in_background:
             self.refresh()
         else:
@@ -212,6 +230,22 @@ class HomePage:
         if self.visible:
             self.refresh()
 
+    def _allowing(self) -> bool:
+        return self.on_allow is not None and self.view is not None and self.view.allow
+
+    def clicked_line(self, _event: Any = None) -> None:
+        if self._allowing():  # a missing permission: the line works like its button
+            self.allow()
+
+    def allow(self) -> None:
+        """Home's "Allow" (or a click on the line): the setup's "Allow access" screen."""
+        if self.on_allow is None:
+            return
+        try:
+            self.on_allow()
+        except Exception:
+            log.exception("couldn't open Allow access")
+
     def render(self, view: HomeView) -> None:
         if self.closed:
             return
@@ -220,13 +254,19 @@ class HomePage:
         self.view = view
         self.talk.configure(text=view.talk)
         pad = round(10 * self.scale) if view.urgent and view.note else 0
+        allowing = self._allowing()
         self.note.configure(
             text=view.note,
             bg=kit.RED if view.urgent and view.note else kit.YELLOW,
             fg=kit.BLACK if view.urgent else kit.MUTED,
             padx=pad,
             pady=round(4 * self.scale) if pad else 0,
+            cursor="hand2" if allowing else "",
         )
+        if allowing:
+            self.allow_button.pack(side="left", fill="y", padx=(round(8 * self.scale), 0))
+        else:
+            self.allow_button.pack_forget()
         if view.busy:
             self.mouth.talk()
         else:
@@ -245,6 +285,7 @@ class AppWindow:
         page: str = "home",
         on_close: Callable[[], None] | None = None,
         on_add_phone: Callable[[], None] | None = None,
+        on_allow_access: Callable[[], None] | None = None,
         load_in_background: bool = True,
     ) -> None:
         import tkinter as tk
@@ -254,6 +295,7 @@ class AppWindow:
         self.svc = services
         self.on_close = on_close
         self.on_add_phone = on_add_phone
+        self.on_allow_access = on_allow_access
         self.load_in_background = load_in_background
         self.closed = False
         self.scale = kit.ui_scale(window)
@@ -279,15 +321,11 @@ class AppWindow:
             window.bind("<Control-ISO_Left_Tab>", lambda _e: self._step(-1))
         window.bind("<MouseWheel>", self._on_wheel)
         with contextlib.suppress(Exception):  # cosmetic only
-            self._icon = kit.app_icon_photo(window, 32)
-            window.iconphoto(False, self._icon)
+            self._icon = kit.set_window_icon(window)
 
+        # Just the tabs: the brand mouth is Home's (one mouth per screen).
         nav = tk.Frame(window, bg=kit.YELLOW)
         nav.pack(fill="x", padx=round(22 * s), pady=(round(12 * s), 0))
-        if self._icon is not None:
-            tk.Label(nav, image=self._icon, bg=kit.YELLOW).pack(
-                side="left", padx=(0, round(14 * s)), pady=(0, round(6 * s))
-            )
         tab_font = (f.body_family, 12, "bold")
         for name, label in PAGES.items():
             cell = tk.Frame(nav, bg=kit.YELLOW)
@@ -340,7 +378,7 @@ class AppWindow:
                 on_add_phone=self.on_add_phone,
                 load_in_background=background,
             )
-        return HomePage(holder, svc, load_in_background=background)
+        return HomePage(holder, svc, load_in_background=background, on_allow=self.on_allow_access)
 
     def show(self, page: str | None) -> None:
         """Bring ``page`` up (built on first use; refreshed when coming back to it)."""

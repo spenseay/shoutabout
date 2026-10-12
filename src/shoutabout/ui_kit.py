@@ -13,6 +13,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import logging
+import math
 import sys
 from collections.abc import Callable, Iterable, Sequence
 from functools import lru_cache
@@ -103,6 +104,18 @@ def ui_scale(widget: Any) -> float:
 
 
 # ------------------------------------------------------------------- images
+#
+# How the mouth stays sharp at any scale:
+#
+# * macOS: Tk draws a PhotoImage one pixel per *point*, so on a Retina screen every bitmap is
+#   scaled up 2x (soft edges). The canvas there is antialiased and drawn at the screen's
+#   backing scale, so the mouth is vector shapes on a canvas (brand.mouth_polygons: the
+#   brand's own outlines, curves sampled finely), sharp at 1x, 2x or 3x.
+# * Windows: Tk's canvas isn't antialiased (GDI), so the mouth stays a supersampled bitmap,
+#   rendered at the real size in screen pixels (callers pass ``N * ui_scale``: the process is
+#   DPI aware, so a bitmap pixel is a screen pixel at 100, 125, 150 or 200 %).
+
+VECTOR_MOUTH = sys.platform == "darwin"
 
 
 def photo(master: Any, image: brand.Image) -> Any:
@@ -117,53 +130,139 @@ def talk_heights(n: int = 12) -> list[float]:
     return brand.talk_frames(n)
 
 
+def mouth_box(width: int) -> tuple[int, int]:
+    """The mouth's box: as wide as asked, as tall as the open mouth (every frame fits it, so
+    the art doesn't jump while it talks)."""
+    width = max(1, int(width))
+    return width, max(1, math.ceil(width * brand.OPEN / brand.REF_W))
+
+
+def _with_tongue(opening: float, talking: bool) -> bool:
+    """Talking frames show the tongue; of the stills only the open mouth does (ajar: none)."""
+    return talking or opening >= brand.OPEN
+
+
+# Bitmaps (Windows)
+
+
+def _boxed(width: int, opening: float, tongue: bool) -> brand.Image:
+    w, full_h = mouth_box(width)
+    img = brand.mouth_image(w, opening, tongue=brand.RED if tongue else None, samples=4)
+    return brand.compose(w, full_h, None, [(img, 0, (full_h - img.height) // 2)])
+
+
 @lru_cache(maxsize=8)
 def _mouth_images(width: int, n: int) -> tuple[brand.Image, ...]:
     """Talking-mouth frames, all padded to the open height so the art doesn't jump."""
-    full_h = max(1, round(width * brand.OPEN / brand.REF_W))
-    frames = []
-    for h in talk_heights(n):
-        img = brand.mouth_image(width, h, samples=4)
-        frames.append(brand.compose(width, full_h, None, [(img, 0, (full_h - img.height) // 2)]))
-    return tuple(frames)
+    return tuple(_boxed(width, h, True) for h in talk_heights(n))
 
 
 @lru_cache(maxsize=8)
 def _still_mouth(width: int, opening: float) -> brand.Image:
-    full_h = max(1, round(width * brand.OPEN / brand.REF_W))
-    tongue = brand.RED if opening >= brand.OPEN else None
-    img = brand.mouth_image(width, opening, tongue=tongue, samples=4)
-    return brand.compose(width, full_h, None, [(img, 0, (full_h - img.height) // 2)])
+    return _boxed(width, opening, _with_tongue(opening, False))
+
+
+# Vectors (macOS)
+
+Shapes = tuple[tuple[tuple[float, ...], str], ...]  # ((flat x, y coordinates), Tk colour)
+
+
+def tk_color(rgb: brand.RGB) -> str:
+    return "#{:02X}{:02X}{:02X}".format(*rgb)
+
+
+@lru_cache(maxsize=128)
+def mouth_shapes(width: int, opening: float, tongue: bool) -> Shapes:
+    """One still of the mouth for a canvas the size of :func:`mouth_box`: filled polygons,
+    bottom to top, centred in the box like the bitmaps."""
+    w, full_h = mouth_box(width)
+    h = w * opening / brand.REF_W
+    polygons = brand.mouth_polygons(
+        0, (full_h - h) / 2, w, opening, tongue=brand.RED if tongue else None
+    )
+    return tuple(
+        (tuple(round(c, 3) for point in points for c in point), tk_color(color))
+        for points, color in polygons
+    )
+
+
+def _mouth_vectors(width: int, n: int) -> tuple[Shapes, ...]:
+    return tuple(mouth_shapes(width, h, True) for h in talk_heights(n))
 
 
 class Mouth:
-    """The brand mouth as a Tk label: still (ajar) or talking (saTalk, 12 frames x 133 ms)."""
+    """The brand mouth: still (ajar, or open with its tongue) or talking (saTalk, 12 frames x
+    133 ms). Vector shapes on a canvas on macOS, a bitmap label on Windows (see above);
+    ``widget`` (alias ``label``) is the Tk widget either way."""
 
-    def __init__(self, parent: Any, width: int, bg: str = YELLOW, frames: int = 12) -> None:
+    def __init__(
+        self,
+        parent: Any,
+        width: int,
+        bg: str = YELLOW,
+        frames: int = 12,
+        *,
+        vector: bool | None = None,
+    ) -> None:
         import tkinter as tk
 
-        self.label = tk.Label(parent, bg=bg, bd=0)
+        self.vector = VECTOR_MOUTH if vector is None else bool(vector)
+        self.width, self.height = mouth_box(width)
         self._frames: list[Any] = []
         self._still: Any = None
         self._ajar: Any = None
+        self._items: list[Any] = []
         self._job: Any = None
         self._i = 0
         self._interval = round(brand.TALK_DURATION_MS / frames)
+        if self.vector:
+            self.widget = tk.Canvas(
+                parent,
+                width=self.width,
+                height=self.height,
+                bg=bg,
+                bd=0,
+                highlightthickness=0,
+                takefocus=0,
+            )
+        else:
+            self.widget = tk.Label(parent, bg=bg, bd=0)
+        self.label = self.widget
         try:  # cosmetic: never let artwork stop a window from opening
-            self._frames = [photo(parent, img) for img in _mouth_images(width, frames)]
-            self._still = photo(parent, _still_mouth(width, brand.OPEN))
-            self._ajar = photo(parent, _still_mouth(width, brand.AJAR))
-            self.label.configure(image=self._ajar)
+            if self.vector:
+                self._frames = list(_mouth_vectors(self.width, frames))
+                self._still = mouth_shapes(self.width, brand.OPEN, True)
+                self._ajar = mouth_shapes(self.width, brand.AJAR, False)
+            else:
+                self._frames = [photo(parent, img) for img in _mouth_images(self.width, frames)]
+                self._still = photo(parent, _still_mouth(self.width, brand.OPEN))
+                self._ajar = photo(parent, _still_mouth(self.width, brand.AJAR))
+            self._show(self._ajar)
         except Exception:
             log.debug("couldn't render the mouth", exc_info=True)
 
     def pack(self, **kw: Any) -> Mouth:
-        self.label.pack(**kw)
+        self.widget.pack(**kw)
         return self
 
     def grid(self, **kw: Any) -> Mouth:
-        self.label.grid(**kw)
+        self.widget.grid(**kw)
         return self
+
+    def _show(self, frame: Any) -> None:
+        if not self.vector:
+            self.widget.configure(image=frame)
+            return
+        canvas = self.widget
+        while len(self._items) < len(frame):
+            self._items.append(canvas.create_polygon(0, 0, 0, 0, 0, 0, outline="", width=0))
+        for i, item in enumerate(self._items):
+            if i < len(frame):
+                coords, color = frame[i]
+                canvas.coords(item, *coords)
+                canvas.itemconfigure(item, fill=color, state="normal")
+            else:
+                canvas.itemconfigure(item, state="hidden")
 
     def talk(self) -> None:
         if self._job is None and self._frames:
@@ -171,25 +270,39 @@ class Mouth:
 
     def _tick(self) -> None:
         try:
-            self.label.configure(image=self._frames[self._i % len(self._frames)])
+            self._show(self._frames[self._i % len(self._frames)])
             self._i += 1
-            self._job = self.label.after(self._interval, self._tick)
+            self._job = self.widget.after(self._interval, self._tick)
         except Exception:  # the window closed under us
             self._job = None
 
     def stop(self, open_mouth: bool = False) -> None:
         if self._job is not None:
             with contextlib.suppress(Exception):
-                self.label.after_cancel(self._job)
+                self.widget.after_cancel(self._job)
             self._job = None
-        image = self._still if open_mouth else self._ajar
-        if image is not None:
+        frame = self._still if open_mouth else self._ajar
+        if frame is not None:
             with contextlib.suppress(Exception):
-                self.label.configure(image=image)
+                self._show(frame)
 
 
 def app_icon_photo(master: Any, size: int = 44) -> Any:
     return photo(master, brand.app_icon("primary", size, rounded=True, samples=4))
+
+
+WINDOW_ICON_PX = 32  # Windows' large icon at 100 % (SM_CXICON)
+
+
+def set_window_icon(window: Any) -> Any:
+    """The window's icon (title bar and taskbar on Windows), at the screen's own icon size:
+    Tk hands Windows one image for both, so it's the large one (32 px at 100 %, 48 at 150 %)
+    and the title bar's is an exact half of it. On macOS the window process keeps the Dock
+    icon instead (:mod:`shoutabout.mac.tkmac`). Returns the photo, to keep alive."""
+    size = max(16, round(WINDOW_ICON_PX * ui_scale(window)))
+    icon = app_icon_photo(window, size)
+    window.iconphoto(False, icon)
+    return icon
 
 
 def qr_photo(master: Any, text: str, scale: int = 5) -> Any:

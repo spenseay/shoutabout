@@ -94,8 +94,7 @@ class ApprovalPrompt:
         window.geometry(f"{w}x{h}+{x}+{y}")
         self._icon: Any = None
         with contextlib.suppress(Exception):
-            self._icon = kit.app_icon_photo(window, 32)
-            window.iconphoto(False, self._icon)
+            self._icon = kit.set_window_icon(window)
 
         frame = tk.Frame(window, bg=kit.YELLOW, padx=round(20 * s), pady=round(16 * s))
         frame.pack(fill="both", expand=True)
