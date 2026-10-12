@@ -178,12 +178,12 @@ def test_transcribe_lan_contract():
     assert all(isinstance(v, int) for v in body["timings_ms"].values())
     assert body["route"] == "lan"
     assert body["target"] == "pc"
-    assert body["text"] == "hello better shell"
+    assert body["text"] == "hello Better Shell"
     assert body["raw_text"] == "hello better shell"
     assert body["pasted"] is True
     assert body["warning"] is None
     assert body["cleanup"] == "applied"
-    assert hub.injector.pasted == ["hello better shell"]
+    assert hub.injector.pasted == ["hello Better Shell"]
 
 
 @pytest.mark.parametrize(
@@ -599,7 +599,7 @@ def test_raw_upload_ok():
     body = r.json()
     assert set(body) == RESPONSE_KEYS
     assert (body["route"], body["target"], body["pasted"]) == ("lan", "pc", True)
-    assert hub.injector.pasted == ["hello better shell"]
+    assert hub.injector.pasted == ["hello Better Shell"]
 
 
 @pytest.mark.parametrize("ctype", ["audio/x-m4a", "audio/mp4", "application/octet-stream", ""])

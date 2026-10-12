@@ -1,6 +1,7 @@
 # ShoutAbout vocabulary: one term or phrase per line.
 # Lines starting with # are comments. Order = priority: if the list is too long
 # for Whisper's prompt budget, terms at the top win. Changes apply without a restart.
+# A replacement turns what you say into something else: "omw -> on my way".
 Better Shell
 Claude Code
 Claude

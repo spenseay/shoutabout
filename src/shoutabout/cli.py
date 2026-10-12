@@ -815,16 +815,20 @@ def _print_suggestions(paths: Paths, new: int, *, json_out: bool, source: str | 
 
 
 def cmd_vocab_list(args: argparse.Namespace) -> int:
-    from shoutabout.vocab import read_terms
+    from shoutabout.vocab import read_entries, split_replacement
 
     paths = _paths(args)
-    terms = read_terms(paths.vocab_file)
+    entries = read_entries(paths.vocab_file)
     if args.json:
-        print(json.dumps({"terms": terms, "count": len(terms)}, ensure_ascii=False))
+        pairs = [p for p in map(split_replacement, entries) if p]
+        terms = [e for e in entries if split_replacement(e) is None]
+        replacements = [{"say": say, "write": write} for say, write in pairs]
+        body = {"terms": terms, "replacements": replacements, "count": len(terms)}
+        print(json.dumps(body, ensure_ascii=False))
         return 0
-    for i, term in enumerate(terms, 1):
-        print(f"{i:>3}. {term}")
-    print(f"{len(terms)} term(s) in {paths.vocab_file} (top = highest priority)")
+    for i, entry in enumerate(entries, 1):
+        print(f"{i:>3}. {entry}")
+    print(f"{len(entries)} term(s) in {paths.vocab_file} (top = highest priority)")
     return 0
 
 
@@ -1008,7 +1012,11 @@ def _add_vocab_parser(sub: Any, common: argparse.ArgumentParser) -> None:
     q.add_argument("--json", action="store_true")
     q.set_defaults(func=cmd_vocab_list)
 
-    q = vsub.add_parser("add", parents=[common], help="teach a word (it goes to the top)")
+    q = vsub.add_parser(
+        "add",
+        parents=[common],
+        help='teach a word (it goes to the top), or a replacement: "omw -> on my way"',
+    )
     q.add_argument("term", nargs="+", metavar="TERM", help=term_help)
     q.set_defaults(func=cmd_vocab_add)
 

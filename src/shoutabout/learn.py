@@ -38,6 +38,7 @@ from shoutabout.vocab import (
     file_lock,
     normalize_term,
     read_terms,
+    split_replacement,
 )
 
 log = logging.getLogger(__name__)
@@ -670,7 +671,8 @@ def accept(paths: Paths, terms: Sequence[str]) -> list[AddResult]:
         stored = load_suggestions(paths)
         now = _now()
         for raw, result in zip(terms, results, strict=True):
-            if result.status != "invalid":
+            # A replacement ("omw -> on my way") is never a suggestion.
+            if result.status != "invalid" and split_replacement(result.term) is None:
                 _set_status(stored, result.term, "accepted", now)
                 # A suggestion stored under the raw spelling (rare: it was normalised).
                 _set_status(stored, raw, "accepted", now, create=False)

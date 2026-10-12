@@ -1,10 +1,12 @@
 """The Teach words page of the ShoutAbout window (Tk): teach a word, review suggestions.
 
-* a box to add a word (Enter adds it, at the top of vocab.txt);
+* a box to add a word (Enter adds it, at the top of vocab.txt), and an optional "When I
+  say" box that makes it a replacement instead ("omw" -> "on my way", "slash
+  consolidate" -> "/consolidate");
 * suggestions waiting for a yes or no (Add selected / Dismiss selected), and **Suggest from
   my project folders**, the only thing that ever looks at the project folders: once, when
   pressed (:func:`suggest_from_projects`);
-* your words in priority order (Remove, Open vocab.txt).
+* your words and replacements in priority order (Remove, Open vocab.txt).
 
 :class:`TeachPage` draws into a frame of :class:`shoutabout.app_window.AppWindow`, on the
 UI thread; slow work (file locks, the folder scan) runs on short worker threads that hand
@@ -28,6 +30,7 @@ from typing import Any
 from shoutabout import ui_kit as kit
 from shoutabout.config import Paths
 from shoutabout.learn import SOURCES, Suggestion
+from shoutabout.vocab import ARROW, split_replacement
 
 log = logging.getLogger(__name__)
 
@@ -51,12 +54,29 @@ def group_suggestions(suggestions: Iterable[Suggestion]) -> list[tuple[str, list
 
 
 def add_message(status: str, term: str, reason: str | None = None) -> str:
-    """Status line after teaching one word."""
+    """Status line after teaching one word or replacement."""
+    pair = split_replacement(term) if status != "invalid" else None
+    if pair:
+        say, write = pair
+        if status == "added":
+            return f'Added. Saying "{say}" now writes "{write}".'
+        return f'"{say}" already has a replacement: {display_entry(term)}.'
     if status == "added":
-        return f'Added "{term}" - it\'s now first in line for Whisper.'
+        return f'Added "{term}". ShoutAbout will spell it that way.'
     if status == "exists":
-        return f'"{term}" is already in your vocab.'
+        return f'"{term}" is already in your words.'
     return f"Can't add that: {reason or 'invalid term'}."
+
+
+def display_entry(entry: str) -> str:
+    """How a vocab.txt line shows in the list: "omw → on my way" for a replacement."""
+    pair = split_replacement(entry)
+    return f"{pair[0]} \u2192 {pair[1]}" if pair else entry
+
+
+def compose_entry(word: str, say: str) -> str:
+    """What the two boxes add: the word, or "say -> word" when "When I say" is filled in."""
+    return f"{say.strip()} {ARROW} {word.strip()}" if say.strip() else word
 
 
 def accept_message(results: Sequence[Any]) -> str:
@@ -97,11 +117,11 @@ def suggest_from_projects(paths: Paths) -> int:
 
 
 def read_words(paths: Paths) -> tuple[list[Suggestion], list[str]]:
-    """(pending suggestions, vocab terms in priority order)."""
+    """(pending suggestions, vocab words and replacements in priority order)."""
     from shoutabout.learn import pending_suggestions
-    from shoutabout.vocab import read_terms
+    from shoutabout.vocab import read_entries
 
-    return pending_suggestions(paths), read_terms(paths.vocab_file)
+    return pending_suggestions(paths), read_entries(paths.vocab_file)
 
 
 def open_file(path: Path) -> None:
@@ -209,23 +229,48 @@ class TeachPage:
         outer = tk.Frame(self.win, bg=kit.YELLOW)
         outer.pack(fill="both", expand=True, padx=round(28 * s), pady=(round(18 * s), 0))
 
+        def entry_box(parent: Any, font: Any) -> Any:
+            box = tk.Entry(
+                parent,
+                font=font,
+                bg=kit.WHITE,
+                fg=kit.BLACK,
+                insertbackground=kit.BLACK,
+                relief="flat",
+                highlightthickness=2,
+                highlightbackground=kit.BLACK,
+                highlightcolor=kit.RED,
+            )
+            box.bind("<Return>", lambda _e: self.add_word())
+            box.bind("<KP_Enter>", lambda _e: self.add_word())
+            return box
+
+        def box_label(parent: Any, text: str) -> None:
+            label = tk.Label(parent, text=text, font=f.small_bold, bg=kit.YELLOW, fg=kit.BLACK)
+            label.configure(width=11, anchor="w")
+            label.pack(side="left")
+
         row = tk.Frame(outer, bg=kit.YELLOW)
         row.pack(fill="x")
-        self.entry = tk.Entry(
-            row,
-            font=f.entry,
-            bg=kit.WHITE,
-            fg=kit.BLACK,
-            insertbackground=kit.BLACK,
-            relief="flat",
-            highlightthickness=2,
-            highlightbackground=kit.BLACK,
-            highlightcolor=kit.RED,
-        )
+        box_label(row, "WORD")
+        self.entry = entry_box(row, f.entry)
         self.entry.pack(side="left", fill="x", expand=True, ipady=round(4 * s))
-        self.entry.bind("<Return>", lambda _e: self.add_word())
-        self.entry.bind("<KP_Enter>", lambda _e: self.add_word())
-        kit.button(row, "Add word", self.add_word, f).pack(side="left", padx=(round(10 * s), 0))
+        kit.button(row, "Add", self.add_word, f).pack(side="left", padx=(round(10 * s), 0))
+
+        # Optional: what you say, when it should turn into the word above.
+        say_row = tk.Frame(outer, bg=kit.YELLOW)
+        say_row.pack(fill="x", pady=(round(6 * s), 0))
+        box_label(say_row, "WHEN I SAY")
+        self.say_entry = entry_box(say_row, f.body)
+        self.say_entry.configure(width=22)
+        self.say_entry.pack(side="left", ipady=round(2 * s))
+        tk.Label(
+            say_row,
+            text="optional: write the word instead, like \u201comw\u201d \u2192 on my way",
+            font=f.small,
+            bg=kit.YELLOW,
+            fg=kit.MUTED,
+        ).pack(side="left", padx=(round(8 * s), 0))
 
         self.status = tk.Label(outer, text="", font=f.small_bold, bg=kit.YELLOW, fg=kit.BLACK)
         self.status.configure(anchor="w")
@@ -301,7 +346,7 @@ class TeachPage:
         kit.button(vbuttons, "Remove", self.remove_selected, f, "light").pack(side="left")
         kit.link(vbuttons, "Open vocab.txt", self.open_vocab_file, f).pack(side="right")
 
-        self.set_status("Type a word, then press Enter.")
+        self.set_status("Type a word the way it should be spelled, then press Enter.")
 
     def on_wheel(self, event: Any) -> None:
         """Scroll the suggestions while the pointer is over them."""
@@ -377,7 +422,7 @@ class TeachPage:
         self.vocab_title.configure(text=f"YOUR WORDS ({len(terms)})" if terms else "YOUR WORDS")
         self.vocab_list.delete(0, "end")
         for i, term in enumerate(terms, 1):
-            self.vocab_list.insert("end", f"{i:>3}. {term}")
+            self.vocab_list.insert("end", f"{i:>3}. {display_entry(term)}")
 
     def _selected_suggestions(self) -> list[str]:
         return [s.term for var, s in self.suggestion_vars if var.get()]
@@ -388,7 +433,11 @@ class TeachPage:
         from shoutabout.learn import accept
         from shoutabout.vocab import VocabTermError, normalize_term
 
-        raw = self.entry.get()
+        word, say = self.entry.get(), self.say_entry.get()
+        if say.strip() and not word.strip():
+            self.set_status("Type what it should write in the top box.", error=True)
+            return
+        raw = compose_entry(word, say)
         try:
             term = normalize_term(raw)
         except VocabTermError as exc:
@@ -409,6 +458,7 @@ class TeachPage:
             )
             if result.status != "invalid":
                 self.entry.delete(0, "end")
+                self.say_entry.delete(0, "end")
             self.reload()
 
         self.run_async(lambda: accept(paths, [term]), done)
@@ -485,7 +535,7 @@ class TeachPage:
             if error is not None:
                 self.set_status(f"Couldn't update vocab.txt: {error}", error=True)
             elif len(picked) == 1:
-                self.set_status(f'Removed "{picked[0]}".')
+                self.set_status(f'Removed "{display_entry(picked[0])}".')
             else:
                 self.set_status(f"Removed {len(picked)} words.")
             self.reload()

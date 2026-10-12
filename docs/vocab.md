@@ -1,7 +1,8 @@
 # Vocabulary: teaching ShoutAbout your words
 
 Whisper gets everyday English right. It gets names wrong: your projects, your colleagues,
-product names, jargon. `vocab.txt` is the list of words you want spelled your way. This page
+product names, jargon. `vocab.txt` is the list of words you want spelled your way, plus any
+replacements (like your phone's text replacement: say "omw", get "on my way"). This page
 covers how the list is used, the four ways to add to it, word suggestions, and the `/vocab`
 API.
 
@@ -21,6 +22,34 @@ Run the CLI as `.\.venv\Scripts\python.exe -m shoutabout ...` from the repo fold
 Each dictation passes the terms to Whisper in two ways, as `hotwords` and as an
 `initial_prompt`, in the form `In this dictation I mention A, B, C.` The LLM cleanup also gets
 the list, so it can fix near-miss spellings such as "better shel" to "Better Shell".
+
+That's only a hint, though: a name Whisper already knows another spelling of still comes out
+its way ("Sofia" as "Sophia"). So every dictation also gets a spelling pass at the end, with
+or without the cleanup (`shoutabout/vocabfix.py`, the same rules as the iPhone app):
+- A word said with different capitals or spacing gets your spelling: "better shell" becomes
+  "Better Shell", "shout about" becomes "ShoutAbout".
+- A word that **sounds like** yours and is spelled almost like it becomes yours: "Sophia"
+  becomes "Sofia". To avoid false hits, an everyday word ("sofa", "cloud") only changes when
+  Whisper capitalised it mid-sentence, as it does for a name.
+- A word with a symbol also matches when you say the symbol: "/consolidate" catches "slash
+  consolidate", "C#" catches "C sharp", "Node.js" catches "node dot js".
+
+## Replacements
+
+A line with an arrow is a replacement: what you say on the left, what gets written on the
+right. Matching ignores case and works on whole words only.
+
+```text
+omw -> on my way
+slash consolidate -> /consolidate
+Sophia -> Sofia
+```
+
+Use one for a shortcut (`omw`), for anything that doesn't sound like what's written, or to
+force a fix the sound-alike rules don't make. Replacements aren't sent to Whisper and don't
+count toward the budget. Each spoken phrase can have one replacement; the first line wins.
+`=>` and `→` work as the arrow too. To add one, fill in **When I say** on the Teach words
+page, or run `vocab add "omw -> on my way"` (with the quotes).
 
 **The budget.** Whisper's prompt is small. The vocab text gets `[stt] max_prompt_tokens`
 (default 200) tokens, which is roughly 40 to 60 short terms. Terms past the budget are dropped
@@ -60,13 +89,16 @@ shows the `reason` instead. See [the API reference](#api-reference) and
 
 Tray > **Teach words…** opens the ShoutAbout window on its **Teach words** page (or
 `vocab review`).
-- **Top:** a box plus an **Add word** button. Press Enter to add; the word goes to the top.
+- **Top:** a **Word** box plus an **Add** button. Press Enter to add; the word goes to the
+  top. Fill in **When I say** as well to add a replacement instead: Word "on my way", When I
+  say "omw".
 - **Suggestions** (left), each with the reason it was suggested. Tick some, then choose:
   - **Add selected** puts them at the top of the vocab, in the order shown.
   - **Dismiss** means they are never suggested again.
   - **Suggest from my project folders** looks through your project folders once, now
     ([below](#from-your-project-folders)).
-- **Your words** (right): your vocab in priority order. Select one or more words, then
+- **Your words** (right): your words and replacements (`omw → on my way`) in priority order.
+  Select one or more, then
   **Remove** (or press Delete). **Open vocab.txt** opens the file in your editor.
 
 ### 3. CLI

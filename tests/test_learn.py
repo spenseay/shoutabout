@@ -418,9 +418,33 @@ def test_group_suggestions():
 
 
 def test_messages():
-    assert "first in line" in review_ui.add_message("added", "GitHub")
+    assert review_ui.add_message("added", "Sofia") == (
+        'Added "Sofia". ShoutAbout will spell it that way.'
+    )
     assert "already" in review_ui.add_message("exists", "GitHub")
     assert "too long" in review_ui.add_message("invalid", "x", "too long")
+    assert review_ui.add_message("added", "omw -> on my way") == (
+        'Added. Saying "omw" now writes "on my way".'
+    )
+    assert review_ui.add_message("exists", "omw -> on my way") == (
+        '"omw" already has a replacement: omw \u2192 on my way.'
+    )
+    assert "Whisper" not in review_ui.add_message("added", "GitHub")
+
+
+def test_replacement_entries():
+    assert review_ui.compose_entry("/consolidate", "slash consolidate") == (
+        "slash consolidate -> /consolidate"
+    )
+    assert review_ui.compose_entry("Sofia", "  ") == "Sofia"
+    assert review_ui.display_entry("omw -> on my way") == "omw \u2192 on my way"
+    assert review_ui.display_entry("Sofia") == "Sofia"
+
+
+def test_accept_never_records_a_replacement_as_a_suggestion(paths):
+    [result] = learn.accept(paths, ["omw -> on my way"])
+    assert result.status == "added"
+    assert learn.load_suggestions(paths) == []
 
     class R:
         def __init__(self, status, reason=None):
@@ -458,6 +482,13 @@ def test_teach_page_adds_scans_and_removes(paths, root, monkeypatch):
         _pump(window, 0.4)
         assert read_terms(paths.vocab_file)[0] == "Priya Raghunathan"
         assert page.vocab_terms[0] == "Priya Raghunathan"
+        page.entry.insert(0, "on my way")
+        page.say_entry.insert(0, "omw")
+        page.add_word()
+        _pump(window, 0.4)
+        assert page.vocab_terms[0] == "omw -> on my way"
+        assert page.vocab_list.get(0).endswith("omw \u2192 on my way")
+        assert page.say_entry.get() == ""
         assert page.scan_button["text"] == review_ui.SCAN_LABEL
         page.scan_projects()  # the only thing that looks at the folders
         _pump(window, 0.8)
