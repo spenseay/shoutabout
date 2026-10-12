@@ -6,13 +6,13 @@
     "live": true,
     "file": "ShoutAbout-Setup.exe",
     "url": "https://github.com/spenseay/shoutabout/releases/latest/download/ShoutAbout-Setup.exe",
-    "size_bytes": 533221880
+    "size_bytes": 533235462
   },
   "mac": {
     "live": true,
     "file": "ShoutAbout.dmg",
     "url": "https://github.com/spenseay/shoutabout/releases/latest/download/ShoutAbout.dmg",
-    "size_bytes": 66120226
+    "size_bytes": 66139161
   },
   "iphone": {
     "live": false,
