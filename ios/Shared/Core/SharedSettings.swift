@@ -24,7 +24,6 @@ struct SharedSettings {
         static let hubInfo = "hubInfo"
         static let onboardingDone = "onboardingDone"
         static let useTunnel = "useTunnel"
-        static let keepHistory = "keepHistory"
         static let pendingCopy = "pendingCopy"
     }
 
@@ -119,35 +118,6 @@ struct SharedSettings {
     var useTunnel: Bool {
         get { bool(Key.useTunnel, default: true) }
         nonmutating set { defaults.set(newValue, forKey: Key.useTunnel) }
-    }
-
-    /// Settings › Keep history. nil until the first launch of a version that has the switch
-    /// (`resolveKeepHistory` decides it then).
-    var keepHistory: Bool? {
-        get { defaults.object(forKey: Key.keepHistory) as? Bool }
-        nonmutating set {
-            if let newValue {
-                defaults.set(newValue, forKey: Key.keepHistory)
-            } else {
-                defaults.removeObject(forKey: Key.keepHistory)
-            }
-        }
-    }
-
-    /// The stored "Keep history" choice. The first time, it's decided and stored (so it never
-    /// changes behind your back): see `defaultKeepHistory(existingItemCount:)`.
-    func resolveKeepHistory(existingItemCount: Int) -> Bool {
-        if let stored = keepHistory { return stored }
-        let value = Self.defaultKeepHistory(existingItemCount: existingItemCount)
-        keepHistory = value
-        return value
-    }
-
-    /// History is off by default (the owner's privacy choice), except on an install that
-    /// already has saved dictations from before the switch existed: nobody silently loses
-    /// their list.
-    static func defaultKeepHistory(existingItemCount: Int) -> Bool {
-        existingItemCount > 0
     }
 
     /// A result waiting for the app to be in front so it can go on the clipboard.

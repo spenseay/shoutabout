@@ -51,13 +51,6 @@ struct SettingsView: View {
                     Text("Dictation")
                 }
                 Section {
-                    KeepHistoryToggle()
-                } header: {
-                    Text("History")
-                } footer: {
-                    Text("Off by default. Saved only on this phone.")
-                }
-                Section {
                     NavigationLink("Advanced") { AdvancedSettingsView() }
                 }
                 Section {
@@ -203,31 +196,6 @@ private struct KeyboardSetupRow: View {
                     Label("Keyboard", systemImage: "keyboard")
                 }
             }
-        }
-    }
-}
-
-/// "Keep history" (Settings, and the History screen's empty state turns it on). Turning it off
-/// with saved dictations asks whether to keep or clear them.
-struct KeepHistoryToggle: View {
-    @Environment(AppModel.self) private var model
-    @State private var confirmOff = false
-
-    var body: some View {
-        Toggle("Keep history", isOn: Binding(
-            get: { model.keepHistory },
-            set: { on in
-                if !on, !model.history.isEmpty {
-                    confirmOff = true
-                } else {
-                    model.setKeepHistory(on)
-                }
-            }
-        ))
-        .confirmationDialog("Turn off history?", isPresented: $confirmOff, titleVisibility: .visible) {
-            Button("Clear saved dictations", role: .destructive) { model.setKeepHistory(false, clearSaved: true) }
-            Button("Keep saved dictations") { model.setKeepHistory(false) }
-            Button("Cancel", role: .cancel) {}
         }
     }
 }

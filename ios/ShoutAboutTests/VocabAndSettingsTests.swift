@@ -202,35 +202,6 @@ final class SharedSettingsTests: XCTestCase {
         XCTAssertEqual(DictationTarget.phone.toggled, .pc)
     }
 
-    // MARK: Keep history
-
-    func testHistoryIsOffByDefaultOnANewInstall() {
-        let settings = makeSettings()
-        XCTAssertNil(settings.keepHistory)
-        XCTAssertFalse(settings.resolveKeepHistory(existingItemCount: 0))
-        XCTAssertEqual(settings.keepHistory, false)  // decided once, then stored
-        XCTAssertFalse(settings.resolveKeepHistory(existingItemCount: 12))
-    }
-
-    func testHistoryStaysOnForAnInstallThatAlreadyHasSomeDictations() {
-        let settings = makeSettings()
-        XCTAssertTrue(settings.resolveKeepHistory(existingItemCount: 3))
-        XCTAssertEqual(settings.keepHistory, true)
-        XCTAssertTrue(settings.resolveKeepHistory(existingItemCount: 0))  // clearing it later doesn't flip it
-    }
-
-    func testKeepHistoryChoiceIsRemembered() {
-        let settings = makeSettings()
-        settings.keepHistory = true
-        XCTAssertTrue(SharedSettings(defaults: settings.defaults).resolveKeepHistory(existingItemCount: 0))
-        settings.keepHistory = false
-        XCTAssertFalse(SharedSettings(defaults: settings.defaults).resolveKeepHistory(existingItemCount: 50))
-        settings.keepHistory = nil
-        XCTAssertNil(settings.keepHistory)
-        XCTAssertFalse(SharedSettings.defaultKeepHistory(existingItemCount: 0))
-        XCTAssertTrue(SharedSettings.defaultKeepHistory(existingItemCount: 1))
-    }
-
     // MARK: Pending copy
 
     func testPendingCopyRoundTripsAndClears() {

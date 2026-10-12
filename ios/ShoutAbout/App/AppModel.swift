@@ -51,7 +51,7 @@ enum StartResult: Equatable, Sendable {
 }
 
 /// App state: settings (mirrored to the App Group), the paired computer, the dictation state
-/// machine with its Live Activity, history and vocabulary. Views bind to it; intents reach it
+/// machine with its Live Activity, Recent and vocabulary. Views bind to it; intents reach it
 /// through `DictationLauncher`.
 @MainActor
 @Observable
@@ -77,9 +77,6 @@ final class AppModel {
             Task { await refreshOfflineStatus() }
         }
     }
-    /// Settings › Keep history: off by default (see `SharedSettings.resolveKeepHistory`). Off,
-    /// results show on the main screen for this session only.
-    private(set) var keepHistory = false
     private(set) var onboardingDone = false
 
     // MARK: The computer
@@ -106,7 +103,8 @@ final class AppModel {
     private(set) var level: Double = 0
     private(set) var elapsed: TimeInterval = 0
     private(set) var lastItem: HistoryItem?
-    private(set) var history: [HistoryItem] = []
+    /// Recent: the last few dictations, in memory only (never saved, gone when the app quits).
+    private(set) var history = HistoryStore()
     private(set) var lastFailedJob: DictationJob?
     /// Where the current recording goes (fixed when it starts).
     private(set) var recordingTarget: DictationTarget?
@@ -141,7 +139,6 @@ final class AppModel {
 
     @ObservationIgnored private let settings = SharedSettings()
     @ObservationIgnored private let keychain = KeychainStore()
-    @ObservationIgnored private let historyStore = HistoryStore()
     @ObservationIgnored private let recorder = AudioRecorder()
     @ObservationIgnored let activity = LiveActivityController()
     @ObservationIgnored private let finder = ComputerFinder()
@@ -174,8 +171,6 @@ final class AppModel {
         hubInfo = settings.cachedHubInfo
         vocab = settings.vocabTerms
         vocabFetchedAt = settings.vocabFetchedAt
-        history = historyStore.load()
-        keepHistory = settings.resolveKeepHistory(existingItemCount: history.count)
         refreshSecretsSummary()
         // People who paired with the QR code before onboarding existed skip it.
         onboardingDone = settings.onboardingDone || (configuration.isPaired && hasLegacyToken)
@@ -185,7 +180,11 @@ final class AppModel {
             applyScreenshotScene(scene)
         }
 #endif
-        if !isDemo { setUpKeyboardLink() }
+        if !isDemo {
+            // Older versions could save up to 200 dictations on disk; Recent never does.
+            HistoryStore.removeSavedHistory(defaults: settings.defaults)
+            setUpKeyboardLink()
+        }
     }
 
     // MARK: Derived
@@ -662,10 +661,7 @@ final class AppModel {
 
     private func record(_ item: HistoryItem) {
         lastItem = item
-        guard keepHistory else { return }  // off: the main screen shows it, nothing is saved
-        history.insert(item, at: 0)
-        if history.count > HistoryStore.limit { history.removeLast(history.count - HistoryStore.limit) }
-        if !isDemo { historyStore.save(history) }
+        history.add(item)  // Recent: in memory only
     }
 
     private static func milliseconds(since start: ContinuousClock.Instant) -> Int {
@@ -673,7 +669,7 @@ final class AppModel {
         return Int(seconds * 1000 + attoseconds / 1_000_000_000_000_000)
     }
 
-    // MARK: History
+    // MARK: Recent
 
     func copy(_ item: HistoryItem) {
         guard !item.text.isEmpty else { return }
@@ -683,21 +679,7 @@ final class AppModel {
     }
 
     func deleteHistory(_ ids: Set<UUID>) {
-        history.removeAll { ids.contains($0.id) }
-        historyStore.save(history)
-    }
-
-    func clearHistory() {
-        history = []
-        lastItem = nil
-        historyStore.save(history)
-    }
-
-    /// Settings › Keep history. Turning it off can also clear what's saved (the screen asks).
-    func setKeepHistory(_ on: Bool, clearSaved: Bool = false) {
-        keepHistory = on
-        if !isDemo { settings.keepHistory = on }
-        if clearSaved { clearHistory() }
+        history.remove(ids)
     }
 
     // MARK: The computer: pairing
@@ -1236,7 +1218,7 @@ final class AppModel {
     }
 
     /// The latest phone dictation, for the keyboard to type. Only ever the one, and gone
-    /// after a few minutes, typed or not (also with Keep history off).
+    /// after a few minutes, typed or not (separate from Recent).
     private func publishKeyboardHandoff(_ text: String) {
         keyboardLink.publish(KeyboardHandoff(text: text))
         KeyboardSignals.post(.result)
@@ -1329,8 +1311,7 @@ extension AppModel {
     fileprivate func applyScreenshotScene(_ scene: ScreenshotScene) {
         vocab = ["ShoutAbout", "TestFlight", "Sample Project", "faster-whisper"]
         vocabFetchedAt = Date()
-        history = Self.sampleHistory
-        keepHistory = true
+        history = HistoryStore(Self.sampleHistory)
         // A made-up PC at a documentation-only address (192.0.2.0/24, RFC 5737).
         let sample = ScreenshotScene.sampleComputer
         pairedComputer = PairedComputer(
@@ -1360,7 +1341,7 @@ extension AppModel {
             pairedComputer = nil
             hasDeviceToken = false
             hubInfo = nil
-            history = []
+            history = HistoryStore()
             target = .phone
         case .mainComputer:
             break
@@ -1374,7 +1355,7 @@ extension AppModel {
         case .processing, .islandSending:
             phase = .processing(DictationStage.sendingAudio(.lan).message)
         case .result, .islandDone, .history, .settings:
-            lastItem = history.first
+            lastItem = history.items.first
             phase = .done
         case .away:
             let item = HistoryItem(
@@ -1382,13 +1363,12 @@ extension AppModel {
                 target: .pc, route: .offline, warning: DictationNotice.away,
                 audioSeconds: 4.8, roundTripMs: 1450, engine: "SpeechTranscriber"
             )
-            history.insert(item, at: 0)
+            history.add(item)
             lastItem = item
             phase = .done
         case .failed:
             let message = "Your PC isn't reachable, and this iPhone couldn't write it down: the on-device model isn't downloaded yet."
             let item = HistoryItem(text: "", target: .pc, route: .offline, audioSeconds: 5.2, error: message)
-            history.insert(item, at: 0)
             lastItem = item
             lastFailedJob = DictationJob(
                 recording: Recording(url: FileManager.default.temporaryDirectory.appendingPathComponent("sample.m4a"), duration: 5.2),
@@ -1465,12 +1445,6 @@ extension AppModel {
                 target: .pc, route: .lan, pasted: true, cleanup: "applied",
                 timings: .init(decode: 10, stt: 139, cleanup: 94, paste: 33, total: 281),
                 audioSeconds: 5.0, roundTripMs: 560
-            ),
-            HistoryItem(
-                date: now.addingTimeInterval(-26 * 3600),
-                text: "Sample text: ideas from the walk, a brighter icon and a louder mouth.",
-                target: .pc, route: .offline, warning: DictationNotice.away,
-                audioSeconds: 7.8, roundTripMs: 1900, engine: "SpeechTranscriber"
             ),
         ]
     }

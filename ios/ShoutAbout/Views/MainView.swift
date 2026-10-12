@@ -9,7 +9,7 @@ enum MainSheet: String, Identifiable, Sendable {
 
 /// The one screen: Computer | Phone at the top (only with a paired computer), the big mouth
 /// button in the middle, one status line, and the last result as a compact card that always
-/// sits above the bottom safe area. History and Settings open as sheets.
+/// sits above the bottom safe area. Recent and Settings open as sheets.
 struct MainView: View {
     @Environment(AppModel.self) private var model
     @State private var sheet: MainSheet? = MainView.initialSheet
@@ -67,7 +67,7 @@ private struct TopBar: View {
 
     var body: some View {
         HStack(spacing: Theme.Spacing.xs) {
-            CircleIconButton(systemImage: "clock.arrow.circlepath", label: "History") { sheet = .history }
+            CircleIconButton(systemImage: "clock.arrow.circlepath", label: "Recent") { sheet = .history }
             Spacer(minLength: 0)
             if model.hasComputer {
                 TargetPill()
@@ -393,7 +393,7 @@ private struct ResultArea: View {
     }
 }
 
-/// The last result, compact: the first lines (History has the rest) and a copy button.
+/// The last result, compact: the first lines (Recent has the rest) and a copy button.
 struct ResultCard: View {
     @Environment(AppModel.self) private var model
     let item: HistoryItem

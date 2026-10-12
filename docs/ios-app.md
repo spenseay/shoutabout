@@ -57,7 +57,7 @@ tour runs in the iOS Simulator. Nothing has run on a real iPhone yet (see
     turns red, shakes and offers **Retry** (the audio is kept).
   - Under it: one status line ("Your words land where you're typing on DESKTOP-ABC.").
   - Bottom: the last result as a compact card, always above the home indicator, with a copy
-    button. **History** and **Settings** are small round buttons that open sheets.
+    button. **Recent** and **Settings** are small round buttons that open sheets.
   - The button is the app icon: a yellow tile with the mouth (black mouth, white teeth, red
     tongue, no ring) and a thin ink edge, on a yellow ground (light) or black (dark).
 - **The Action Button pops up a mouth, like the old Siri.** `DictateIntent` records without
@@ -108,12 +108,12 @@ tour runs in the iOS Simulator. Nothing has run on a real iPhone yet (see
   says "Allow Full Access to dictate". Details: `Shared/Core/KeyboardBridge.swift`.
 - **Siri / Shortcuts**: "Dictate with ShoutAbout", "Open ShoutAbout and dictate" (the
   foreground fallback), "Toggle ShoutAbout target", plus Set Dictation Target.
-- **History**: off by default (Settings › Keep history: "Saves what you dictate on this phone
-  so you can copy it later."). An install that already had saved dictations when the switch
-  arrived starts with it on, so nobody silently loses their list. On: the last 200 results, on
-  this iPhone only (excluded from backups); swipe to copy or delete. Off: the latest result
-  still shows on the main screen for the session, History says "History is off" with a button
-  to turn it on, and turning it off with saved dictations asks keep or clear.
+- **Recent**: the last 3 dictations (ones with words), newest first, each with a copy
+  button (long-press: Copy, Share; swipe to delete). In memory only: never written to disk,
+  gone when the app quits or iOS ends it. It's only there to get back text that landed in the
+  wrong spot, so there's no setting. Older versions could keep up to 200 on disk (Settings ›
+  Keep history); the first launch of this version deletes that file and the old switch
+  (`HistoryStore.removeSavedHistory`).
 - **Vocabulary**: the PC's custom words (`GET/POST /vocab`), cached for dictating away from
   home. Fetched every time the app comes forward and the PC answers, when a recording starts
   and after it (on the home network), right after adding a word, and over the tunnel at most
@@ -146,8 +146,10 @@ ios/
       VocabFixer.swift        custom spelling of vocab terms in on-device transcripts (same
                               spelling, then sound-alike)
       SoundAlike.swift        phonetic key (simplified Metaphone), edit distance, common words
-      SharedSettings.swift    App Group defaults (target, paired computer, /info cache, keep
-                              history, pending copy, ...)
+      HistoryStore.swift      Recent: the last 3 dictations, in memory only (+ deletes the
+                              history older versions saved)
+      SharedSettings.swift    App Group defaults (target, paired computer, /info cache,
+                              pending copy, ...)
       DeviceFeatures.swift    does this iPhone have an Action Button (model identifier)
       AppGroup.swift          the App Group id and its shared defaults
       KeyboardBridge.swift    the keyboard <-> app link: state + heartbeat, tap decisions,
@@ -166,9 +168,9 @@ ios/
                               Debug screenshot scenes), DictationLauncher (intent entry points)
     Services/                 HubClient (LiveHubTransport), ComputerFinder (NWBrowser +
                               resolution), LiveActivityController, AudioRecorder,
-                              OfflineTranscriber, KeychainStore, NetworkPath, HistoryStore
+                              OfflineTranscriber, KeychainStore, NetworkPath
     Views/                    RootView, OnboardingView, ConnectComputerView (+ PairingModel),
-                              MainView, HistoryView, SettingsView (+ Advanced), PairingViews
+                              MainView, HistoryView (Recent), SettingsView (+ Advanced), PairingViews
                               (legacy QR/manual), VocabView
     Resources/                Assets.xcassets (icons, launch colour), Fonts (+ OFL licences)
   ShoutAboutWidgets/          widget extension: Control Center controls, Lock Screen widget,
@@ -199,7 +201,7 @@ Action Button again / Stop -> stop -> DictationJob (snapshot of target, computer
            unreachable mid-way -> tunnel (if set up) -> on-device + clipboard
            PC answered "no" (401/409/503...) -> on-device + clipboard + note
    -> clipboard (if needed; from the background it may wait for the app: PendingCopy),
-      history (if kept), haptic, the mouth zips shut (app + island), ~2.5 s
+      Recent (in memory), haptic, the mouth zips shut (app + island), ~2.5 s
 ```
 
 ## Decisions and tradeoffs
@@ -325,7 +327,7 @@ Routing rules (`DictationRouter`, every branch unit-tested):
   the LAN and its `/info` speed isn't `slow` (or it has no `/info`, an older PC), the audio goes
   to `POST /transcribe?target=phone`: the PC writes the text and pastes nothing. Otherwise (no
   PC, away, slow PC, or any PC error) the iPhone transcribes on-device. No note either way;
-  the island says "Copied ✓" and History shows who wrote it. The tunnel is never used for it.
+  the island says "Copied ✓". The tunnel is never used for it.
 - **Computer**, on Wi-Fi (or a VPN address such as Tailscale's `100.64.0.0/10` on cellular):
   `/hello` within 1.5 s (on 404, `/health` in the time left), then `/info` (unless cached):
   - `speed` is `slow` and the PC accepts text → on-device, then `POST /paste` (> 10 000
