@@ -53,6 +53,9 @@ MACHO="$ROOT/packaging/macos/macho.py"
 # Checks the signature can break (imports = library validation; vad/ctranslate2 = the
 # native libraries; objc-callbacks = executable memory for PyObjC's stubs).
 SIGNING_CHECKS="modules dependencies vad ctranslate2 objc-callbacks"
+# Checks the signed app must pass on this Mac, whatever the unsigned one did (mac-mouth = the
+# windows' mouth is an AppKit view at the screen's scale: only a real Mac can tell).
+REQUIRED_CHECKS="mac-mouth"
 
 say() { printf '\n==> %s  [%s]\n' "$1" "$(date +%H:%M:%S)"; }
 fail() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
@@ -124,6 +127,21 @@ elif after is None:
     print("crashed")
 else:
     print(" ".join(n for n in watched if before.get(n) == "pass" and after.get(n) != "pass"))
+EOF
+}
+
+# not_passed REPORT -> names of REQUIRED_CHECKS that didn't pass ("no report" if it's missing)
+not_passed() {
+  "$PY" - "$1" "$REQUIRED_CHECKS" <<'EOF'
+import json, sys
+from pathlib import Path
+
+try:
+    checks = {c["name"]: c["status"] for c in json.loads(Path(sys.argv[1]).read_text())["checks"]}
+except Exception:
+    print("no report")
+else:
+    print(" ".join(n for n in sys.argv[2].split() if checks.get(n) != "pass"))
 EOF
 }
 
@@ -228,6 +246,11 @@ elif [ -n "$BROKEN" ]; then
 else
   echo "signed app passes every check the unsigned one passed"
 fi
+LAST_REPORT="$LOGS/selftest-signed.json"
+[ -f "$LOGS/selftest-signed-fallback.json" ] && LAST_REPORT="$LOGS/selftest-signed-fallback.json"
+FAILED="$(not_passed "$LAST_REPORT")"
+[ -z "$FAILED" ] || fail "the signed app fails: $FAILED (see its self-test above)"
+echo "signed app passes $REQUIRED_CHECKS"
 
 # --------------------------------------------------------------------------- notarization
 KEY_FILE=""

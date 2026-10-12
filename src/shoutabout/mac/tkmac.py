@@ -16,6 +16,9 @@ never on Windows, so the shared window code stays unchanged:
   replaces the *Dock* icon with the photo it gets (the windows pass a 32 px one: a blurry
   tile). It is ignored here, so the Dock shows the app's own ShoutAbout.icns (16 to
   1024 px); run from source (no bundle icon) it shows the brand icon rendered at Dock size.
+* **The mouth**: Tk 8.6 can't draw it sharp on a Retina screen (bitmaps are scaled up 2x,
+  canvas corners snap to whole points), so each mouth gets an AppKit view over its canvas,
+  drawn at the screen's backing scale (:mod:`shoutabout.mac.native_mouth`).
 """
 
 from __future__ import annotations
@@ -97,6 +100,10 @@ def install() -> None:
     tk.Wm.wm_iconphoto = keep_dock_icon  # type: ignore[method-assign]
     tk.Wm.iconphoto = keep_dock_icon  # type: ignore[method-assign]
     tk.Button = make_label_button(tk)  # type: ignore[misc]
+    from shoutabout import ui_kit
+    from shoutabout.mac.native_mouth import NativeMouth
+
+    ui_kit.native_mouth = NativeMouth
     _installed = True
 
 

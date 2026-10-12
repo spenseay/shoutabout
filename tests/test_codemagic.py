@@ -467,6 +467,36 @@ def test_release_selftest_comparison_dry_run(tmp_path):
     assert run(broken, unsigned) == ""
 
 
+def test_release_required_checks_dry_run(tmp_path):
+    """release.sh's `not_passed`: a required check must pass in the signed app's report."""
+    text = (MACOS / "release.sh").read_text("utf-8")
+    assert 'REQUIRED_CHECKS="mac-mouth"' in text
+    assert 'FAILED="$(not_passed "$LAST_REPORT")"' in text
+    program = _heredoc(text, """"$PY" - "$1" "$REQUIRED_CHECKS" <<'EOF'""")
+
+    def run(statuses):
+        path = tmp_path / "report.json"
+        if statuses is not None:
+            checks = [{"name": k, "status": v} for k, v in statuses.items()]
+            path.write_text(__import__("json").dumps({"ok": True, "checks": checks}))
+        elif path.exists():
+            path.unlink()
+        out = subprocess.run(
+            [sys.executable, "-c", program, str(path), "mac-mouth"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert out.returncode == 0, out.stderr
+        return out.stdout.strip()
+
+    assert run({"mac-mouth": "pass", "tk": "fail"}) == ""
+    assert run({"mac-mouth": "fail"}) == "mac-mouth"
+    assert run({"mac-mouth": "skip"}) == "mac-mouth"  # on a Mac it never skips
+    assert run({"tk": "pass"}) == "mac-mouth"  # an app without the check fails too
+    assert run(None) == "no report"
+
+
 def test_release_notary_output_parsing_dry_run(tmp_path):
     """release.sh's `notary_field`: notarytool may print more than one JSON object."""
     program = _heredoc(

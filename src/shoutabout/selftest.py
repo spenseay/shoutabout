@@ -584,6 +584,66 @@ def check_overlay(ctx: Context) -> str:
     return f"pill frames render ({first.width}x{first.height} px at 100 %, {ms:.0f} ms)"
 
 
+def check_mac_mouth(ctx: Context) -> str:
+    """macOS: the windows' mouth is an AppKit view over its canvas, drawn at the screen's
+    backing scale (Tk 8.6 can't draw it sharp on Retina). Opens a small window for a moment
+    and checks the view: over the canvas on screen, the canvas's size, an image pixel per
+    screen pixel, the canvas's own polygons hidden under it, and the talking frames."""
+    if sys.platform != "darwin":
+        raise SkipCheck("macOS only")
+    import tkinter
+
+    from shoutabout import ui_kit as kit
+    from shoutabout.mac import native_mouth
+
+    root = tkinter.Tk()
+    hook = kit.native_mouth
+    kit.native_mouth = native_mouth.NativeMouth
+    try:
+        root.title("ShoutAbout self-test")
+        root.geometry("+80+120")
+        mouth = kit.Mouth(root, 150).pack(padx=24, pady=24)
+        view = mouth._native
+        if view is None:
+            raise RuntimeError("the mouth has no native view")
+        deadline = time.monotonic() + 5
+        while not view.covering and time.monotonic() < deadline:
+            root.update()
+            time.sleep(0.02)
+        if not view.covering:
+            raise RuntimeError(f"the native view didn't attach: {view.problem}")
+        from AppKit import NSScreen
+
+        on_screen = view.view.window().convertRectToScreen_(
+            view.view.convertRect_toView_(view.view.bounds(), None)
+        )
+        primary_h = float(NSScreen.screens()[0].frame().size.height)
+        got = native_mouth.tk_rect(native_mouth._rect(on_screen), primary_h)
+        canvas = mouth.widget
+        want = (canvas.winfo_rootx(), canvas.winfo_rooty(), mouth.width, mouth.height)
+        if max(abs(a - b) for a, b in zip(got, want, strict=True)) > 1:
+            raise RuntimeError(f"the view is at {got}, the canvas at {want}")
+        rep = view.view.image().representations()[0]
+        px = (int(rep.pixelsWide()), int(rep.pixelsHigh()))
+        if px != (round(mouth.width * view.scale), round(mouth.height * view.scale)):
+            raise RuntimeError(f"{px} px for {mouth.width}x{mouth.height} pt at {view.scale}x")
+        if any(canvas.itemcget(i, "state") != "hidden" for i in canvas.find_all()):
+            raise RuntimeError("the canvas still shows its polygons under the view")
+        mouth.talk()
+        end = time.monotonic() + 0.4
+        while time.monotonic() < end:
+            root.update()
+            time.sleep(0.02)
+        mouth.stop(open_mouth=True)
+        root.update()
+        if len(view._images) < 3:
+            raise RuntimeError(f"the talking mouth drew {len(view._images)} frames")
+        return f"an AppKit view over the canvas, {px[0]}x{px[1]} px at {view.scale:g}x"
+    finally:
+        kit.native_mouth = hook
+        root.destroy()
+
+
 def check_recent(ctx: Context) -> str:
     """Recent (the last few dictations and failed recordings, in memory) round-trips."""
     import numpy as np
@@ -675,6 +735,7 @@ DEFAULT_CHECKS: tuple[Check, ...] = (
     Check("hardware", check_hardware),
     Check("brand", check_brand),
     Check("overlay", check_overlay),
+    Check("mac-mouth", check_mac_mouth),
     Check("recent", check_recent),
     Check("objc-callbacks", check_objc_callbacks),  # v2-codemagic
 )
