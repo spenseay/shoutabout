@@ -223,6 +223,28 @@ def test_bridge_answers_the_childs_calls(tmp_path):
         assert link.call("identity_changed") is None and saved == ["reload"]
         with pytest.raises(RemoteError, match="unknown"):
             link.call("format_disk")
+        with pytest.raises(RemoteError, match="permissions"):
+            link.call("permissions")  # no permissions to ask for (not a Mac hub)
+    finally:
+        link.close()
+        bridge.shutdown(0.1)
+
+
+def test_bridge_reads_and_asks_for_permissions_in_the_hub(tmp_path):
+    """The setup's "Allow access" runs in the window process; the hub asks macOS."""
+    from v2_fakes import FakeAccess
+
+    bridge, _pairing, children, _ = make_bridge(tmp_path, pump=False)
+    access = FakeAccess(grant_on_ask=True, answer="asked")
+    bridge.svc.permissions = access
+    bridge.open_setup()
+    link = Link(children[0].read, children[0].write)
+    link.start()
+    try:
+        assert link.call("permissions")["microphone"] == "undetermined"
+        assert link.call("allow", which="microphone") == "asked"
+        assert access.asked == ["microphone"]
+        assert link.call("permissions")["microphone"] == "granted"
     finally:
         link.close()
         bridge.shutdown(0.1)

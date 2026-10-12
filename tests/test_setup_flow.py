@@ -8,7 +8,7 @@ import threading
 from shoutabout import setup_flow
 from shoutabout.config_edit import update_config
 from shoutabout.setup_flow import SetupFlow, download_line, phone_status_line, size_line
-from v2_fakes import Downloads, inline_runner, make_services
+from v2_fakes import Downloads, FakeAccess, inline_runner, make_services
 
 PHONE = "6f1c2a8e-0b7d-4a43-9d5e-2c1b0a9f8e7d"
 
@@ -61,12 +61,173 @@ def test_no_tours_or_disclaimers_in_the_copy():
         setup_flow.PHONE_HOWTO,
         setup_flow.QR_NOTE,
         *(download_line(p, 1, 2) for p in ("checking", "downloading", "ready", "failed")),
+        *setup_flow.ALLOW_LABELS.values(),
+        *(why.format(key="Right ⌘ Command") for why in setup_flow.ALLOW_WHY.values()),
+        setup_flow.ALLOW_HINT,
+        setup_flow.ALMOST_TITLE,
+        setup_flow.ACCESS_LINE,
+        setup_flow.PASTE_NOTE,
     ]
     for line in lines:
         lowered = line.lower()
         assert "tray" not in lowered and "menu bar" not in lowered and "clock" not in lowered
         assert "yellow mouth" not in lowered and "ollama" not in lowered
         assert len(line) <= 80, line
+
+
+# ------------------------------------------------- screen 0: allow access (macOS)
+
+
+def mac_flow(tmp_path, access: FakeAccess, mode: str = "full", **kw) -> SetupFlow:
+    svc = make_services(tmp_path, permissions=access, **kw)
+    return SetupFlow(svc, mode=mode, runner=inline_runner)
+
+
+def test_windows_has_no_allow_screen(tmp_path):
+    flow, svc = flow_for(tmp_path)
+    assert svc.permissions is None and flow.access is None
+    assert flow.screen == "check" and flow.can_try() and not flow.needs_access()
+    flow.poll_permissions()  # nothing to read
+    assert flow.try_note() == "" and flow.skip_allow() is False
+
+
+def test_a_mac_starts_with_allow_access_while_something_is_missing(tmp_path):
+    access = FakeAccess()  # nothing asked yet
+    flow = mac_flow(tmp_path, access)
+    assert flow.screen == "allow" and flow.title() == "Allow access"
+    rows = flow.allow_rows()
+    assert [(r.label, r.why, r.granted) for r in rows] == [
+        ("Microphone", "to hear you", False),
+        ("Accessibility", "for Right Ctrl and pasting", False),
+    ]
+    flow.start()  # the model is checked (and would download) meanwhile
+    assert flow.phase == "ready" and flow.screen == "allow"  # but it waits for the permissions
+
+
+def test_a_mac_that_allows_everything_never_sees_it(tmp_path):
+    flow = mac_flow(tmp_path, FakeAccess("granted", True, None))
+    assert flow.screen == "check"
+    flow.start()
+    assert flow.screen == "try"
+
+
+def test_allow_asks_the_hub_and_moves_on_by_itself(tmp_path):
+    access = FakeAccess(grant_on_ask=True, answer="asked")  # macOS's dialog, then Allow
+    flow = mac_flow(tmp_path, access)
+    flow.start()
+    flow.ask("microphone")
+    assert access.asked == ["microphone"]
+    assert [r.granted for r in flow.allow_rows()] == [True, False]
+    assert flow.screen == "allow" and flow.allow_hint == ""  # a dialog: no hint needed
+    assert not flow.take_raise()
+    flow.ask("accessibility")
+    assert flow.screen == "try"  # everything allowed and the model is ready: Try it
+    assert flow.take_raise() and not flow.take_raise()  # to the front, once
+
+
+def test_system_settings_hint_and_polling_follow_macos(tmp_path):
+    access = FakeAccess()
+    flow = mac_flow(tmp_path, access)
+    flow.start()
+    flow.ask("accessibility")
+    assert flow.allow_hint == setup_flow.ALLOW_HINT  # System Settings opened: what to do there
+    version = flow.version
+    flow.poll_permissions()
+    assert flow.version == version  # nothing changed, nothing redrawn
+    access.grant("microphone", "accessibility")  # the person flips the switches
+    flow.poll_permissions()
+    assert flow.screen == "try" and flow.allow_hint == ""
+
+
+def test_allow_then_getting_ready_while_the_model_downloads(tmp_path):
+    access = FakeAccess()
+    flow = mac_flow(tmp_path, access)  # not started: the download hasn't finished
+    access.grant("microphone", "accessibility")
+    flow.refresh_permissions()
+    assert flow.screen == "check"
+    flow.start()
+    assert (flow.phase, flow.screen) == ("ready", "try")
+
+
+def test_skip_never_shows_try_it_without_the_mic_and_the_hotkey(tmp_path):
+    access = FakeAccess()
+    flow = mac_flow(tmp_path, access)
+    flow.start()
+    assert flow.skip_allow() is False
+    assert flow.screen == "done" and flow.needs_access()
+    assert flow.done_line() == setup_flow.ACCESS_LINE
+    assert flow.title() == "Almost there"  # not "You're all set" while it can't work
+    flow.back_to_allow()  # the "Allow access" link on the last screen
+    assert flow.screen == "allow"
+    access.grant("microphone", "accessibility")
+    flow.poll_permissions()
+    assert flow.screen == "try" and not flow.needs_access()
+
+
+def test_no_accessibility_still_tries_it_with_the_copy(tmp_path):
+    """A managed Mac may never allow Accessibility: with Input Monitoring the hotkey works,
+    and the words land on the clipboard (⌘V)."""
+    flow = mac_flow(tmp_path, FakeAccess("granted", False, True))
+    flow.start()
+    assert flow.screen == "allow"  # still asked for, before Try it
+    flow.skip_allow()
+    assert flow.screen == "try" and flow.try_note() == setup_flow.PASTE_NOTE
+
+
+def test_input_monitoring_is_listed_only_when_accessibility_cant_be_read(tmp_path):
+    flow = mac_flow(tmp_path, FakeAccess("granted", None, False))
+    assert [r.key for r in flow.allow_rows()] == ["microphone", "accessibility", "input_monitoring"]
+    assert flow.allow_rows()[2].why == "for Right Ctrl"
+    flow = mac_flow(tmp_path / "b", FakeAccess("granted", False, False))
+    assert [r.key for r in flow.allow_rows()] == ["microphone", "accessibility"]
+
+
+def test_allow_mode_is_just_the_permissions(tmp_path):
+    downloads = Downloads()
+    access = FakeAccess("denied", True, None)
+    flow = mac_flow(tmp_path, access, mode="allow", downloads=downloads)
+    assert flow.screen == "allow"
+    flow.start()
+    assert flow.phase == "idle" and downloads.calls == []  # nothing to download here
+    assert flow.skip_allow() is True  # Skip just closes it
+    access.grant("microphone")
+    flow.poll_permissions()
+    assert flow.screen == "done" and flow.done_line() == flow.pc_line()
+    flow.finish()
+    assert not flow.svc.paths.setup_flag_file.exists()  # not the first-run setup
+    everything = mac_flow(tmp_path / "b", FakeAccess("granted", True, None), mode="allow")
+    assert everything.screen == "done"
+
+
+def test_unreadable_permissions_never_block(tmp_path):
+    access = FakeAccess()
+    access.broken = True  # the hub doesn't answer
+    flow = mac_flow(tmp_path, access)
+    assert flow.screen == "check" and flow.can_try()
+    flow.start()
+    assert flow.screen == "try"
+
+
+def test_permissions_are_read_only_while_they_matter(tmp_path):
+    access = FakeAccess("granted", True, None)
+    flow = mac_flow(tmp_path, access)
+    flow.start()
+    assert flow.screen == "try"
+    reads = access.reads
+    flow.poll_permissions()
+    assert access.reads == reads
+    phone = mac_flow(tmp_path / "b", FakeAccess(), mode="phone")
+    assert phone.access is None and phone.screen == "phone"
+
+
+def test_a_closed_flow_ignores_late_answers(tmp_path):
+    access = FakeAccess()
+    flow = mac_flow(tmp_path, access)
+    flow.finish()
+    access.grant("microphone", "accessibility")
+    flow.refresh_permissions()
+    assert flow.screen == "allow"
+    assert '"skipped"' in flow.svc.paths.setup_flag_file.read_text("utf-8")
 
 
 # --------------------------------------------------------- screen 1: getting ready

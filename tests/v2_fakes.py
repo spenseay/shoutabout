@@ -76,6 +76,48 @@ class Downloads:
         return f"/models/{model}"
 
 
+class FakeAccess:
+    """The macOS permissions as the setup sees them (shoutabout.mac.access status dicts).
+    ``ask`` records the key and grants it when ``grant_on_ask`` (a click in macOS's dialog)."""
+
+    def __init__(
+        self,
+        microphone: str = "undetermined",
+        accessibility: bool | None = False,
+        input_monitoring: bool | None = False,
+        *,
+        grant_on_ask: bool = False,
+        answer: str = "opened",
+    ) -> None:
+        self.now = {
+            "microphone": microphone,
+            "accessibility": accessibility,
+            "input_monitoring": input_monitoring,
+            "hotkey": False,
+        }
+        self.grant_on_ask = grant_on_ask
+        self.answer = answer
+        self.asked: list[str] = []
+        self.reads = 0
+        self.broken = False
+
+    def status(self) -> dict:
+        self.reads += 1
+        if self.broken:
+            raise ConnectionError("the hub went away")
+        return dict(self.now)
+
+    def ask(self, which: str) -> str:
+        self.asked.append(which)
+        if self.grant_on_ask:
+            self.grant(which)
+        return self.answer
+
+    def grant(self, *keys: str) -> None:
+        for key in keys:
+            self.now[key] = "granted" if key == "microphone" else True
+
+
 def make_services(
     tmp_path,
     *,

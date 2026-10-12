@@ -240,6 +240,10 @@ class SetupWindow:
             )
             if not row.granted:
                 kit.button(line, "Allow", lambda key=row.key: f.ask(key), fonts).pack(side="right")
+            else:  # a blank as tall as the button, so the lines don't move when it goes
+                tk.Label(line, text=" ", font=fonts.body_bold, bg=kit.YELLOW, pady=6).pack(
+                    side="right"
+                )
         if f.allow_hint:
             self._line(self.outer, f.allow_hint, fonts.body, fg=kit.MUTED, pady=(round(4 * s), 0))
 

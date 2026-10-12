@@ -266,7 +266,7 @@ class MacUiBridge:
             self.open_teach()
             return None
         if op in ("permissions", "allow"):  # the setup's "Allow access": the hub asks macOS
-            access = self.svc.permissions
+            access = getattr(self.svc, "permissions", None)
             if access is None:
                 raise RuntimeError("the permissions aren't available")
             if op == "permissions":

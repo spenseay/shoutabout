@@ -8,7 +8,7 @@ import pytest
 
 from shoutabout import overlay as ov
 from shoutabout.config import PasteConfig
-from shoutabout.mac import keys, mic_mac
+from shoutabout.mac import keys, mic_mac, paste
 from shoutabout.mac.overlay_mac import MacOverlay, place_top_centre, prewarm_looks
 from shoutabout.mac.paste import (
     ACCESSIBILITY_WARNING,
@@ -290,7 +290,9 @@ def test_paste_without_accessibility_leaves_the_text_and_says_why_once():
     text, markers = board.writes[0]
     assert text == "words" and TRANSIENT not in markers  # it stays: not transient
     inj.paste("more")
-    assert len(notes.notes) == 1
+    assert board.writes[1][0] == "more"  # every dictation is copied
+    assert notes.notes == [("ShoutAbout can't paste yet", paste.NO_PASTE_MESSAGE)]  # once
+    assert "⌘V" in paste.NO_PASTE_MESSAGE and len(paste.NO_PASTE_MESSAGE) <= 60
 
 
 def test_paste_into_a_password_field_is_refused():

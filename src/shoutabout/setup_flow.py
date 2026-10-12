@@ -96,6 +96,7 @@ ALLOW_WHY = {
     "input_monitoring": "for {key}",
 }
 ALLOW_HINT = "Turn on ShoutAbout there, then come back."
+ALMOST_TITLE = "Almost there"
 ACCESS_LINE = "Talk to this PC needs access first."
 PASTE_NOTE = "Then press ⌘V to paste it."
 PHONE_HOWTO = "Open ShoutAbout on your iPhone."
@@ -191,6 +192,8 @@ class SetupFlow:
         self.version += 1
 
     def title(self) -> str:
+        if self.screen == "done" and self.needs_access():
+            return ALMOST_TITLE  # not "You're all set" while Talk to this Mac can't work
         return TITLES[self.screen]
 
     # ---------------------------------------------- screen 0: allow access (macOS)
