@@ -168,7 +168,7 @@ def test_iss_run_value_matches_the_app_setting(iss):
 
 
 def test_iss_keeps_user_data_unless_asked(iss):
-    assert "Also remove my settings, vocabulary and history" in iss
+    assert "Also remove my settings and words" in iss
     assert "Box.Checked := False;" in iss
     assert "RemoveUserData := HasParam('/REMOVEUSERDATA');" in iss
     deletes = re.findall(r"DelTree\(ExpandConstant\('([^']+)'\)", iss)

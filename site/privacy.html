@@ -69,7 +69,7 @@
       <p>ShoutAbout is made by Spencer Seay, an independent developer (&ldquo;we&rdquo;, &ldquo;us&rdquo;). This policy covers the ShoutAbout apps for Windows, Mac and iPhone, and this website, shoutabout.fyi.</p>
 
       <h2 id="voice">Your voice and your words</h2>
-      <p><strong>On your computer</strong>, ShoutAbout listens only while you dictate: between two presses of your key, or while you hold it. A speech model on your computer turns the recording into text, which is pasted where you're typing. Recordings aren't kept after they're turned into text, unless you turn on the advanced &ldquo;keep audio&rdquo; option in the settings file yourself.</p>
+      <p><strong>On your computer</strong>, ShoutAbout listens only while you dictate: between two presses of your key, or while you hold it. A speech model on your computer turns the recording into text, which is pasted where you're typing. Recordings aren't kept after they're turned into text. One that couldn't be turned into text is held in memory so you can try again, until ShoutAbout quits.</p>
       <p><strong>On your iPhone</strong>, the app records only when you start it (with the mouth, the Action Button, or one of its controls or shortcuts) and stops when you tell it to. It turns the recording into text with Apple's on-device speech recognition; it never asks Apple's servers to do it. Or, if you chose your computer, it sends the recording there.</p>
       <p><strong>Between them</strong>, your iPhone connects straight to your computer over your own network and sends the recording (or, on slower computers, the finished text), and your computer sends back the text. Nothing passes through us or any cloud service. On your local network this connection isn't encrypted, so use it on networks you trust. Your computer accepts it only from your local network, and only from iPhones you connected yourself.</p>
 
@@ -80,15 +80,15 @@
           <thead><tr><th scope="col">Device</th><th scope="col">What</th><th scope="col">Why</th></tr></thead>
           <tbody>
             <tr><td>Computer</td><td>Settings, your custom words, the list of connected iPhones (their names and a fingerprint of each one's key, never the key itself), logs (no dictated text)</td><td>So ShoutAbout works the way you set it up</td></tr>
-            <tr><td>Computer</td><td>Your dictation history, <strong>only if you turn it on</strong> in Settings. It's off by default. It keeps the text of each dictation, when, and how long it took.</td><td>So you can look back, and for word suggestions (below). Recordings that fail to go through are kept so you can try them again, but only while history is on. Clear history deletes what's kept.</td></tr>
+            <tr><td>Computer</td><td>Your last 3 dictations, <strong>in memory only</strong>. They're never saved to disk and are gone when ShoutAbout quits.</td><td>So you can copy one again if it landed in the wrong place</td></tr>
             <tr><td>Computer</td><td>The speech model</td><td>To turn speech into text without the internet</td></tr>
-            <tr><td>iPhone</td><td>Settings, the connected computer's name and address, and a copy of your custom words. Your last 200 results only if you turn on <strong>Keep history</strong> (off by default).</td><td>So the app finds your computer and spells your words right, and so you can copy past results. History is left out of iCloud and computer backups.</td></tr>
+            <tr><td>iPhone</td><td>Settings, the connected computer's name and address, and a copy of your custom words. Your last 3 results, <strong>in memory only</strong>, gone when the app closes.</td><td>So the app finds your computer and spells your words right, and so you can copy a recent result again</td></tr>
             <tr><td>iPhone</td><td>The key that lets it dictate to your computer, in the iPhone's keychain, on this device only</td><td>So your computer knows it's your iPhone</td></tr>
           </tbody>
         </table>
       </div>
       <p><strong>Word suggestions.</strong> To help it spell names right, ShoutAbout on your computer can suggest words from the names of your project folders. It only looks at them when you ask it to. This happens on your computer, and nothing is added without your OK.</p>
-      <p><strong>Removing it.</strong> On Windows, uninstalling asks whether to delete your settings, words and history too. On a Mac, drag the app to the Trash and delete <code>~/Library/Application Support/ShoutAbout</code> to remove them. On iPhone, deleting the app deletes its data.</p>
+      <p><strong>Removing it.</strong> On Windows, uninstalling asks whether to delete your settings and words too. On a Mac, drag the app to the Trash and delete <code>~/Library/Application Support/ShoutAbout</code> to remove them. On iPhone, deleting the app deletes its data.</p>
 
       <h2 id="online">When the apps go online</h2>
       <ul>

@@ -16,8 +16,8 @@
 ;   * stops a running ShoutAbout before replacing files (upgrades in place) and starts it
 ;     again afterwards;
 ;   * the uninstaller stops the app and removes the files, the firewall rule and the Run
-;     value. Settings, vocabulary and history (%APPDATA%\shoutabout) stay unless the user
-;     ticks "Also remove my settings, vocabulary and history" (or passes /REMOVEUSERDATA
+;     value. Settings and words (%APPDATA%\shoutabout) stay unless the user
+;     ticks "Also remove my settings and words" (or passes /REMOVEUSERDATA
 ;     to a /VERYSILENT uninstall).
 
 #ifndef AppVersion
@@ -290,7 +290,7 @@ begin
   if IsUpgrade then begin
     WizardForm.WelcomeLabel1.Caption := 'Update {#AppName}';
     WizardForm.WelcomeLabel2.Caption :=
-      'Version {#AppVersion}. Your settings, vocabulary and history are kept.';
+      'Version {#AppVersion}. Your settings and words are kept.';
   end;
 end;
 
@@ -361,7 +361,7 @@ begin
     Box.Top := ScaleY(48);
     Box.Width := Form.ClientWidth - ScaleX(40);
     Box.Height := ScaleY(20);
-    Box.Caption := 'Also remove my settings, vocabulary and history';
+    Box.Caption := 'Also remove my settings and words';
     Box.Checked := False;
 
     OkButton := TNewButton.Create(Form);
@@ -409,7 +409,7 @@ begin
     RemoveFirewallRule();
     DisableStartAtSignIn();
   end else if (CurUninstallStep = usPostUninstall) and RemoveUserData then begin
-    Log('Removing settings, vocabulary and history');
+    Log('Removing settings and words');
     DelTree(ExpandConstant('{userappdata}\{#DataFolder}'), True, True, True);
     DelTree(ExpandConstant('{localappdata}\{#DataFolder}'), True, True, True);
   end;
