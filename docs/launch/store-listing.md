@@ -67,7 +67,7 @@ Get the free ShoutAbout app for Windows or Mac at shoutabout.fyi, and your iPhon
 
 SMALL TOUCHES
 - Switch between your computer and this iPhone with one tap, or from Control Center
-- Your last 200 results in History, on this iPhone only
+- Your last 3 results in Recent, kept in memory only (never saved)
 - Your computer's custom words help it spell names right
 - Light and dark mode
 

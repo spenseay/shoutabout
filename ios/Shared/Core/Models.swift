@@ -55,7 +55,7 @@ enum OfflineEnginePreference: String, Codable, Sendable, CaseIterable, Identifia
     }
 }
 
-/// One finished (or failed) dictation, kept locally for History.
+/// One finished (or failed) dictation: the main screen's last result, and Recent (in memory).
 struct HistoryItem: Codable, Identifiable, Equatable, Sendable {
     var id: UUID = UUID()
     var date: Date = Date()
