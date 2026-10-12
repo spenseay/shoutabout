@@ -27,10 +27,10 @@ config.toml, and the word suggestions mined from dictations that were still wait
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import re
-import shutil
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -52,6 +52,9 @@ OLD_GENERATED_LINES: dict[str, tuple[str, Any]] = {
     "max_seconds = 120          # stop listening after this long": ("max_seconds", 600),
 }
 _SEED_PROJECTS_ON = re.compile(r"^seed_projects\s*=\s*true\b")
+# What earlier versions wrote in "audio" (history: 20261010-143000-<request id>.m4a) and
+# "failed" (20261010-143000-123456.wav / .json).
+_OLD_RECORDING = re.compile(r"^\d{8}-\d{6}-[0-9a-z]+\.[0-9a-z]+$", re.IGNORECASE)
 
 
 def _done(paths: Paths) -> dict[str, Any]:
@@ -139,23 +142,32 @@ def _learn_projects_off(paths: Paths, text: str) -> list[str] | None:
     return did
 
 
-def _delete(path: Path) -> bool:
-    """Delete a file or a folder of ours. True if something was there. Raises OSError."""
-    if path.is_dir() and not path.is_symlink():
-        shutil.rmtree(path)
-        return True
-    if path.exists() or path.is_symlink():
-        path.unlink()
-        return True
-    return False
+def _delete_ours(folder: Path) -> bool:
+    """Delete the files ShoutAbout wrote in ``folder`` (known by their names: a custom home
+    folder may hold other things called "audio"), then the folder if that emptied it. True
+    if anything went. Raises OSError."""
+    if not folder.is_dir() or folder.is_symlink():
+        return False
+    gone = False
+    for path in folder.iterdir():
+        if path.is_file() and _OLD_RECORDING.match(path.name):
+            path.unlink()
+            gone = True
+    with contextlib.suppress(OSError):  # not empty: something else lives there
+        folder.rmdir()
+        gone = True
+    return gone
 
 
 def _history_gone(paths: Paths, text: str) -> list[str] | None:
     did: list[str] = []
     try:
-        for path in (paths.history_file, paths.audio_dir, paths.failed_dir):
-            if _delete(path):
-                did.append(f"deleted {path.name}")
+        if paths.history_file.is_file():
+            paths.history_file.unlink()
+            did.append(f"deleted {paths.history_file.name}")
+        for folder in (paths.audio_dir, paths.failed_dir):
+            if _delete_ours(folder):
+                did.append(f"deleted {folder.name}")
     except OSError:
         log.exception("couldn't delete the old history")
         return None

@@ -2,8 +2,8 @@
 
 :class:`MicRecorder` opens the default input device only while ShoutAbout is listening,
 keeps the samples in memory, reports a smoothed loudness level (0..1) for the on-screen
-mouth, and stops by itself at ``max_seconds``. (Only a recording whose transcription
-*failed* is written to disk, by :mod:`shoutabout.failed_audio`, so it can be tried again.)
+mouth, and stops by itself at ``max_seconds``. Nothing is written to disk (a recording whose
+transcription *failed* is kept in memory by :mod:`shoutabout.recent`, to try again).
 
 Audio goes through ``sounddevice`` (MIT; its Windows wheel bundles PortAudio, MIT). The
 default host API on Windows is MME, which converts to 16 kHz for us; if a device refuses

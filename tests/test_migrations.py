@@ -122,10 +122,11 @@ def test_the_old_history_is_deleted_once(tmp_path):
     """ShoutAbout keeps no history now: what an earlier version kept on disk goes, once."""
     paths = home(tmp_path, "[server]\nport = 8766\n\n" + OLD_HISTORY + "\n" + OLD_DICTATION)
     paths.history_file.write_text('{"text": "something private"}\n', "utf-8")
-    (paths.audio_dir / "nested").mkdir(parents=True)
-    (paths.audio_dir / "20260101-a.m4a").write_bytes(b"audio")
+    paths.audio_dir.mkdir()
+    (paths.audio_dir / "20260101-093000-3f9a0c1d2e4b.m4a").write_bytes(b"audio")
     paths.failed_dir.mkdir()
     (paths.failed_dir / "20260101-000000-000000.wav").write_bytes(b"RIFF")
+    (paths.failed_dir / "20260101-000000-000000.json").write_text("{}", "utf-8")
     write_suggestions(
         paths,
         [("Priya Raghunathan", "history", "pending"), ("GitHub", "history", "dismissed")],
@@ -147,6 +148,19 @@ def test_the_old_history_is_deleted_once(tmp_path):
     paths.history_file.write_text("{}\n", "utf-8")  # (nothing writes it any more)
     assert migrate(paths) == []  # once
     assert paths.history_file.exists()
+
+
+def test_only_what_shoutabout_wrote_is_deleted(tmp_path):
+    """A custom home folder (--home, SHOUTABOUT_HOME) may hold someone's own "audio"."""
+    paths = home(tmp_path, "[server]\nport = 8766\n")
+    paths.audio_dir.mkdir()
+    (paths.audio_dir / "my-own-song.mp3").write_bytes(b"mine")
+    (paths.audio_dir / "20260101-093000-noid.wav").write_bytes(b"ours")
+    (paths.audio_dir / "20260101-093000-folder.d").mkdir()
+    assert migrate(paths) == ["deleted audio"]  # the one recording of ours
+    assert not (paths.audio_dir / "20260101-093000-noid.wav").exists()
+    assert (paths.audio_dir / "my-own-song.mp3").read_bytes() == b"mine"
+    assert (paths.audio_dir / "20260101-093000-folder.d").is_dir()
 
 
 def test_an_old_history_section_still_loads(tmp_path):
