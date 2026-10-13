@@ -23,7 +23,7 @@ What it writes (all generated, don't edit by hand):
   site/assets/img/shots/*.webp    screenshots (sample data only), resized and compressed
 
 Only screenshots made with made-up data belong here (the iOS Debug screenshot scenes,
-scripts/capture_ui.py). Never the Teach window: it lists real project folder names.
+scripts/capture_ui.py). Never the Teach window: it lists real taught words.
 
 The owner's rules for every mouth in the marketing: only the primary mark (black mouth,
 white teeth band, red tongue), never without its tongue and never with a ring or outline

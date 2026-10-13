@@ -116,6 +116,32 @@ def build_fixer(terms: tuple[str, ...], replacements: tuple[tuple[str, str], ...
     )
 
 
+@dataclass(frozen=True)
+class Teaching:
+    """What **Fix a word** saves for "``wrong`` should be ``right``", and the fixed text."""
+
+    entry: str  # the vocab.txt line: the word itself, or "wrong -> right"
+    is_word: bool
+    fixed_text: str
+
+
+def teach_fix(text: str, wrong: str, right: str) -> Teaching:
+    """Learn from a correction in a dictation: "Sophia" should be "Sofia".
+
+    A plain custom word is preferred: it also catches other spellings, and it never
+    rewrites an everyday word on its own. It is used when the word alone already turns at
+    least one ``wrong`` in ``text`` into ``right`` (other capitals or spacing, a sound-alike
+    name, a symbol said aloud). Anything else becomes a replacement, "wrong -> right".
+    """
+    wrong, right = " ".join(wrong.split()), " ".join(right.split())
+    finder = say_pattern(wrong)
+    context = text if finder is not None and finder.search(text) else f"so {wrong}"
+    as_word = apply_fixes(context, [right])
+    if as_word != context and as_word.count(right) > context.count(right):
+        return Teaching(right, True, apply_fixes(text, [right]))
+    return Teaching(f"{wrong} -> {right}", False, apply_fixes(text, [], [(wrong, right)]))
+
+
 def say_pattern(say: str) -> re.Pattern[str] | None:
     """Whole-word, case-insensitive match of a spoken phrase ("omw", "slash consolidate")."""
     words = say.replace("-", " ").split()

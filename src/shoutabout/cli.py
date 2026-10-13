@@ -781,39 +781,6 @@ def _vocab_term(args: argparse.Namespace) -> str:
     return " ".join(args.term)
 
 
-def _learn_roots(paths: Paths, given: Sequence[str] = ()) -> list[Path] | None:
-    if given:
-        roots = [Path(r).expanduser() for r in given]
-        missing = [str(r) for r in roots if not r.is_dir()]
-        if missing:
-            raise CliError(f"not a folder: {', '.join(missing)}")
-        return roots
-    configured = _load_config(paths).learn.project_roots
-    return [Path(r).expanduser() for r in configured] or None
-
-
-def _print_suggestions(paths: Paths, new: int, *, json_out: bool, source: str | None) -> None:
-    from shoutabout.learn import pending_suggestions
-    from shoutabout.review_ui import group_suggestions
-
-    pending = [s for s in pending_suggestions(paths) if source is None or s.source == source]
-    if json_out:
-        out = {"new": new, "pending": [s.to_dict() for s in pending]}
-        print(json.dumps(out, ensure_ascii=False))
-        return
-    print(f"{new} new suggestion(s); {len(pending)} waiting for review.")
-    width = max((len(s.term) for s in pending), default=0)
-    for title, items in group_suggestions(pending):
-        print(f"\n  {title}")
-        for s in items:
-            print(f"    {s.term.ljust(width)}  {s.detail}")
-    if pending:
-        print(
-            '\nTeach one: shoutabout vocab add "<term>"   Dismiss: shoutabout vocab dismiss '
-            '"<term>"   All at once: shoutabout vocab review'
-        )
-
-
 def cmd_vocab_list(args: argparse.Namespace) -> int:
     from shoutabout.vocab import read_entries, split_replacement
 
@@ -833,10 +800,10 @@ def cmd_vocab_list(args: argparse.Namespace) -> int:
 
 
 def cmd_vocab_add(args: argparse.Namespace) -> int:
-    from shoutabout.learn import accept
+    from shoutabout.vocab import add_terms
 
     paths = _paths(args)
-    result = accept(paths, [_vocab_term(args)])[0]
+    result = add_terms(paths.vocab_file, [_vocab_term(args)])[0]
     if result.status == "invalid":
         raise CliError(f"can't add that: {result.reason}")
     if result.status == "added":
@@ -855,37 +822,6 @@ def cmd_vocab_remove(args: argparse.Namespace) -> int:
     if not remove_term(paths.vocab_file, term):
         raise CliError(f'"{term}" is not in {paths.vocab_file}')
     print(f'removed "{term}" from {paths.vocab_file}')
-    return 0
-
-
-def cmd_vocab_dismiss(args: argparse.Namespace) -> int:
-    from shoutabout.learn import dismiss
-
-    paths = _paths(args)
-    term = _vocab_term(args)
-    dismiss(paths, [term])
-    print(f'"{term}" won\'t be suggested again')
-    return 0
-
-
-def cmd_vocab_suggest(args: argparse.Namespace) -> int:
-    from shoutabout.learn import refresh_suggestions
-
-    paths = _paths(args)
-    new = 0
-    if args.projects:  # project folders are only looked at when asked
-        new = refresh_suggestions(paths, include_projects=True, roots=_learn_roots(paths))
-    _print_suggestions(paths, new, json_out=args.json, source=None)
-    return 0
-
-
-def cmd_vocab_seed(args: argparse.Namespace) -> int:
-    from shoutabout.learn import refresh_suggestions
-
-    paths = _paths(args)
-    roots = _learn_roots(paths, args.roots)
-    new = refresh_suggestions(paths, include_projects=True, roots=roots)
-    _print_suggestions(paths, new, json_out=args.json, source="projects")
     return 0
 
 
@@ -1001,9 +937,7 @@ def cmd_devices_remove(args: argparse.Namespace) -> int:
 
 
 def _add_vocab_parser(sub: Any, common: argparse.ArgumentParser) -> None:
-    p = sub.add_parser(
-        "vocab", parents=[common], help="teach words: list/add/remove, suggestions, review"
-    )
+    p = sub.add_parser("vocab", parents=[common], help="teach words: list/add/remove, review")
     vsub = p.add_subparsers(dest="vocab_command", metavar="ACTION")
     vsub.required = True
     term_help = "the word or phrase (several words are joined: vocab add Chameleon CV)"
@@ -1023,28 +957,6 @@ def _add_vocab_parser(sub: Any, common: argparse.ArgumentParser) -> None:
     q = vsub.add_parser("remove", parents=[common], help="remove a word from vocab.txt")
     q.add_argument("term", nargs="+", metavar="TERM", help=term_help)
     q.set_defaults(func=cmd_vocab_remove)
-
-    q = vsub.add_parser("dismiss", parents=[common], help="never suggest a word again")
-    q.add_argument("term", nargs="+", metavar="TERM", help=term_help)
-    q.set_defaults(func=cmd_vocab_dismiss)
-
-    q = vsub.add_parser("suggest", parents=[common], help="list the suggestions waiting")
-    q.add_argument(
-        "--projects", action="store_true", help="look through your project folders first"
-    )
-    q.add_argument("--json", action="store_true")
-    q.set_defaults(func=cmd_vocab_suggest)
-
-    q = vsub.add_parser("seed", parents=[common], help="suggest names from project folders")
-    q.add_argument(
-        "roots",
-        nargs="*",
-        metavar="ROOT",
-        help="folders to scan 2 levels deep (default: [learn] project_roots, else "
-        "~/Documents, ~/source/repos, ~/repos, ~/code, ~/projects)",
-    )
-    q.add_argument("--json", action="store_true")
-    q.set_defaults(func=cmd_vocab_seed)
 
     q = vsub.add_parser("review", parents=[common], help="open Teach words in the window")
     q.set_defaults(func=cmd_vocab_review)

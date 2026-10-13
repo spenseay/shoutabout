@@ -708,42 +708,6 @@ def test_vocab_add_invalid_is_error(tmp_path, capsys):
     assert cli.main(["vocab", "--home", h]) == 2  # no action given
 
 
-def test_vocab_suggest_seed_dismiss(tmp_path, capsys):
-    home_dir = _vocab_home(tmp_path)
-    h = str(home_dir)
-    projects = tmp_path / "projects"
-    (projects / "chameleon-cv").mkdir(parents=True)
-    (projects / "chameleon-cv" / "package.json").write_text('{"name": "chameleon-cv"}', "utf-8")
-    (projects / "better_shell").mkdir(parents=True)
-    (projects / "better_shell" / "package.json").write_text('{"name": "kestrel"}', "utf-8")
-    (home_dir / "config.toml").write_text(
-        f"[learn]\nproject_roots = [{json.dumps(str(projects))}]\n", "utf-8"
-    )
-
-    # Nothing is looked at unless asked: suggest only lists what's waiting.
-    assert cli.main(["vocab", "suggest", "--home", h, "--json"]) == 0
-    assert json.loads(capsys.readouterr().out) == {"new": 0, "pending": []}
-    assert cli.main(["vocab", "suggest", "--home", h, "--projects", "--json"]) == 0
-    out = json.loads(capsys.readouterr().out)
-    assert out["new"] == 2
-    assert sorted(s["term"] for s in out["pending"]) == ["Chameleon CV", "Kestrel"]
-
-    assert cli.main(["vocab", "seed", "--home", h, str(projects)]) == 0
-    out = capsys.readouterr().out
-    assert "0 new suggestion(s)" in out
-    assert "From your projects" in out and "Chameleon CV" in out
-
-    assert cli.main(["vocab", "dismiss", "--home", h, "Kestrel"]) == 0
-    capsys.readouterr()
-    assert cli.main(["vocab", "suggest", "--home", h]) == 0
-    out = capsys.readouterr().out
-    assert "0 new suggestion(s); 1 waiting" in out
-    assert "Kestrel" not in out and "Chameleon CV" in out
-
-    assert cli.main(["vocab", "seed", "--home", h, str(tmp_path / "missing")]) == 1
-    assert "not a folder" in capsys.readouterr().err
-
-
 def test_vocab_review_and_settings_open_the_window(tmp_path, monkeypatch):
     from shoutabout import ui_host
 

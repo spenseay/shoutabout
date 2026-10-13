@@ -153,16 +153,20 @@ found.", "Talk to this PC is off." ("this Mac" on a Mac), "Getting ready… 42%"
 
 ### Teach words
 
-A box to add a word (Enter puts it at the top of `vocab.txt`), **SUGGESTIONS** with
-checkboxes (**Add selected**, **Dismiss**) and a small **Suggest from my project folders**
-button, and **YOUR WORDS** in priority order (**Remove**, **Open vocab.txt**). Details:
-[vocab.md](vocab.md).
+A **Word** box and **Add** (Enter puts it at the top of `vocab.txt`), an optional **When I
+say** box that makes it a replacement instead (Word "on my way", When I say "omw"), and
+**YOUR WORDS** across the full width in priority order, replacements shown as
+`omw → on my way` (**Remove** or Delete, **Open vocab.txt**). A word that came out wrong is
+usually fixed from Recent instead (**Fix a word**). Details: [vocab.md](vocab.md).
 
 ### Recent
 
 The last 3 dictations meant for this computer, newest first: "14:03 · This PC" (or the
-phone's name; "Not pasted" or "Written out later" when that's so), the text (selectable) and
-**Copy**. Above them, only when there are some, **Couldn't write these out**: recordings the
+phone's name; "Not pasted" or "Written out later" when that's so), the text (selectable),
+**Copy** and **Fix a word**. Fix a word opens a row under the text: **Wrong** (filled in with
+what you selected), **Right**, **Save**, **Cancel** (Enter saves, Escape cancels). Saving
+adds a word or a replacement to the top of `vocab.txt`, corrects the card's text and says,
+for example, `Saved. "Sophia" will come out "Sofia" from now on.` Above them, only when there are some, **Couldn't write these out**: recordings the
 speech engine failed on, with the length, the reason, **Try again** (never pastes; the text
 appears at the top) and **Delete**. All in memory only; the page updates by itself within
 about a second. Details: [history.md](history.md).

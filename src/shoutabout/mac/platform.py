@@ -25,7 +25,6 @@ import subprocess
 import sys
 import threading
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 from shoutabout.config import Paths
@@ -83,43 +82,8 @@ def redirect_output(paths: Paths) -> bool:
     return True
 
 
-# Project folders "Suggest from my project folders" (Teach words) looks at on a Mac. Never
-# ~/Documents, ~/Desktop or ~/Downloads: macOS guards those, and reading them makes it ask
-# the person "ShoutAbout would like to access files in your Documents folder" out of the blue.
-MAC_PROJECT_ROOTS = (
-    "~/Developer",
-    "~/code",
-    "~/Code",
-    "~/repos",
-    "~/projects",
-    "~/Projects",
-    "~/src",
-    "~/git",
-    "~/source/repos",
-)
-
-
-def mac_project_roots(home: Path | None = None) -> list[Path]:
-    """The unguarded project folders that exist (``[learn] project_roots`` left empty)."""
-    base = home or Path.home()
-    found: list[Path] = []
-    for root in MAC_PROJECT_ROOTS:
-        path = base / root[2:]
-        if not path.is_dir():
-            continue
-        try:
-            if any(os.path.samefile(path, other) for other in found):
-                continue  # ~/code and ~/Code are one folder on a case-insensitive disk
-        except OSError:
-            continue
-        found.append(path)
-    return found
-
-
 def first_run_defaults(paths: Paths, fresh: bool) -> None:
-    """A fresh Mac install: Right ⌘, press to start and stop, open at login (built app).
-    (Project folders are never scanned unless the person asks: ``[learn] seed_projects``
-    is off everywhere.)"""
+    """A fresh Mac install: Right ⌘, press to start and stop, open at login (built app)."""
     if not fresh:
         return
     from shoutabout.config_edit import update_config

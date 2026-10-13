@@ -13,16 +13,15 @@ what ran, so a person who picks the old value again later keeps it.
 in Settings before upgrading writes the same line as the old default, so that one choice
 can't be told apart and is switched to toggle once; Settings switches it back.)
 
-``learn-projects-off`` (privacy): project folders are no longer scanned for word
-suggestions unless the person asks (Teach words > "Suggest from my project folders").
-``[learn] seed_projects = true`` is switched off once, however it is written, and project
-suggestions still waiting from earlier scans are dropped. Turning it back on afterwards
-sticks.
-
 ``history-gone`` (privacy): ShoutAbout keeps no history any more (Recent holds the last few
 dictations in memory only). What earlier versions kept on disk is deleted once:
-history.jsonl, its ``audio`` folder, the ``failed`` recordings, the ``[history]`` section of
-config.toml, and the word suggestions mined from dictations that were still waiting.
+history.jsonl, its ``audio`` folder, the ``failed`` recordings and the ``[history]`` section
+of config.toml.
+
+``suggestions-gone``: word suggestions (from project folders, and earlier from dictations)
+are gone; words are fixed from Recent instead. vocab-suggestions.json and the ``[learn]``
+section of config.toml are deleted once. (It replaces ``learn-projects-off``, which switched
+the project folder scanning off.)
 """
 
 from __future__ import annotations
@@ -42,8 +41,8 @@ from shoutabout.fileio import atomic_write_text
 log = logging.getLogger(__name__)
 
 DICTATION_DEFAULTS = "dictation-toggle-600"
-LEARN_PROJECTS_OFF = "learn-projects-off"
 HISTORY_GONE = "history-gone"
+SUGGESTIONS_GONE = "suggestions-gone"
 
 # The exact lines earlier versions generated (src/shoutabout/data/config.example.toml).
 OLD_GENERATED_LINES: dict[str, tuple[str, Any]] = {
@@ -51,7 +50,6 @@ OLD_GENERATED_LINES: dict[str, tuple[str, Any]] = {
     "press to stop)": ("mode", "toggle"),
     "max_seconds = 120          # stop listening after this long": ("max_seconds", 600),
 }
-_SEED_PROJECTS_ON = re.compile(r"^seed_projects\s*=\s*true\b")
 # What earlier versions wrote in "audio" (history: 20261010-143000-<request id>.m4a) and
 # "failed" (20261010-143000-123456.wav / .json).
 _OLD_RECORDING = re.compile(r"^\d{8}-\d{6}-[0-9a-z]+\.[0-9a-z]+$", re.IGNORECASE)
@@ -100,11 +98,6 @@ def untouched_dictation_defaults(text: str) -> dict[str, Any]:
     return changes
 
 
-def project_scanning_on(text: str) -> bool:
-    """Does ``[learn]`` in ``text`` say ``seed_projects = true``?"""
-    return any(_SEED_PROJECTS_ON.match(line) for line in _section_lines(text, "learn"))
-
-
 def _dictation_defaults(paths: Paths, text: str) -> list[str] | None:
     changes = untouched_dictation_defaults(text)
     if not changes:
@@ -117,29 +110,6 @@ def _dictation_defaults(paths: Paths, text: str) -> list[str] | None:
         log.exception("couldn't upgrade the [dictation] defaults")
         return None
     return [f"dictation.{k} = {v!r}" for k, v in changes.items()]
-
-
-def _learn_projects_off(paths: Paths, text: str) -> list[str] | None:
-    did: list[str] = []
-    if project_scanning_on(text):
-        from shoutabout.config_edit import ConfigEditError, update_config
-
-        try:
-            update_config(paths, {"learn": {"seed_projects": False}})
-        except (ConfigEditError, OSError):
-            log.exception("couldn't turn project folder scanning off")
-            return None
-        did.append("learn.seed_projects = False")
-    try:
-        from shoutabout.learn import forget_source
-
-        dropped = forget_source(paths, "projects")
-    except OSError:
-        log.exception("couldn't drop the waiting project suggestions")
-        return None
-    if dropped:
-        did.append(f"dropped {dropped} project suggestion(s)")
-    return did
 
 
 def _delete_ours(folder: Path) -> bool:
@@ -180,15 +150,29 @@ def _history_gone(paths: Paths, text: str) -> list[str] | None:
         except (ConfigEditError, OSError):
             log.exception("couldn't remove [history] from config.toml")
             return None
-    try:
-        from shoutabout.learn import forget_source
+    return did
 
-        dropped = forget_source(paths, "history")  # words mined from dictations
+
+def _suggestions_gone(paths: Paths, text: str) -> list[str] | None:
+    did: list[str] = []
+    lock = paths.suggestions_file.with_name(paths.suggestions_file.name + ".lock")
+    try:
+        for path in (paths.suggestions_file, lock):
+            if path.is_file():
+                path.unlink()
+                did.append(f"deleted {path.name}")
     except OSError:
-        log.exception("couldn't drop the suggestions from the old history")
+        log.exception("couldn't delete the old word suggestions")
         return None
-    if dropped:
-        did.append(f"dropped {dropped} history suggestion(s)")
+    if "[learn]" in text:
+        from shoutabout.config_edit import ConfigEditError, update_config
+
+        try:
+            if update_config(paths, {"learn": None}):
+                did.append("removed [learn]")
+        except (ConfigEditError, OSError):
+            log.exception("couldn't remove [learn] from config.toml")
+            return None
     return did
 
 
@@ -196,8 +180,8 @@ def _history_gone(paths: Paths, text: str) -> list[str] | None:
 # failed (it is tried again next start).
 MIGRATIONS: tuple[tuple[str, Callable[[Paths, str], list[str] | None]], ...] = (
     (DICTATION_DEFAULTS, _dictation_defaults),
-    (LEARN_PROJECTS_OFF, _learn_projects_off),
     (HISTORY_GONE, _history_gone),
+    (SUGGESTIONS_GONE, _suggestions_gone),
 )
 
 

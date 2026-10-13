@@ -8,10 +8,9 @@ from shoutabout.config import Paths, ensure_initialized, load_config
 from shoutabout.migrations import (
     DICTATION_DEFAULTS,
     HISTORY_GONE,
-    LEARN_PROJECTS_OFF,
     OLD_GENERATED_LINES,
+    SUGGESTIONS_GONE,
     migrate,
-    project_scanning_on,
     untouched_dictation_defaults,
 )
 
@@ -127,23 +126,15 @@ def test_the_old_history_is_deleted_once(tmp_path):
     paths.failed_dir.mkdir()
     (paths.failed_dir / "20260101-000000-000000.wav").write_bytes(b"RIFF")
     (paths.failed_dir / "20260101-000000-000000.json").write_text("{}", "utf-8")
-    write_suggestions(
-        paths,
-        [("Priya Raghunathan", "history", "pending"), ("GitHub", "history", "dismissed")],
-    )
     ensure_initialized(paths)  # never overwrites an existing config.toml
     did = migrate(paths)
     assert "deleted history.jsonl" in did and "deleted audio" in did and "deleted failed" in did
-    assert "removed [history]" in did and "dropped 1 history suggestion(s)" in did
+    assert "removed [history]" in did
     assert not paths.history_file.exists()
     assert not paths.audio_dir.exists() and not paths.failed_dir.exists()
     text = paths.config_file.read_text("utf-8")
     assert "[history]" not in text and "keep_audio" not in text
     assert "port = 8766" in text and 'mode = "toggle"' in text  # the rest stays
-    from shoutabout.learn import load_suggestions
-
-    (left,) = load_suggestions(paths)  # the decision is remembered, where it came from isn't
-    assert (left.term, left.status, left.detail) == ("GitHub", "dismissed", "")
     assert HISTORY_GONE in json.loads(paths.migrations_file.read_text("utf-8"))
     paths.history_file.write_text("{}\n", "utf-8")  # (nothing writes it any more)
     assert migrate(paths) == []  # once
@@ -166,7 +157,7 @@ def test_only_what_shoutabout_wrote_is_deleted(tmp_path):
 def test_an_old_history_section_still_loads(tmp_path):
     """The CLI reads config.toml without upgrading it: [history] must not stop it."""
     paths = home(tmp_path, OLD_HISTORY)
-    assert load_config(paths).learn.seed_projects is False
+    load_config(paths)
 
 
 # The [learn] section earlier versions generated: project folders scanned every day.
@@ -182,57 +173,30 @@ notify = true              # one tray notification when new suggestions are wait
 """
 
 
-def write_suggestions(paths: Paths, rows: list[tuple[str, str, str]]) -> None:
-    from shoutabout.learn import Suggestion, _save
-
-    _save(paths, [Suggestion(t, src, 1, "", "2026-01-01T00:00:00", st) for t, src, st in rows])
-
-
-def test_project_folder_scanning_is_switched_off_once(tmp_path):
-    from shoutabout.learn import load_suggestions
-
-    paths = home(tmp_path, OLD_LEARN)
-    write_suggestions(
-        paths,
-        [
-            ("Chameleon CV", "projects", "pending"),
-            ("Better Shell", "projects", "dismissed"),
-            ("Paperclip", "projects", "accepted"),
-            ("Priya Raghunathan", "history", "pending"),
-        ],
-    )
+def test_word_suggestions_are_gone_once(tmp_path):
+    """Word suggestions were removed: their file and the [learn] section go, once."""
+    paths = home(tmp_path, "[server]\nport = 8766\n\n" + OLD_LEARN + "\n" + OLD_DICTATION)
+    paths.suggestions_file.write_text('{"version": 1, "suggestions": []}', "utf-8")
     did = migrate(paths)
-    assert did[:2] == ["learn.seed_projects = False", "dropped 1 project suggestion(s)"]
-    assert load_config(paths).learn.seed_projects is False
+    assert "deleted vocab-suggestions.json" in did and "removed [learn]" in did
+    assert not paths.suggestions_file.exists()
     text = paths.config_file.read_text("utf-8")
-    assert "seed_projects = false       # also suggest" in text  # the comment stays
-    left = {s.term: s.status for s in load_suggestions(paths)}
-    # nothing scanned earlier shows again; what the person decided is remembered (and the
-    # words mined from the old history go too: history-gone)
-    assert left == {"Better Shell": "dismissed", "Paperclip": "accepted"}
-    assert LEARN_PROJECTS_OFF in json.loads(paths.migrations_file.read_text("utf-8"))
-    # turned back on later (by hand): it stays on
-    paths.config_file.write_text(
-        text.replace("seed_projects = false", "seed_projects = true"), "utf-8"
-    )
-    assert migrate(paths) == []
-    assert load_config(paths).learn.seed_projects is True
+    assert "[learn]" not in text and "seed_projects" not in text
+    assert "port = 8766" in text  # the rest stays
+    assert SUGGESTIONS_GONE in json.loads(paths.migrations_file.read_text("utf-8"))
+    paths.suggestions_file.write_text("{}", "utf-8")
+    assert migrate(paths) == []  # once
+    assert paths.suggestions_file.exists()
 
 
-def test_scanning_is_switched_off_however_it_was_written(tmp_path):
-    assert project_scanning_on("[learn]\nseed_projects=true\n")
-    assert project_scanning_on("[learn]\n  seed_projects = true  # mine\n")
-    assert not project_scanning_on("[learn]\nseed_projects = false\n")
-    assert not project_scanning_on("[other]\nseed_projects = true\n")
-    paths = home(tmp_path, "[learn]\nseed_projects = true\nproject_roots = ['~/Developer']\n")
-    assert migrate(paths) == ["learn.seed_projects = False"]  # (and no old history to delete)
-    cfg = load_config(paths)
-    assert cfg.learn.seed_projects is False and cfg.learn.project_roots == ["~/Developer"]
+def test_an_old_learn_section_still_loads(tmp_path):
+    """The CLI reads config.toml without upgrading it: [learn] must not stop it."""
+    paths = home(tmp_path, OLD_LEARN)
+    load_config(paths)
 
 
-def test_new_installs_never_scan_project_folders(tmp_path):
+def test_a_fresh_install_has_no_learn_section(tmp_path):
     paths = Paths(tmp_path / "home")
     ensure_initialized(paths)
     assert migrate(paths) == []
-    assert load_config(paths).learn.seed_projects is False
-    assert "seed_projects = false" in paths.config_file.read_text("utf-8")
+    assert "[learn]" not in paths.config_file.read_text("utf-8")

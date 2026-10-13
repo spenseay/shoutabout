@@ -5,8 +5,6 @@ main thread      tray message loop (or wait on the server with tray=False)
 thread "server"  uvicorn (FastAPI app)
 thread "engine"  load Whisper, then publish ctx.pipeline
 thread "warmer"  keep the Ollama cleanup model loaded
-thread "learn"   only with [learn] seed_projects = true: word suggestions from project
-                 folders shortly after start, then daily; one notification when new ones wait
 thread "hotkey"  "Talk to this PC" (+ "hotkey-hook", "overlay"; see voice_runtime.py)
 thread "ui"      the ShoutAbout window, the setup window and pairing prompts, while one is open
 thread "discovery" announces the hub on the network once it's listening (hub_v2)
@@ -30,7 +28,6 @@ import os
 import sys
 import threading
 import time
-from pathlib import Path
 from typing import Any
 
 from shoutabout import __version__
@@ -51,32 +48,8 @@ ACCESS_NOT_CONFIGURED_WARNING = (
     "config.toml."
 )
 SERVER_JOIN_TIMEOUT_S = 10.0
-LEARN_FIRST_DELAY_S = 90.0  # let Whisper and the cleanup model load first
-LEARN_INTERVAL_S = 24 * 3600.0
-TEACH_TITLE = "Teach words"  # the tray / menu bar item, so the notification says where
 CLEANUP_RETRY_S = 30.0  # "auto" cleanup: how often to look for Ollama until it answers
 GREET_WAIT_S = 30 * 60.0  # "Ready" after a launch waits this long at most (model download)
-
-
-# ------------------------------------------------------------------ teaching words
-
-
-def teach_notification(new: int) -> tuple[str, str]:
-    """(title, message) for the tray when ``new`` suggestions are waiting."""
-    words = "word" if new == 1 else "words"
-    return (TEACH_TITLE, f"{new} new {words} to teach.")
-
-
-def refresh_and_notify(paths: Paths, learn_cfg: Any, notify: Any) -> int:
-    """One look through the project folders (``[learn] seed_projects = true`` only);
-    notifies once if it found new suggestions. Returns the new count."""
-    from shoutabout.learn import refresh_suggestions
-
-    roots = [Path(r).expanduser() for r in learn_cfg.project_roots] or None
-    new = refresh_suggestions(paths, include_projects=learn_cfg.seed_projects, roots=roots)
-    if new and learn_cfg.notify:
-        notify(*teach_notification(new))
-    return new
 
 
 # ------------------------------------------------------------------ single instance
@@ -500,28 +473,12 @@ def _run(
                 return
             stopping.wait(interval)
 
-    def learn_loop() -> None:
-        # Project folders are looked at only when the person asks (Teach words), unless
-        # they turned [learn] seed_projects on in config.toml.
-        if not (cfg.learn.enabled and cfg.learn.seed_projects):
-            return
-        if stopping.wait(LEARN_FIRST_DELAY_S):
-            return
-        while not stopping.is_set():
-            try:
-                refresh_and_notify(paths, cfg.learn, notify)
-            except Exception:
-                log.exception("vocab suggestions refresh failed")
-            stopping.wait(LEARN_INTERVAL_S)
-
     server_thread = threading.Thread(target=serve, name="server", daemon=True)
     engine_thread = threading.Thread(target=load_engine, name="engine", daemon=True)
     warm_thread = threading.Thread(target=warm_loop, name="warmer", daemon=True)
-    learn_thread = threading.Thread(target=learn_loop, name="learn", daemon=True)
     server_thread.start()
     engine_thread.start()
     warm_thread.start()
-    learn_thread.start()
     # --- v2-setup
     v2.announce_when_listening(server, stopping)
     if show_setup and v2.ui is not None:

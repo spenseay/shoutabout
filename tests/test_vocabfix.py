@@ -5,7 +5,14 @@ from __future__ import annotations
 
 import pytest
 
-from shoutabout.vocabfix import apply_fixes, distance, is_common_word, sound_key, split_camel_case
+from shoutabout.vocabfix import (
+    apply_fixes,
+    distance,
+    is_common_word,
+    sound_key,
+    split_camel_case,
+    teach_fix,
+)
 
 VOCAB = [
     "Sofia",
@@ -194,3 +201,31 @@ def test_custom_words_with_symbols_are_matched_when_said():
     assert apply_fixes("set my underscore var", ["my_var"]) == "set my_var"
     assert apply_fixes("the dotnet runtime", [".NET"]) == "the dotnet runtime"
     assert apply_fixes("already /consolidate", ["/consolidate"]) == "already /consolidate"
+
+
+# ------------------------------------------------------------------ fix a word
+
+
+def test_teach_fix_prefers_a_word():
+    t = teach_fix("I talked to Sophia today.", "Sophia", "Sofia")
+    assert (t.entry, t.is_word, t.fixed_text) == ("Sofia", True, "I talked to Sofia today.")
+    t = teach_fix("push it to github", "github", "GitHub")
+    assert (t.entry, t.is_word, t.fixed_text) == ("GitHub", True, "push it to GitHub")
+    t = teach_fix("Run slash consolidate.", "slash consolidate", "/consolidate")
+    assert (t.entry, t.is_word, t.fixed_text) == ("/consolidate", True, "Run /consolidate.")
+    # The verb at the start stays: a word never rewrites an everyday word by itself.
+    t = teach_fix("Mark the date, then call Mark.", "Mark", "Marc")
+    assert (t.entry, t.fixed_text) == ("Marc", "Mark the date, then call Marc.")
+
+
+def test_teach_fix_falls_back_to_a_replacement():
+    t = teach_fix("open cloud code now", "cloud code", "Claude Code")
+    assert (t.entry, t.is_word) == ("cloud code -> Claude Code", False)
+    assert t.fixed_text == "open Claude Code now"
+    t = teach_fix("omw, see you", "omw", "on my way")
+    assert (t.entry, t.fixed_text) == ("omw -> on my way", "on my way, see you")
+
+
+def test_teach_fix_with_a_word_not_in_the_text():
+    t = teach_fix("something else", "Sophia", "Sofia")
+    assert (t.entry, t.is_word, t.fixed_text) == ("Sofia", True, "something else")

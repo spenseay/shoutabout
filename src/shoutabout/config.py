@@ -115,7 +115,7 @@ class Paths:
         return self.home / "install-state.json"
 
     @property
-    def suggestions_file(self) -> Path:
+    def suggestions_file(self) -> Path:  # earlier versions; migrations delete it
         return self.home / "vocab-suggestions.json"
 
     @property
@@ -293,19 +293,14 @@ class LegacyHistoryConfig(_Section):
     keep_audio: bool = False
 
 
-class LearnConfig(_Section):
-    # Word suggestions, waiting in Teach words; nothing is added to vocab.txt without the
-    # owner's approval. ``enabled = false`` stops the background refresh below.
+class LegacyLearnConfig(_Section):
+    """``[learn]`` of earlier versions (word suggestions from project folders, since
+    removed). The keys still load, unused, and the ``suggestions-gone`` migration removes
+    the section."""
+
     enabled: bool = True
-    # Also look through the owner's project folders on every refresh (repo/package names,
-    # README titles). Off by default: folders are only looked at when the owner presses
-    # "Suggest from my project folders" in Teach words.
     seed_projects: bool = False
-    # Folders scanned 2 levels deep for projects. Empty = learn.default_project_roots():
-    # ~/Documents, ~/source/repos, ~/repos, ~/code and ~/projects on Windows; on a Mac only
-    # folders macOS doesn't guard (~/Developer, ~/code, ~/projects...).
     project_roots: list[str] = Field(default_factory=list)
-    # One tray notification when new suggestions are waiting.
     notify: bool = True
 
 
@@ -345,7 +340,7 @@ class Config(_Section):
     paste: PasteConfig = Field(default_factory=PasteConfig)
     access: AccessConfig = Field(default_factory=AccessConfig)
     history: LegacyHistoryConfig = Field(default_factory=LegacyHistoryConfig)  # unused
-    learn: LearnConfig = Field(default_factory=LearnConfig)
+    learn: LegacyLearnConfig = Field(default_factory=LegacyLearnConfig)  # unused
     dictation: DictationConfig = Field(default_factory=DictationConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
 

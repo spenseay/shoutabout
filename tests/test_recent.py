@@ -280,6 +280,58 @@ def test_stamp_follows_the_hub(tmp_path):
     assert model.stamp() != before
 
 
+def test_fix_a_word_teaches_and_corrects(tmp_path):
+    from shoutabout.vocab import read_entries
+
+    copied: list[str] = []
+    recent = Recent()
+    recent.add(result("Ask Sophia to open cloud code."))
+    model = rm.RecentModel(services_with(tmp_path, recent, copy_text=copied.append))
+    model.load()
+    key = model.items[0].id
+    vocab = model.svc.paths.vocab_file
+
+    assert model.fix_word(key, "Sophia", " Sofia ") == "Ask Sofia to open cloud code."
+    assert model.message == 'Saved. "Sophia" will come out "Sofia" from now on.'
+    assert not model.error
+    assert read_entries(vocab)[0] == "Sofia"  # a word: it sounds the same
+    assert model.view().entries[0].text == "Ask Sofia to open cloud code."
+
+    fixed = model.fix_word(key, "cloud code", "Claude Code")
+    assert fixed == "Ask Sofia to open Claude Code."
+    assert read_entries(vocab)[0] == "cloud code -> Claude Code"  # can't tell by the sound
+    assert model.copy(key) and copied == ["Ask Sofia to open Claude Code."]
+
+
+def test_fix_a_word_keeps_one_replacement_per_phrase(tmp_path):
+    from shoutabout.vocab import read_entries
+
+    recent = Recent()
+    recent.add(result("omw, see you."))
+    recent.add(result("omw again."))
+    model = rm.RecentModel(services_with(tmp_path, recent))
+    model.load()
+    newer, older = (i.id for i in model.items)
+    assert model.fix_word(older, "omw", "on my way") == "on my way, see you."
+    assert model.fix_word(newer, "omw", "oh my word") is None
+    assert model.message == '"omw" already turns into "on my way". Change it on Teach words.'
+    assert model.view().entries[0].text == "omw again."  # left as it was
+    assert read_entries(model.svc.paths.vocab_file)[0] == "omw -> on my way"
+
+
+def test_fix_a_word_needs_both_words(tmp_path):
+    recent = Recent()
+    recent.add(result("Hello there."))
+    model = rm.RecentModel(services_with(tmp_path, recent))
+    model.load()
+    key = model.items[0].id
+    assert model.fix_word(key, "", "Sofia") is None and model.error
+    assert model.fix_word(key, "there", "  ") is None and model.error
+    assert model.fix_word(key, "there", "there") is None and "same" in model.message
+    assert model.fix_word("gone", "a", "b") is None and model.error
+    assert model.fix_word(key, "there", "#hash") is None and "comment" in model.message
+
+
 def test_copy_retry_and_delete(tmp_path):
     copied: list[str] = []
     recent = Recent()
@@ -437,3 +489,39 @@ def test_remote_recent_follows_hub_events():
     assert remote.snapshot() == {"items": []}
     remote.remove_failed("f1")
     assert calls == [("recent", {}), ("remove_failed", {"id": "f1"})]
+
+
+@pytest.mark.windows
+def test_the_page_fixes_a_word(tmp_path, tk_root):
+    """Select the wrong word, Fix a word, type the right one, Save: the card is corrected
+    and the word is in vocab.txt for next time."""
+    import tkinter as tk
+
+    from shoutabout.recent_ui import RecentPage
+    from shoutabout.vocab import read_entries
+
+    recent = Recent()
+    recent.add(result("I talked to Sophia today."))
+    frame = tk.Frame(tk_root)
+    frame.pack(fill="both", expand=True)
+    model = rm.RecentModel(services_with(tmp_path, recent))
+    page = RecentPage(frame, model)
+    _pump(tk_root, 0.4)
+    key = recent.items()[0].id
+    text = page._texts[key]
+    text.tag_add("sel", "1.12", "1.18")  # "Sophia"
+    page._open_fix(key)
+    _row, wrong, right = page._fix_rows[key]
+    assert wrong.get() == "Sophia"
+    right.insert(0, "Sofia")
+    page._save_fix(key)
+    _pump(tk_root, 0.5)
+    assert text.get("1.0", "end").strip() == "I talked to Sofia today."
+    assert key not in page._fix_rows
+    assert page.status["text"] == 'Saved. "Sophia" will come out "Sofia" from now on.'
+    assert read_entries(model.svc.paths.vocab_file)[0] == "Sofia"
+    # Cancel closes the row without saving.
+    page._open_fix(key)
+    page._close_fix(key)
+    assert key not in page._fix_rows
+    page.close()

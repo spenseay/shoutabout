@@ -622,8 +622,9 @@ flags outputs that answered instead of cleaning.
 ### A name or term keeps coming out wrong
 
 **Fix:**
-1. Add it to `vocab.txt`: tray > **Teach words…** (or **Open vocab.txt** there), or
-   `%APPDATA%\shoutabout\vocab.txt`.
+1. Open tray > **Recent…**, select the wrong word in that dictation, press **Fix a word**,
+   type the right spelling and press **Save**. Or add it to `vocab.txt` yourself: tray >
+   **Teach words…** (or **Open vocab.txt** there), or `%APPDATA%\shoutabout\vocab.txt`.
    - One term per line, spelled and cased exactly as you want it, e.g. `Better Shell`.
    - Changes apply on the next request, with no restart.
 2. **Order sets priority.** Put the terms that matter most at the top.
