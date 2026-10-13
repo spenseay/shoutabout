@@ -16,6 +16,7 @@ struct SharedSettings {
         static let copyInPCMode = "copyInPCMode"
         static let offlineEngine = "offlineEngine"
         static let vocabTerms = "vocabTerms"
+        static let vocabReplacements = "vocabReplacements"
         static let vocabVersion = "vocabVersion"
         static let vocabFetchedAt = "vocabFetchedAt"
         static let pendingDictationAt = "pendingDictationAt"
@@ -84,6 +85,13 @@ struct SharedSettings {
     var vocabTerms: [String] {
         get { defaults.stringArray(forKey: Key.vocabTerms) ?? [] }
         nonmutating set { defaults.set(newValue, forKey: Key.vocabTerms) }
+    }
+
+    /// Cached replacements from the same `GET /vocab` ("omw" -> "on my way"), applied to
+    /// on-device transcripts.
+    var vocabReplacements: [VocabReplacement] {
+        get { decode([VocabReplacement].self, Key.vocabReplacements) ?? [] }
+        nonmutating set { encode(newValue.isEmpty ? nil : newValue, Key.vocabReplacements) }
     }
 
     var vocabVersion: Int? {

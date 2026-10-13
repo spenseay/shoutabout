@@ -167,10 +167,13 @@ caller extra attempts on the other.
 ### `GET /vocab`
 
 ```json
-{"terms": ["Chameleon CV", "Better Shell", "Claude Code"], "version": 4, "count": 3}
+{"terms": ["Chameleon CV", "Better Shell", "Claude Code"],
+ "replacements": [{"say": "omw", "write": "on my way"}], "version": 4, "count": 3}
 ```
 
-The terms are in priority order. `version` goes up each time the hub reloads the file.
+The terms are in priority order. `replacements` lists the `say -> write` lines (the iPhone
+applies them to offline dictations too); `count` counts the terms only. `version` goes up each
+time the hub reloads the file.
 
 ### `POST /vocab`
 

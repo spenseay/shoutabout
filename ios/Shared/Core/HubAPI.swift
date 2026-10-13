@@ -38,7 +38,15 @@ struct TranscribeResponse: Codable, Equatable, Sendable {
 /// `GET /vocab` body.
 struct VocabList: Codable, Equatable, Sendable {
     var terms: [String]
+    /// "say -> write" lines from vocab.txt; nil from a PC that predates them.
+    var replacements: [VocabReplacement]?
     var version: Int?
+}
+
+/// A replacement: what you say, and what gets written instead ("omw" -> "on my way").
+struct VocabReplacement: Codable, Equatable, Hashable, Sendable {
+    var say: String
+    var write: String
 }
 
 /// `POST /vocab` body.

@@ -1,10 +1,14 @@
 import Foundation
 
-/// Post-processing for on-device transcripts, with the PC's custom words. The PC route doesn't
-/// need this: the hub feeds the vocabulary to Whisper and its cleanup LLM.
+/// Post-processing for on-device transcripts, with the PC's custom words and replacements. The
+/// PC route doesn't need this: the hub runs the same passes (shoutabout/vocabfix.py).
 ///
-/// Two passes:
+/// Three passes:
 ///
+/// 0. **Replacements** ("say -> write" lines in vocab.txt): the spoken words, matched as whole
+///    words ignoring case, become the written text ("omw" -> "on my way"). A custom word with
+///    a symbol gets one for free: "/consolidate" also matches "slash consolidate", "C#" "C
+///    sharp", "Node.js" "node dot js".
 /// 1. **Same spelling**: case-insensitive matches of a term become its canonical spelling
 ///    ("better shell" -> "Better Shell", "shout-about" -> "ShoutAbout").
 /// 2. **Sound-alike**: a run of words that *sounds like* a term and is spelled almost like it
@@ -30,13 +34,123 @@ import Foundation
 /// - **Longest term wins** ("Sofia Coppola" before "Sofia"), words already spelled exactly
 ///   like a term are never rewritten into another term, and each word is rewritten once.
 enum VocabFixer {
-    static func apply(_ text: String, terms: [String]) -> String {
+    static func apply(_ text: String, terms: [String], replacements: [VocabReplacement] = []) -> String {
         guard !text.isEmpty else { return text }
         let cleaned = terms
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        guard !cleaned.isEmpty else { return text }
-        return fixSoundAlikes(fixSpelling(text, terms: cleaned), terms: cleaned)
+        let replaced = applyReplacements(text, replacements, terms: cleaned)
+        guard !cleaned.isEmpty else { return replaced }
+        return fixSoundAlikes(fixSpelling(replaced, terms: cleaned), terms: cleaned)
+    }
+
+    // MARK: Pass 0: replacements
+
+    /// How a symbol in a custom word is said. Only symbols whose spoken word is rarely meant
+    /// literally next to the term ("at", "and" are, so "@" and "&" are left out).
+    static let symbolWords: [Character: [String]] = [
+        "/": ["slash", "forward slash"],
+        "\\": ["backslash"],
+        ".": ["dot"],
+        "_": ["underscore"],
+        "#": ["hash", "hashtag", "sharp", "pound"],
+        "+": ["plus"],
+    ]
+
+    /// The replacements, then the custom words with a symbol said aloud; longest first.
+    static func applyReplacements(_ text: String, _ replacements: [VocabReplacement], terms: [String] = []) -> String {
+        var rules: [(length: Int, regex: NSRegularExpression, written: String)] = []
+        for replacement in replacements {
+            let written = replacement.write.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !written.isEmpty, let regex = sayPattern(replacement.say) else { continue }
+            rules.append((replacement.say.count, regex, written))
+        }
+        for term in terms {
+            if let regex = spokenRule(for: term) { rules.append((term.count, regex, term)) }
+        }
+        guard !rules.isEmpty else { return text }
+        var result = text
+        for rule in rules.sorted(by: { $0.length > $1.length }) {
+            result = replaceMatches(of: rule.regex, in: result) { matchCase($0, rule.written) }
+        }
+        return result
+    }
+
+    /// Whole-word, case-insensitive match of a spoken phrase; words may be joined by spaces,
+    /// commas or hyphens ("Slash, consolidate").
+    static func sayPattern(_ say: String) -> NSRegularExpression? {
+        let words = say.replacingOccurrences(of: "-", with: " ")
+            .split(whereSeparator: { $0.isWhitespace })
+            .map(String.init)
+        guard !words.isEmpty else { return nil }
+        let body = words.map(NSRegularExpression.escapedPattern(for:)).joined(separator: "[\\s,-]+")
+        return try? NSRegularExpression(
+            pattern: "(?<![\\p{L}\\p{N}])" + body + "(?![\\p{L}\\p{N}])",
+            options: [.caseInsensitive]
+        )
+    }
+
+    /// For a custom word with a symbol ("/consolidate", "C#"), a match of it said aloud
+    /// ("slash consolidate", "C sharp"); nil for a term without one. Each symbol may also come
+    /// through as itself ("/ consolidate").
+    static func spokenRule(for term: String) -> NSRegularExpression? {
+        var tokens: [String] = []
+        var word = ""
+        for character in term {
+            if character.isLetter || character.isNumber {
+                word.append(character)
+                continue
+            }
+            if !word.isEmpty {
+                tokens.append(word)
+                word = ""
+            }
+            if !character.isWhitespace { tokens.append(String(character)) }
+        }
+        if !word.isEmpty { tokens.append(word) }
+        func isWord(_ token: String) -> Bool { token.allSatisfy { $0.isLetter || $0.isNumber } }
+        let hasSymbol = tokens.contains { $0.count == 1 && symbolWords[Character($0)] != nil }
+        guard hasSymbol, tokens.contains(where: isWord) else { return nil }
+        let parts = tokens.map { token -> String in
+            if token.count == 1, let spoken = symbolWords[Character(token)] {
+                let options = spoken.map { phrase in
+                    phrase.split(separator: " ").map { NSRegularExpression.escapedPattern(for: String($0)) }
+                        .joined(separator: "\\s+")
+                }
+                return "(?:" + (options + [NSRegularExpression.escapedPattern(for: token)]).joined(separator: "|") + ")"
+            }
+            if isWord(token) { return NSRegularExpression.escapedPattern(for: token) }
+            return NSRegularExpression.escapedPattern(for: token) + "?"  // other punctuation is optional
+        }
+        return try? NSRegularExpression(
+            pattern: "(?<![\\p{L}\\p{N}])" + parts.joined(separator: "[\\s,-]+") + "(?![\\p{L}\\p{N}])",
+            options: [.caseInsensitive]
+        )
+    }
+
+    /// A lowercase replacement that starts a sentence keeps the capital ("Omw" -> "On my way");
+    /// one with a capital of its own ("iPhone", "Sofia") is written as given.
+    static func matchCase(_ spoken: String, _ written: String) -> String {
+        guard let first = spoken.first, first.isUppercase,
+              let start = written.first, start.isLowercase,
+              !written.contains(where: { $0.isUppercase })
+        else { return written }
+        return start.uppercased() + written.dropFirst()
+    }
+
+    private static func replaceMatches(
+        of regex: NSRegularExpression, in text: String, with transform: (String) -> String
+    ) -> String {
+        let source = text as NSString
+        var output = ""
+        var cursor = 0
+        for match in regex.matches(in: text, range: NSRange(location: 0, length: source.length)) {
+            output += source.substring(with: NSRange(location: cursor, length: match.range.location - cursor))
+            output += transform(source.substring(with: match.range))
+            cursor = match.range.location + match.range.length
+        }
+        output += source.substring(from: cursor)
+        return output
     }
 
     // MARK: Pass 1: same spelling

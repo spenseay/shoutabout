@@ -75,6 +75,14 @@ final class HubAPITests: XCTestCase {
         ).get()
         XCTAssertEqual(list.terms, ["Better Shell", "ShoutAbout"])
         XCTAssertEqual(list.version, 3)
+        XCTAssertNil(list.replacements)  // a PC from before replacements
+        let withReplacements = try HubResponseParser.parse(
+            VocabList.self,
+            status: 200,
+            body: data(#"{"terms": ["Sofia"], "replacements": [{"say": "omw", "write": "on my way"}], "version": 4}"#),
+            contentType: nil
+        ).get()
+        XCTAssertEqual(withReplacements.replacements, [VocabReplacement(say: "omw", write: "on my way")])
         let added = try HubResponseParser.parse(
             VocabAddResult.self, status: 200, body: data(#"{"added": true, "term": "Parakeet", "count": 3}"#), contentType: nil
         ).get()
