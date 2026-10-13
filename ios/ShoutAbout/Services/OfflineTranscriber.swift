@@ -12,8 +12,9 @@ import Foundation
 ///   preference, and when SpeechTranscriber is unavailable.
 /// - `SFSpeechRecognizer` with `requiresOnDeviceRecognition` + `contextualStrings` is the last
 ///   resort (and the "Legacy" preference).
-/// Whatever wrote it, `VocabFixer` then puts the custom words in their own spelling (also when
-/// they only sound alike: "Sophia" -> "Sofia").
+/// Whatever wrote it, `VocabFixer` then applies the PC's replacements ("omw" -> "on my way")
+/// and puts the custom words in their own spelling (also when they only sound alike: "Sophia"
+/// -> "Sofia").
 /// Each model's assets download once (needs a network the first time); `prepare()` does that
 /// ahead of time from Settings.
 enum OfflineTranscriber {
@@ -38,7 +39,12 @@ enum OfflineTranscriber {
 
     static var locale: Locale { Locale.current }
 
-    static func transcribe(fileURL: URL, vocab: [String], preference: OfflineEnginePreference) async throws -> Result {
+    static func transcribe(
+        fileURL: URL,
+        vocab: [String],
+        replacements: [VocabReplacement] = [],
+        preference: OfflineEnginePreference
+    ) async throws -> Result {
         let terms = Array(vocab.prefix(100))
         switch preference {
         case .automatic:
@@ -50,7 +56,7 @@ enum OfflineTranscriber {
                 triedDictation = true
                 do {
                     let text = try await dictationTranscriber(fileURL: fileURL, vocab: terms)
-                    return Result(text: VocabFixer.apply(text, terms: vocab), engine: "DictationTranscriber")
+                    return Result(text: VocabFixer.apply(text, terms: vocab, replacements: replacements), engine: "DictationTranscriber")
                 } catch {
                     try Task.checkCancellation()
                 }
@@ -58,31 +64,33 @@ enum OfflineTranscriber {
             if SpeechTranscriber.isAvailable {
                 do {
                     let text = try await speechTranscriber(fileURL: fileURL, vocab: terms)
-                    return Result(text: VocabFixer.apply(text, terms: vocab), engine: "SpeechTranscriber")
+                    return Result(text: VocabFixer.apply(text, terms: vocab, replacements: replacements), engine: "SpeechTranscriber")
                 } catch OfflineError.unsupportedLocale {
                     // fall through to DictationTranscriber / the legacy recognizer
                 }
             }
             if triedDictation {
                 let text = try await legacy(fileURL: fileURL, vocab: terms)
-                return Result(text: VocabFixer.apply(text, terms: vocab), engine: "SFSpeechRecognizer")
+                return Result(text: VocabFixer.apply(text, terms: vocab, replacements: replacements), engine: "SFSpeechRecognizer")
             }
-            return try await vocabularyFirst(fileURL: fileURL, terms: terms, vocab: vocab)
+            return try await vocabularyFirst(fileURL: fileURL, terms: terms, vocab: vocab, replacements: replacements)
         case .vocabulary:
-            return try await vocabularyFirst(fileURL: fileURL, terms: terms, vocab: vocab)
+            return try await vocabularyFirst(fileURL: fileURL, terms: terms, vocab: vocab, replacements: replacements)
         case .legacy:
             let text = try await legacy(fileURL: fileURL, vocab: terms)
-            return Result(text: VocabFixer.apply(text, terms: vocab), engine: "SFSpeechRecognizer")
+            return Result(text: VocabFixer.apply(text, terms: vocab, replacements: replacements), engine: "SFSpeechRecognizer")
         }
     }
 
-    private static func vocabularyFirst(fileURL: URL, terms: [String], vocab: [String]) async throws -> Result {
+    private static func vocabularyFirst(
+        fileURL: URL, terms: [String], vocab: [String], replacements: [VocabReplacement]
+    ) async throws -> Result {
         do {
             let text = try await dictationTranscriber(fileURL: fileURL, vocab: terms)
-            return Result(text: VocabFixer.apply(text, terms: vocab), engine: "DictationTranscriber")
+            return Result(text: VocabFixer.apply(text, terms: vocab, replacements: replacements), engine: "DictationTranscriber")
         } catch OfflineError.unsupportedLocale {
             let text = try await legacy(fileURL: fileURL, vocab: terms)
-            return Result(text: VocabFixer.apply(text, terms: vocab), engine: "SFSpeechRecognizer")
+            return Result(text: VocabFixer.apply(text, terms: vocab, replacements: replacements), engine: "SFSpeechRecognizer")
         }
     }
 
@@ -266,10 +274,13 @@ enum OfflineTranscriber {
 /// preference), with the PC's vocabulary as hints.
 struct OnDeviceEngine: OnDeviceTranscribing {
     var vocab: [String]
+    var replacements: [VocabReplacement] = []
     var preference: OfflineEnginePreference
 
     func transcribe(_ audioURL: URL) async throws -> OnDeviceResult {
-        let result = try await OfflineTranscriber.transcribe(fileURL: audioURL, vocab: vocab, preference: preference)
+        let result = try await OfflineTranscriber.transcribe(
+            fileURL: audioURL, vocab: vocab, replacements: replacements, preference: preference
+        )
         return OnDeviceResult(text: result.text, engine: result.engine)
     }
 }

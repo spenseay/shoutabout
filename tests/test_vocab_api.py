@@ -56,8 +56,17 @@ def test_get_vocab(vocab_file):
     assert r.status_code == 200
     body = r.json()
     assert body["terms"] == ["Better Shell", "Claude Code"]
+    assert body["replacements"] == []
     assert body["count"] == 2
     assert isinstance(body["version"], int) and body["version"] >= 1
+
+
+def test_get_vocab_lists_replacements_apart(vocab_file):
+    c = make_hub(vocab_file).client()
+    assert c.post("/vocab", headers=AUTH, json={"term": "omw -> on my way"}).status_code == 200
+    body = c.get("/vocab", headers=AUTH).json()
+    assert body["terms"] == ["Better Shell", "Claude Code"]
+    assert body["replacements"] == [{"say": "omw", "write": "on my way"}]
 
 
 def test_get_vocab_sees_new_terms_and_bumps_version(vocab_file):

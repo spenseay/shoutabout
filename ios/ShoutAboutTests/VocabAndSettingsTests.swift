@@ -115,6 +115,55 @@ final class VocabSoundAlikeTests: XCTestCase {
     }
 }
 
+/// Replacements ("say -> write" lines on the PC) and custom words with a symbol said aloud: the
+/// same rules as the hub's shoutabout/vocabfix.py.
+final class VocabReplacementTests: XCTestCase {
+    private func rule(_ say: String, _ write: String) -> VocabReplacement {
+        VocabReplacement(say: say, write: write)
+    }
+
+    func testLikePhoneTextReplacement() {
+        let rules = [rule("omw", "on my way")]
+        XCTAssertEqual(VocabFixer.apply("omw, see you soon", terms: [], replacements: rules), "on my way, see you soon")
+        XCTAssertEqual(VocabFixer.apply("Omw.", terms: [], replacements: rules), "On my way.")
+        XCTAssertEqual(VocabFixer.apply("OMW", terms: [], replacements: rules), "On my way")
+        XCTAssertEqual(VocabFixer.apply("zomwz and omwhere", terms: [], replacements: rules), "zomwz and omwhere")
+    }
+
+    func testSpokenPhrases() {
+        let rules = [rule("slash consolidate", "/consolidate")]
+        XCTAssertEqual(VocabFixer.apply("Slash consolidate.", terms: [], replacements: rules), "/consolidate.")
+        XCTAssertEqual(VocabFixer.apply("run slash, consolidate now", terms: [], replacements: rules), "run /consolidate now")
+        XCTAssertEqual(VocabFixer.apply("please consolidate it", terms: [], replacements: rules), "please consolidate it")
+    }
+
+    func testOwnCapitalsAndLongestFirst() {
+        XCTAssertEqual(VocabFixer.apply("my eye phone", terms: [], replacements: [rule("eye phone", "iPhone")]), "my iPhone")
+        let rules = [rule("c sharp", "C#"), rule("c sharp code", "C# source")]
+        XCTAssertEqual(VocabFixer.apply("write c sharp code", terms: [], replacements: rules), "write C# source")
+        XCTAssertEqual(VocabFixer.apply("pay $1", terms: [], replacements: [rule("pay", "$0 \\1")]), "$0 \\1 $1")
+    }
+
+    func testCustomWordsWithSymbolsAreMatchedWhenSaid() {
+        XCTAssertEqual(VocabFixer.apply("Slash consolidate", terms: ["/consolidate"]), "/consolidate")
+        XCTAssertEqual(
+            VocabFixer.apply("then slash consolidate the notes", terms: ["/consolidate"]),
+            "then /consolidate the notes"
+        )
+        XCTAssertEqual(VocabFixer.apply("I'll consolidate later", terms: ["/consolidate"]), "I'll consolidate later")
+        XCTAssertEqual(VocabFixer.apply("built in c sharp", terms: ["C#"]), "built in C#")
+        XCTAssertEqual(VocabFixer.apply("a node dot js app", terms: ["Node.js"]), "a Node.js app")
+        XCTAssertEqual(VocabFixer.apply("the dotnet runtime", terms: [".NET"]), "the dotnet runtime")
+    }
+
+    func testWordsAndReplacementsTogether() {
+        XCTAssertEqual(
+            VocabFixer.apply("Tell Sophia omw.", terms: ["Sofia"], replacements: [rule("omw", "on my way")]),
+            "Tell Sofia on my way."
+        )
+    }
+}
+
 final class SoundAlikeTests: XCTestCase {
     func testKeys() {
         XCTAssertEqual(SoundAlike.key("Sophia"), "SF")
@@ -178,12 +227,16 @@ final class SharedSettingsTests: XCTestCase {
             homeSSID: "Home"
         )
         settings.vocabTerms = ["A", "B"]
+        settings.vocabReplacements = [VocabReplacement(say: "omw", write: "on my way")]
         let again = SharedSettings(defaults: settings.defaults)
         XCTAssertEqual(again.target, .phone)
         XCTAssertFalse(again.preferLAN)
         XCTAssertEqual(again.configuration.lanURL?.absoluteString, "http://192.168.1.50:8765")
         XCTAssertEqual(again.configuration.homeSSID, "Home")
         XCTAssertEqual(again.vocabTerms, ["A", "B"])
+        XCTAssertEqual(again.vocabReplacements, [VocabReplacement(say: "omw", write: "on my way")])
+        again.vocabReplacements = []
+        XCTAssertEqual(SharedSettings(defaults: settings.defaults).vocabReplacements, [])
     }
 
     func testPendingDictationIsConsumedOnceAndExpires() {

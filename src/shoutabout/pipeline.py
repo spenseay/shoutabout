@@ -30,6 +30,7 @@ from shoutabout.models import (
 )
 from shoutabout.state import HubState
 from shoutabout.text import normalize_whitespace
+from shoutabout.vocabfix import apply_fixes
 
 if TYPE_CHECKING:
     from shoutabout.recent import Recent
@@ -181,7 +182,7 @@ class Pipeline:
         t = time.perf_counter()
         cleaned = self._cleanup(raw_text, cleanup)
         timings.cleanup = _ms(t)
-        text = normalize_whitespace(cleaned.text)
+        text = normalize_whitespace(self._fix_words(cleaned.text))
 
         pasted, warning = False, None
         if not text:
@@ -238,6 +239,18 @@ class Pipeline:
         except Exception:
             log.exception("couldn't read vocab terms")
             return ()
+
+    def _fix_words(self, text: str) -> str:
+        """Replacements and the custom words' spellings (:mod:`shoutabout.vocabfix`): Whisper
+        only takes the words as a hint, and the cleanup isn't always on."""
+        if not text:
+            return text
+        try:
+            vocab = self.vocab.get()
+            return apply_fixes(text, tuple(vocab.terms), tuple(getattr(vocab, "replacements", ())))
+        except Exception:
+            log.exception("couldn't apply the vocab fixes; using the text as is")
+            return text
 
     def _cleanup(self, raw_text: str, cleanup: bool | None) -> CleanupResult:
         # enabled may be "auto": then the hub only builds a cleaner when it can run.

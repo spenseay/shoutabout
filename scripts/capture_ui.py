@@ -273,23 +273,11 @@ def recent_services(svc: AppServices) -> None:
 
 
 def teach_services(svc: AppServices) -> None:
-    """A few taught words and suggestions from (made-up) project folders."""
-    from shoutabout.learn import Suggestion, _save
-
+    """A few taught words and a replacement."""
     svc.paths.vocab_file.write_text(
-        "# Words ShoutAbout should spell right (top = first in line)\n"
-        "Priya Raghunathan\nChameleon CV\nBetter Shell\nKeyzPZ\niOS\n",
+        "# Words ShoutAbout should spell your way (top = highest priority)\n"
+        "omw -> on my way\nPriya Raghunathan\nChameleon CV\nBetter Shell\nKeyzPZ\niOS\n",
         "utf-8",
-    )
-    rows = [
-        ("Rocket Launcher", "package name in Developer/webstuff"),
-        ("Paperclip", "git remote of Developer/paperclip-src"),
-        ("Nested AI Tool", "package name in Developer/group/nested-ai-tool"),
-        ("Plot Twist", "project folder Developer/plot-twist-beta"),
-    ]
-    _save(
-        svc.paths,
-        [Suggestion(t, "projects", 1, d, "2026-10-11T09:00:00-07:00") for t, d in rows],
     )
 
 

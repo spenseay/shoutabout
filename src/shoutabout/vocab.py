@@ -1,5 +1,10 @@
 """Custom vocabulary: vocab.txt parsing, hot reload, and Whisper prompt hints.
 
+vocab.txt holds two kinds of line: a **word** ("Sofia", "/consolidate"), spelled the way it
+should come out, and a **replacement** ("omw -> on my way", "slash consolidate ->
+/consolidate"): what you say on the left, what gets written on the right. Words go to
+Whisper as hints; both are applied to every transcript by :mod:`shoutabout.vocabfix`.
+
 How the vocabulary reaches Whisper (faster-whisper 1.2.1)
 ---------------------------------------------------------
 Both ``hotwords`` and ``initial_prompt`` end up in the decoder's "previous text" context
@@ -62,6 +67,9 @@ HINT_SUFFIX = "."
 _SEPARATOR = ", "
 _WS = re.compile(r"\s+")
 _MAX_LOGGED_TERMS = 20
+ARROW = "->"
+# "say -> write"; "=>" and "→" work too (a phone may turn "->" into an arrow).
+_ARROW = re.compile(r"\s*(?:->|=>|\u2192)\s*")
 
 CountTokens = Callable[[str], int]
 
@@ -69,25 +77,65 @@ CountTokens = Callable[[str], int]
 # ----------------------------------------------------------------------- parsing
 
 
-def parse_vocab(text: str) -> list[str]:
-    """One term per line, in priority order.
+def split_replacement(line: str) -> tuple[str, str] | None:
+    """``(say, write)`` for a replacement line ("omw -> on my way"), else None."""
+    parts = _ARROW.split(line, maxsplit=1)
+    if len(parts) != 2 or not parts[0].strip() or not parts[1].strip():
+        return None
+    return parts[0].strip(), parts[1].strip()
+
+
+def format_replacement(say: str, write: str) -> str:
+    return f"{say} {ARROW} {write}"
+
+
+def entry_key(entry: str) -> str:
+    """Identity of a vocab.txt line: a word by its spelling, a replacement by what you say
+    (one replacement per spoken phrase), both case-insensitive."""
+    pair = split_replacement(entry)
+    return f"{ARROW}{term_key(pair[0])}" if pair else term_key(entry)
+
+
+def parse_entries(text: str) -> list[str]:
+    """Every word and replacement line, in file order (replacements as "say -> write").
 
     Whitespace is trimmed (and runs of it collapsed); blank lines and lines whose first
     non-space character is ``#`` are skipped (no inline comments, so "C#" is a term);
-    duplicates are dropped case-insensitively, keeping the first occurrence.
+    duplicates are dropped case-insensitively (see :func:`entry_key`), keeping the first.
     """
-    terms: list[str] = []
+    entries: list[str] = []
     seen: set[str] = set()
-    for raw in text.lstrip("﻿").splitlines():
+    for raw in text.lstrip("\ufeff").splitlines():
         line = _WS.sub(" ", raw).strip()
         if not line or line.startswith("#"):
             continue
-        key = line.casefold()
+        pair = split_replacement(line)
+        if pair:
+            line = format_replacement(*pair)
+        key = entry_key(line)
         if key in seen:
             continue
         seen.add(key)
-        terms.append(line)
-    return terms
+        entries.append(line)
+    return entries
+
+
+def parse_vocab_file(text: str) -> tuple[list[str], list[tuple[str, str]]]:
+    """``(words, replacements)`` in priority order."""
+    terms: list[str] = []
+    replacements: list[tuple[str, str]] = []
+    for entry in parse_entries(text):
+        pair = split_replacement(entry)
+        if pair:
+            replacements.append(pair)
+        else:
+            terms.append(entry)
+    return terms, replacements
+
+
+def parse_vocab(text: str) -> list[str]:
+    """The words (not the replacements), one per line, in priority order."""
+    return parse_vocab_file(text)[0]
 
 
 def format_hint_text(terms: Sequence[str]) -> str:
@@ -119,6 +167,7 @@ def split_hint_text(text: str) -> tuple[str, list[str]]:
 class Vocab:
     terms: tuple[str, ...]
     version: int  # increments on every reload
+    replacements: tuple[tuple[str, str], ...] = ()  # (say, write)
 
 
 @dataclass(frozen=True)
@@ -217,12 +266,14 @@ class VocabStore:
                 return self._vocab
             if signature == self._signature:
                 return self._vocab
+            replacements: list[tuple[str, str]] = []
             if signature is None:
                 terms: list[str] = []
                 log.info("vocab file %s not found; using an empty vocabulary", self.path)
             else:
                 try:
-                    terms = parse_vocab(_decode(self.path.read_bytes(), self.path))
+                    text = _decode(self.path.read_bytes(), self.path)
+                    terms, replacements = parse_vocab_file(text)
                 except FileNotFoundError:
                     terms, signature = [], None
                 except OSError as exc:  # e.g. an editor holds the file mid-save
@@ -230,11 +281,16 @@ class VocabStore:
                     return self._vocab
             self._signature = signature
             self._last_error = None
-            self._vocab = Vocab(terms=tuple(terms), version=self._vocab.version + 1)
+            self._vocab = Vocab(
+                terms=tuple(terms),
+                version=self._vocab.version + 1,
+                replacements=tuple(replacements),
+            )
             if signature is not None:
                 log.info(
-                    "loaded %d vocab term(s) from %s (version %d)",
+                    "loaded %d vocab term(s) and %d replacement(s) from %s (version %d)",
                     len(terms),
+                    len(replacements),
                     self.path,
                     self._vocab.version,
                 )
@@ -332,12 +388,14 @@ def _strip_wrapping(term: str) -> str:
 
 
 def normalize_term(raw: str) -> str:
-    """Clean up and validate one taught term; raises :class:`VocabTermError`.
+    """Clean up and validate one taught term or replacement; raises :class:`VocabTermError`.
 
     Trims whitespace (inner runs collapse to one space), surrounding quotes/brackets and
     sentence punctuation ("“Chameleon CV.”" -> "Chameleon CV"). Valid terms are 1-64
     characters, at most 6 words, contain a letter, have no control characters or line
     breaks, and don't start with ``#`` (vocab.txt would read that line as a comment).
+    A replacement ("omw -> on my way") is checked side by side and comes back as
+    "say -> write".
     """
     if not isinstance(raw, str):
         raise VocabTermError("no term given")
@@ -348,7 +406,35 @@ def normalize_term(raw: str) -> str:
         raise VocabTermError("one term at a time (no line breaks)")
     if any(unicodedata.category(ch) == "Cc" and ch != "\t" for ch in s):
         raise VocabTermError("contains control characters")
-    s = _strip_wrapping(normalize_whitespace(s))
+    s = normalize_whitespace(s)
+    if _ARROW.search(s):
+        return normalize_replacement(*_ARROW.split(s, maxsplit=1))
+    return _normalize_one(s)
+
+
+def normalize_replacement(say: str, write: str) -> str:
+    """Validate "what you say" and "what gets written"; returns the "say -> write" line."""
+    if not say.strip():
+        raise VocabTermError("say what you say, then what to write (omw -> on my way)")
+    if not write.strip():
+        raise VocabTermError(f'what should "{say.strip()}" turn into?')
+    try:
+        said = _normalize_one(normalize_whitespace(say))
+    except VocabTermError as exc:
+        raise VocabTermError(f"what you say: {exc}") from None
+    try:
+        written = _normalize_one(normalize_whitespace(write))
+    except VocabTermError as exc:
+        raise VocabTermError(f"what to write: {exc}") from None
+    if _ARROW.search(said) or _ARROW.search(written):
+        raise VocabTermError("one replacement at a time")
+    if said == written:
+        raise VocabTermError("what you say and what to write are the same")
+    return format_replacement(said, written)
+
+
+def _normalize_one(s: str) -> str:
+    s = _strip_wrapping(s)
     if not s:
         raise VocabTermError("needs at least one letter")
     if len(s) > MAX_TERM_CHARS:
@@ -493,8 +579,8 @@ class _VocabFile:
         stripped = line.strip()
         return bool(stripped) and not stripped.startswith("#")
 
-    def terms(self) -> list[str]:
-        return parse_vocab("".join(self.lines))
+    def entries(self) -> list[str]:
+        return parse_entries("".join(self.lines))
 
     def insert_top(self, terms: Sequence[str]) -> None:
         """Insert before the first term line (after the leading comments / blank lines)."""
@@ -524,14 +610,19 @@ def _default_header() -> list[str]:
     return header
 
 
-def read_terms(path: Path) -> list[str]:
-    """The terms in ``path`` in priority order ([] if the file doesn't exist)."""
+def read_entries(path: Path) -> list[str]:
+    """Every word and replacement in ``path``, in file order ([] if it doesn't exist)."""
     path = Path(path)
     try:
         data = path.read_bytes()
     except FileNotFoundError:
         return []
-    return parse_vocab(_decode(data, path))
+    return parse_entries(_decode(data, path))
+
+
+def read_terms(path: Path) -> list[str]:
+    """The words (not the replacements) in ``path`` in priority order."""
+    return [e for e in read_entries(path) if split_replacement(e) is None]
 
 
 def add_terms(path: Path, terms: Iterable[str]) -> list[AddResult]:
@@ -549,14 +640,14 @@ def add_terms(path: Path, terms: Iterable[str]) -> list[AddResult]:
             checked.append((normalize_whitespace(str(raw))[:MAX_TERM_CHARS], str(exc)))
     with file_lock(path):
         vf = _VocabFile.read(path)
-        existing = {term_key(t): t for t in vf.terms()}
+        existing = {entry_key(t): t for t in vf.entries()}
         to_add: list[str] = []
         outcome: list[tuple[str, bool, str | None]] = []
         for term, error in checked:
             if error is not None:
                 outcome.append((term, False, error))
                 continue
-            key = term_key(term)
+            key = entry_key(term)
             if key in existing:
                 outcome.append((existing[key], False, ALREADY_IN_VOCAB))
                 continue
@@ -566,7 +657,7 @@ def add_terms(path: Path, terms: Iterable[str]) -> list[AddResult]:
         if to_add:
             vf.insert_top(to_add)
             atomic_write_bytes(path, vf.encode())
-        count = len(vf.terms())
+        count = len(vf.entries())
     return [AddResult(added, term, reason, count) for term, added, reason in outcome]
 
 
@@ -583,20 +674,23 @@ def add_term(path: Path, term: str) -> AddResult:
 
 
 def remove_term(path: Path, term: str) -> bool:
-    """Remove every line holding ``term`` (case-insensitive). True if anything was removed.
-
-    Comment lines are never touched.
+    """Remove every line holding ``term`` (case-insensitive; a replacement by what you
+    say). True if anything was removed. Comment lines are never touched.
     """
     path = Path(path)
-    keys = {term_key(term)}
+    keys = {entry_key(_WS.sub(" ", term).strip())}
     with contextlib.suppress(VocabTermError):
-        keys.add(term_key(normalize_term(term)))
+        keys.add(entry_key(normalize_term(term)))
     keys.discard("")
     if not keys or not path.exists():
         return False
     with file_lock(path):
         vf = _VocabFile.read(path)
-        kept = [line for line in vf.lines if not (vf.is_term(line) and term_key(line) in keys)]
+        kept = [
+            line
+            for line in vf.lines
+            if not (vf.is_term(line) and entry_key(_WS.sub(" ", line).strip()) in keys)
+        ]
         if len(kept) == len(vf.lines):
             return False
         vf.lines = kept

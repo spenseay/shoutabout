@@ -52,7 +52,7 @@ def make(
 def test_happy_path_pc():
     p = make()
     r = p.process_file(AUDIO, target="pc", route="lan")
-    assert r.text == "hello better shell"
+    assert r.text == "hello Better Shell"
     assert r.raw_text == "hello better shell"
     assert r.pasted is True
     assert r.warning is None
@@ -63,7 +63,7 @@ def test_happy_path_pc():
     assert len(r.request_id) == 12
     assert set(r.timings.as_dict()) == {"decode", "stt", "cleanup", "paste", "total"}
     assert r.timings.total >= r.timings.stt
-    assert p.injector.pasted == ["hello better shell"]
+    assert p.injector.pasted == ["hello Better Shell"]
     assert p.state.status == HubStatus.IDLE
     assert r.extra["stt_model"] == "fake-engine"
     assert r.extra["llm_model"] == Config().cleanup.model
@@ -104,15 +104,15 @@ def test_trailing_space_only_in_paste():
     cfg.paste.trailing_space = True
     p = make(config=cfg)
     r = p.process_file(AUDIO, target="pc", route="lan")
-    assert p.injector.pasted == ["hello better shell "]
-    assert r.text == "hello better shell"
-    assert r.to_response()["text"] == "hello better shell"
+    assert p.injector.pasted == ["hello Better Shell "]
+    assert r.text == "hello Better Shell"
+    assert r.to_response()["text"] == "hello Better Shell"
 
 
 def test_no_trailing_space_by_default():
     p = make()
     p.process_file(AUDIO, target="pc", route="lan")
-    assert p.injector.pasted == ["hello better shell"]
+    assert p.injector.pasted == ["hello Better Shell"]
 
 
 def test_paused_does_not_paste():
@@ -121,7 +121,7 @@ def test_paused_does_not_paste():
     r = p.process_file(AUDIO, target="pc", route="lan")
     assert r.pasted is False
     assert r.warning == PAUSED_WARNING == "Hub is paused — not pasted on the PC."
-    assert r.text == "hello better shell"
+    assert r.text == "hello Better Shell"
     assert p.injector.pasted == []
 
 
@@ -223,7 +223,7 @@ def test_cleanup_disabled_by_argument():
 def test_cleanup_none_cleaner():
     r = make(cleaner=None).process_file(AUDIO, target="pc", route="lan")
     assert r.cleanup.status == "disabled"
-    assert r.text == r.raw_text
+    assert r.text == "hello Better Shell"  # the word fixes still run without a cleaner
 
 
 def test_cleanup_fallback_status_passthrough():
@@ -240,7 +240,7 @@ def test_cleaner_exception_falls_back_to_raw():
 
     r = make(cleaner=Boom()).process_file(AUDIO, target="pc", route="lan")
     assert r.cleanup.status == "fallback"
-    assert r.text == "hello better shell"
+    assert r.text == "hello Better Shell"
     assert r.pasted is True
 
 
@@ -405,3 +405,21 @@ def test_cleanup_result_type_preserved():
 
     r = make(cleaner=Reasoned()).process_file(AUDIO, target="phone", route="lan")
     assert r.cleanup.reason == "guard: too different"
+
+
+def test_words_and_replacements_fix_the_final_text():
+    """Whisper's spelling of a custom word, and replacements, are fixed on every dictation."""
+
+    class Vocab(FakeVocabStore):
+        def get(self):
+            from types import SimpleNamespace
+
+            return SimpleNamespace(
+                terms=self.terms, version=1, replacements=(("omw", "on my way"),)
+            )
+
+    text = "Tell Sophia omw. Then slash consolidate."
+    p = make(text=text, vocab=Vocab(("Sofia", "/consolidate")))
+    r = p.process_file(AUDIO, target="phone", route="lan")
+    assert r.raw_text == "Tell Sophia omw. Then slash consolidate."
+    assert r.text == "Tell Sofia on my way. Then /consolidate."

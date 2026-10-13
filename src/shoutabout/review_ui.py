@@ -1,14 +1,16 @@
-"""The Teach words page of the ShoutAbout window (Tk): teach a word, review suggestions.
+"""The Teach words page of the ShoutAbout window (Tk): your words and replacements.
 
-* a box to add a word (Enter adds it, at the top of vocab.txt);
-* suggestions waiting for a yes or no (Add selected / Dismiss selected), and **Suggest from
-  my project folders**, the only thing that ever looks at the project folders: once, when
-  pressed (:func:`suggest_from_projects`);
-* your words in priority order (Remove, Open vocab.txt).
+* a box to add a word (Enter adds it, at the top of vocab.txt), and an optional "When I
+  say" box that makes it a replacement instead ("omw" -> "on my way", "slash
+  consolidate" -> "/consolidate");
+* your words and replacements in priority order (Remove, Open vocab.txt).
+
+A word that came out wrong is usually fixed from Recent instead (**Fix a word** on the
+dictation, :mod:`shoutabout.recent_ui`).
 
 :class:`TeachPage` draws into a frame of :class:`shoutabout.app_window.AppWindow`, on the
-UI thread; slow work (file locks, the folder scan) runs on short worker threads that hand
-results back through a queue. ``tkinter`` is imported lazily, so importing this module
+UI thread; slow work (the vocab.txt lock) runs on short worker threads that hand results
+back through a queue. ``tkinter`` is imported lazily, so importing this module
 works headless.
 """
 
@@ -21,87 +23,53 @@ import queue
 import subprocess
 import sys
 import threading
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from shoutabout import ui_kit as kit
 from shoutabout.config import Paths
-from shoutabout.learn import SOURCES, Suggestion
+from shoutabout.vocab import ARROW, split_replacement
 
 log = logging.getLogger(__name__)
 
 POLL_MS = 120
-SCAN_LABEL = "Suggest from my project folders"
-SOURCE_TITLES = {"history": "From your dictations", "projects": "From your projects"}
 
 
 # ------------------------------------------------------------------- pure helpers
 
 
-def group_suggestions(suggestions: Iterable[Suggestion]) -> list[tuple[str, list[Suggestion]]]:
-    """``[(section title, suggestions)]`` in source order, empty sections left out."""
-    groups: dict[str, list[Suggestion]] = {}
-    for s in suggestions:
-        groups.setdefault(s.source, []).append(s)
-    order = [*SOURCES, *sorted(set(groups) - set(SOURCES))]
-    return [
-        (SOURCE_TITLES.get(src, src.capitalize()), groups[src]) for src in order if src in groups
-    ]
-
-
 def add_message(status: str, term: str, reason: str | None = None) -> str:
-    """Status line after teaching one word."""
+    """Status line after teaching one word or replacement."""
+    pair = split_replacement(term) if status != "invalid" else None
+    if pair:
+        say, write = pair
+        if status == "added":
+            return f'Added. Saying "{say}" now writes "{write}".'
+        return f'"{say}" already has a replacement: {display_entry(term)}.'
     if status == "added":
-        return f'Added "{term}" - it\'s now first in line for Whisper.'
+        return f'Added "{term}". ShoutAbout will spell it that way.'
     if status == "exists":
-        return f'"{term}" is already in your vocab.'
+        return f'"{term}" is already in your words.'
     return f"Can't add that: {reason or 'invalid term'}."
 
 
-def accept_message(results: Sequence[Any]) -> str:
-    added = sum(r.status == "added" for r in results)
-    exists = sum(r.status == "exists" for r in results)
-    bad = [r for r in results if r.status == "invalid"]
-    parts = []
-    if added:
-        parts.append(f"Added {added} word{'s' if added != 1 else ''}")
-    if exists:
-        parts.append(f"{exists} already in your vocab")
-    if bad:
-        parts.append(f"{len(bad)} not valid ({bad[0].reason})")
-    return (", ".join(parts) or "Nothing to add") + "."
+def display_entry(entry: str) -> str:
+    """How a vocab.txt line shows in the list: "omw → on my way" for a replacement."""
+    pair = split_replacement(entry)
+    return f"{pair[0]} \u2192 {pair[1]}" if pair else entry
 
 
-def scan_message(new: int) -> str:
-    if not new:
-        return "Nothing new in your project folders."
-    return f"Found {new} new word{'s' if new != 1 else ''}."
+def compose_entry(word: str, say: str) -> str:
+    """What the two boxes add: the word, or "say -> word" when "When I say" is filled in."""
+    return f"{say.strip()} {ARROW} {word.strip()}" if say.strip() else word
 
 
-def suggest_from_projects(paths: Paths) -> int:
-    """**Suggest from my project folders**: one look through ``[learn] project_roots``, or
-    the usual project folders (on a Mac only ones macOS doesn't guard). Returns how many
-    new suggestions it found."""
-    from shoutabout.learn import refresh_suggestions
+def read_words(paths: Paths) -> list[str]:
+    """Vocab words and replacements in priority order."""
+    from shoutabout.vocab import read_entries
 
-    roots = None
-    try:
-        from shoutabout.config import load_config
-
-        configured = load_config(paths).learn.project_roots
-        roots = [Path(r).expanduser() for r in configured] or None
-    except Exception:
-        log.warning("couldn't read the settings; looking in the usual project folders")
-    return refresh_suggestions(paths, include_projects=True, roots=roots)
-
-
-def read_words(paths: Paths) -> tuple[list[Suggestion], list[str]]:
-    """(pending suggestions, vocab terms in priority order)."""
-    from shoutabout.learn import pending_suggestions
-    from shoutabout.vocab import read_terms
-
-    return pending_suggestions(paths), read_terms(paths.vocab_file)
+    return read_entries(paths.vocab_file)
 
 
 def open_file(path: Path) -> None:
@@ -132,8 +100,6 @@ class TeachPage:
         self._pending: dict[int, Callable[[Any, BaseException | None], None]] = {}
         self._job = 0
         self._jobs: dict[str, Any] = {}  # pending after() jobs
-        self.scanning = False
-        self.suggestion_vars: list[tuple[Any, Suggestion]] = []
         self.vocab_terms: list[str] = []
         self.build()
         if load_in_background:
@@ -209,75 +175,63 @@ class TeachPage:
         outer = tk.Frame(self.win, bg=kit.YELLOW)
         outer.pack(fill="both", expand=True, padx=round(28 * s), pady=(round(18 * s), 0))
 
+        def entry_box(parent: Any, font: Any) -> Any:
+            box = tk.Entry(
+                parent,
+                font=font,
+                bg=kit.WHITE,
+                fg=kit.BLACK,
+                insertbackground=kit.BLACK,
+                relief="flat",
+                highlightthickness=2,
+                highlightbackground=kit.BLACK,
+                highlightcolor=kit.RED,
+            )
+            box.bind("<Return>", lambda _e: self.add_word())
+            box.bind("<KP_Enter>", lambda _e: self.add_word())
+            return box
+
+        def box_label(parent: Any, text: str) -> None:
+            label = tk.Label(parent, text=text, font=f.small_bold, bg=kit.YELLOW, fg=kit.BLACK)
+            label.configure(width=11, anchor="w")
+            label.pack(side="left")
+
         row = tk.Frame(outer, bg=kit.YELLOW)
         row.pack(fill="x")
-        self.entry = tk.Entry(
-            row,
-            font=f.entry,
-            bg=kit.WHITE,
-            fg=kit.BLACK,
-            insertbackground=kit.BLACK,
-            relief="flat",
-            highlightthickness=2,
-            highlightbackground=kit.BLACK,
-            highlightcolor=kit.RED,
-        )
+        box_label(row, "WORD")
+        self.entry = entry_box(row, f.entry)
         self.entry.pack(side="left", fill="x", expand=True, ipady=round(4 * s))
-        self.entry.bind("<Return>", lambda _e: self.add_word())
-        self.entry.bind("<KP_Enter>", lambda _e: self.add_word())
-        kit.button(row, "Add word", self.add_word, f).pack(side="left", padx=(round(10 * s), 0))
+        kit.button(row, "Add", self.add_word, f).pack(side="left", padx=(round(10 * s), 0))
+
+        # Optional: what you say, when it should turn into the word above.
+        say_row = tk.Frame(outer, bg=kit.YELLOW)
+        say_row.pack(fill="x", pady=(round(6 * s), 0))
+        box_label(say_row, "WHEN I SAY")
+        self.say_entry = entry_box(say_row, f.body)
+        self.say_entry.configure(width=22)
+        self.say_entry.pack(side="left", ipady=round(2 * s))
+        tk.Label(
+            say_row,
+            text="optional: write the word instead, like \u201comw\u201d \u2192 on my way",
+            font=f.small,
+            bg=kit.YELLOW,
+            fg=kit.MUTED,
+        ).pack(side="left", padx=(round(8 * s), 0))
 
         self.status = tk.Label(outer, text="", font=f.small_bold, bg=kit.YELLOW, fg=kit.BLACK)
         self.status.configure(anchor="w")
         self.status.pack(fill="x", pady=(round(6 * s), round(10 * s)))
 
-        body = tk.Frame(outer, bg=kit.YELLOW)
-        body.pack(fill="both", expand=True, pady=(0, round(18 * s)))
-        body.columnconfigure(0, weight=3, uniform="cols")
-        body.columnconfigure(1, weight=2, uniform="cols")
-        body.rowconfigure(1, weight=1)
-        gap = round(14 * s)
-
-        # Suggestions (left)
-        head = tk.Frame(body, bg=kit.YELLOW)
-        head.grid(row=0, column=0, sticky="ew", padx=(0, gap), pady=(0, round(4 * s)))
-        self.sugg_title = tk.Label(
-            head, text="SUGGESTIONS", font=f.small_bold, bg=kit.YELLOW, fg=kit.BLACK
-        )
-        self.sugg_title.pack(side="left", anchor="s")
-        self.scan_button = kit.button(head, SCAN_LABEL, self.scan_projects, f, "light")
-        self.scan_button.configure(font=f.small_bold, padx=round(10 * s), pady=round(3 * s))
-        self.scan_button.pack(side="right")
-        frame = tk.Frame(body, bg=kit.PAPER, highlightthickness=2, highlightbackground=kit.BLACK)
-        frame.grid(row=1, column=0, sticky="nsew", padx=(0, gap))
-        self.canvas = tk.Canvas(frame, bg=kit.PAPER, highlightthickness=0, bd=0)
-        scroll = tk.Scrollbar(frame, orient="vertical", command=self.canvas.yview)
-        self.canvas.configure(yscrollcommand=scroll.set)
-        scroll.pack(side="right", fill="y")
-        self.canvas.pack(side="left", fill="both", expand=True)
-        self.sugg_inner = tk.Frame(self.canvas, bg=kit.PAPER)
-        window = self.canvas.create_window((0, 0), window=self.sugg_inner, anchor="nw")
-        self.sugg_inner.bind(
-            "<Configure>",
-            lambda _e: self.canvas.configure(scrollregion=self.canvas.bbox("all")),
-        )
-        self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfigure(window, width=e.width))
-
-        buttons = tk.Frame(body, bg=kit.YELLOW)
-        buttons.grid(row=2, column=0, sticky="ew", pady=(round(10 * s), 0), padx=(0, gap))
-        kit.button(buttons, "Add selected", self.accept_selected, f).pack(side="left")
-        kit.button(buttons, "Dismiss", self.dismiss_selected, f, "light").pack(
-            side="left", padx=(round(8 * s), 0)
-        )
-
-        # Your words (right)
         self.vocab_title = tk.Label(
-            body, text="YOUR WORDS", font=f.small_bold, bg=kit.YELLOW, fg=kit.BLACK, anchor="w"
+            outer, text="YOUR WORDS", font=f.small_bold, bg=kit.YELLOW, fg=kit.BLACK, anchor="w"
         )
-        # sticky "s": level with SUGGESTIONS (its row is as tall as the scan button)
-        self.vocab_title.grid(row=0, column=1, sticky="sew", pady=(0, round(4 * s)))
-        vframe = tk.Frame(body, bg=kit.PAPER, highlightthickness=2, highlightbackground=kit.BLACK)
-        vframe.grid(row=1, column=1, sticky="nsew")
+        self.vocab_title.pack(fill="x", pady=(0, round(4 * s)))
+        vbuttons = tk.Frame(outer, bg=kit.YELLOW)
+        vbuttons.pack(side="bottom", fill="x", pady=(round(10 * s), round(18 * s)))
+        kit.button(vbuttons, "Remove", self.remove_selected, f, "light").pack(side="left")
+        kit.link(vbuttons, "Open vocab.txt", self.open_vocab_file, f).pack(side="right")
+        vframe = tk.Frame(outer, bg=kit.PAPER, highlightthickness=2, highlightbackground=kit.BLACK)
+        vframe.pack(fill="both", expand=True)
         vscroll = tk.Scrollbar(vframe, orient="vertical")
         self.vocab_list = tk.Listbox(
             vframe,
@@ -296,30 +250,14 @@ class TeachPage:
         vscroll.pack(side="right", fill="y")
         self.vocab_list.pack(side="left", fill="both", expand=True, padx=4, pady=4)
         self.vocab_list.bind("<Delete>", lambda _e: self.remove_selected())
-        vbuttons = tk.Frame(body, bg=kit.YELLOW)
-        vbuttons.grid(row=2, column=1, sticky="ew", pady=(round(10 * s), 0))
-        kit.button(vbuttons, "Remove", self.remove_selected, f, "light").pack(side="left")
-        kit.link(vbuttons, "Open vocab.txt", self.open_vocab_file, f).pack(side="right")
 
-        self.set_status("Type a word, then press Enter.")
-
-    def on_wheel(self, event: Any) -> None:
-        """Scroll the suggestions while the pointer is over them."""
-        if self.closed:
-            return
-        widget = self.win.winfo_containing(event.x_root, event.y_root)
-        while widget is not None:
-            if widget is self.canvas:
-                step = int(-event.delta / 120) or (-1 if event.delta > 0 else 1)
-                self.canvas.yview_scroll(step, "units")
-                return
-            widget = getattr(widget, "master", None)
+        self.set_status("Type a word the way it should be spelled, then press Enter.")
 
     # -------------------------------------------------------------- data
 
     def reload(self) -> None:
-        """Re-read pending suggestions and vocab (off the UI thread; the worker gets only
-        the paths, never this page)."""
+        """Re-read vocab.txt (off the UI thread; the worker gets only the paths, never this
+        page)."""
         paths = self.paths
         self.run_async(lambda: read_words(paths), self._show_data)
 
@@ -327,68 +265,27 @@ class TeachPage:
         if self.closed:
             return
         if error is not None:
-            self.set_status(f"Couldn't read your vocab: {error}", error=True)
+            self.set_status(f"Couldn't read your words: {error}", error=True)
             return
-        suggestions, terms = result
-        self._show_suggestions(suggestions)
-        self._show_vocab(terms)
-
-    def _show_suggestions(self, suggestions: list[Suggestion]) -> None:
-        import tkinter as tk
-
-        s, f = self.scale, self.fonts
-        for child in self.sugg_inner.winfo_children():
-            child.destroy()
-        self.suggestion_vars = []
-        self.sugg_title.configure(
-            text=f"SUGGESTIONS ({len(suggestions)})" if suggestions else "SUGGESTIONS"
-        )
-        pad = round(10 * s)
-        if not suggestions:
-            tk.Label(
-                self.sugg_inner, text="None right now.", font=f.body, bg=kit.PAPER, fg=kit.MUTED
-            ).pack(anchor="w", padx=pad, pady=pad)
-            return
-        for item in suggestions:
-            var = tk.IntVar(master=self.win, value=0)
-            row = tk.Frame(self.sugg_inner, bg=kit.PAPER)
-            row.pack(fill="x", padx=pad, pady=(round(4 * s), 0))
-            tk.Checkbutton(
-                row,
-                text=item.term,
-                variable=var,
-                font=f.body_bold,
-                bg=kit.PAPER,
-                fg=kit.BLACK,
-                activebackground=kit.PAPER,
-                selectcolor=kit.WHITE,
-                anchor="w",
-                cursor="hand2",
-            ).pack(side="left")
-            tk.Label(
-                row, text=item.detail, font=f.small, bg=kit.PAPER, fg=kit.MUTED, anchor="w"
-            ).pack(side="left", padx=(round(6 * s), 0))
-            self.suggestion_vars.append((var, item))
-        tk.Frame(self.sugg_inner, bg=kit.PAPER, height=pad).pack()
-        self.canvas.yview_moveto(0)
+        self._show_vocab(result)
 
     def _show_vocab(self, terms: list[str]) -> None:
         self.vocab_terms = list(terms)
         self.vocab_title.configure(text=f"YOUR WORDS ({len(terms)})" if terms else "YOUR WORDS")
         self.vocab_list.delete(0, "end")
         for i, term in enumerate(terms, 1):
-            self.vocab_list.insert("end", f"{i:>3}. {term}")
-
-    def _selected_suggestions(self) -> list[str]:
-        return [s.term for var, s in self.suggestion_vars if var.get()]
+            self.vocab_list.insert("end", f"{i:>3}. {display_entry(term)}")
 
     # -------------------------------------------------------------- actions
 
     def add_word(self) -> None:
-        from shoutabout.learn import accept
-        from shoutabout.vocab import VocabTermError, normalize_term
+        from shoutabout.vocab import VocabTermError, add_terms, normalize_term
 
-        raw = self.entry.get()
+        word, say = self.entry.get(), self.say_entry.get()
+        if say.strip() and not word.strip():
+            self.set_status("Type what it should write in the top box.", error=True)
+            return
+        raw = compose_entry(word, say)
         try:
             term = normalize_term(raw)
         except VocabTermError as exc:
@@ -409,68 +306,10 @@ class TeachPage:
             )
             if result.status != "invalid":
                 self.entry.delete(0, "end")
+                self.say_entry.delete(0, "end")
             self.reload()
 
-        self.run_async(lambda: accept(paths, [term]), done)
-
-    def accept_selected(self) -> None:
-        from shoutabout.learn import accept
-
-        terms = self._selected_suggestions()
-        if not terms:
-            self.set_status("Tick the words to add first.")
-            return
-        paths = self.paths
-
-        def done(results: Any, error: BaseException | None) -> None:
-            if error is not None:
-                self.set_status(f"Couldn't update vocab.txt: {error}", error=True)
-            else:
-                self.set_status(accept_message(results))
-            self.reload()
-
-        self.run_async(lambda: accept(paths, terms), done)
-
-    def dismiss_selected(self) -> None:
-        from shoutabout.learn import dismiss
-
-        terms = self._selected_suggestions()
-        if not terms:
-            self.set_status("Tick the words to dismiss first.")
-            return
-        paths = self.paths
-
-        def done(_result: Any, error: BaseException | None) -> None:
-            if error is not None:
-                self.set_status(f"Couldn't save: {error}", error=True)
-            else:
-                n = len(terms)
-                self.set_status(f"Dismissed {n} word{'s' if n != 1 else ''}; they won't come back.")
-            self.reload()
-
-        self.run_async(lambda: dismiss(paths, terms), done)
-
-    def scan_projects(self) -> None:
-        """Look through the project folders, once, now."""
-        if self.scanning:
-            return
-        paths = self.paths
-        self.scanning = True
-        self.scan_button.configure(state="disabled")
-
-        def done(new: Any, error: BaseException | None) -> None:
-            self.scanning = False
-            if self.closed:
-                return
-            self.scan_button.configure(state="normal")
-            if error is not None:
-                self.set_status(f"Couldn't look through your folders: {error}", error=True)
-            else:
-                self.set_status(scan_message(int(new or 0)))
-            self.reload()
-
-        self.set_status("Looking through your project folders…")
-        self.run_async(lambda: suggest_from_projects(paths), done)
+        self.run_async(lambda: add_terms(paths.vocab_file, [term]), done)
 
     def remove_selected(self) -> None:
         from shoutabout.vocab import remove_term
@@ -485,7 +324,7 @@ class TeachPage:
             if error is not None:
                 self.set_status(f"Couldn't update vocab.txt: {error}", error=True)
             elif len(picked) == 1:
-                self.set_status(f'Removed "{picked[0]}".')
+                self.set_status(f'Removed "{display_entry(picked[0])}".')
             else:
                 self.set_status(f"Removed {len(picked)} words.")
             self.reload()

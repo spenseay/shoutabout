@@ -1,8 +1,12 @@
-"""The Recent page of the ShoutAbout window (Tk): the last few dictations, with Copy.
+"""The Recent page of the ShoutAbout window (Tk): the last few dictations, with Copy and
+Fix a word.
 
 Draws :class:`~shoutabout.recent_model.RecentModel` in the brand look (:mod:`ui_kit`):
 paper-coloured cards on Shout Yellow, newest first; recordings that couldn't be written out
 sit above them with **Try again**. The text in a card can be selected (to copy a part).
+**Fix a word** opens a row under the text, Wrong (the selected text, if any) and Right;
+Save teaches it (:meth:`~shoutabout.recent_model.RecentModel.fix_word`) and corrects the
+card.
 
 It keeps itself current: every :data:`WATCH_MS` it compares the hub's Recent stamp (cheap)
 and reloads when it changed, so a dictation shows up at the top within a second, even while
@@ -48,6 +52,7 @@ class RecentPage:
         self._seen: Any = model.stamp()
         self._cards: dict[str, Any] = {}  # entry key -> card frame (kept across reloads)
         self._texts: dict[str, Any] = {}  # entry key -> its Text widget
+        self._fix_rows: dict[str, tuple[Any, Any, Any]] = {}  # key -> (row, wrong, right)
         self._failed_key: Any = None
         self._jobs: dict[str, Any] = {}  # pending after() jobs
         s = self.scale
@@ -226,6 +231,7 @@ class RecentPage:
         keys = {e.key for e in entries}
         for key in [k for k in self._cards if k not in keys]:
             self._texts.pop(key, None)
+            self._fix_rows.pop(key, None)
             self._cards.pop(key).destroy()
         added: list[Any] = []
         older: Any = None  # the card just below, while going from the oldest up
@@ -256,6 +262,9 @@ class RecentPage:
         meta = " · ".join(x for x in (entry.when, entry.source, entry.note) if x)
         tk.Label(top, text=meta, font=f.small_bold, bg=kit.WHITE, fg=kit.MUTED).pack(side="left")
         kit.button(top, "Copy", lambda k=entry.key: self._copy(k), f, "light").pack(side="right")
+        kit.button(top, "Fix a word", lambda k=entry.key: self._open_fix(k), f, "light").pack(
+            side="right", padx=(0, round(8 * s))
+        )
         text = tk.Text(
             card,
             font=f.body,
@@ -343,6 +352,91 @@ class RecentPage:
     def _copy(self, key: str) -> None:
         model = self.model
         self.run_async(lambda: model.copy(key), lambda _r, _e: self._set_status())
+
+    def _open_fix(self, key: str) -> None:
+        """The Wrong / Right row under a card's text; Wrong starts as the selected text."""
+        import tkinter as tk
+
+        if key in self._fix_rows:
+            self._fix_rows[key][2].focus_set()
+            return
+        card, text = self._cards.get(key), self._texts.get(key)
+        if card is None or text is None:
+            return
+        selected = ""
+        with contextlib.suppress(Exception):  # nothing selected in this card
+            selected = " ".join(text.get("sel.first", "sel.last").split())
+        s, f = self.scale, self.fonts
+        row = tk.Frame(card, bg=kit.WHITE)
+        row.pack(fill="x", padx=round(12 * s), pady=(0, round(10 * s)))
+
+        def box(label: str, first: bool) -> Any:
+            tk.Label(row, text=label, font=f.small_bold, bg=kit.WHITE, fg=kit.BLACK).pack(
+                side="left", padx=(0 if first else round(12 * s), round(6 * s))
+            )
+            entry = tk.Entry(
+                row,
+                font=f.body,
+                width=20,
+                bg=kit.WHITE,
+                fg=kit.BLACK,
+                insertbackground=kit.BLACK,
+                relief="flat",
+                highlightthickness=2,
+                highlightbackground=kit.BLACK,
+                highlightcolor=kit.RED,
+            )
+            entry.pack(side="left", ipady=round(2 * s))
+            entry.bind("<Return>", lambda _e: self._save_fix(key))
+            entry.bind("<KP_Enter>", lambda _e: self._save_fix(key))
+            entry.bind("<Escape>", lambda _e: self._close_fix(key))
+            return entry
+
+        wrong = box("WRONG", True)
+        wrong.insert(0, selected)
+        right = box("RIGHT", False)
+        kit.button(row, "Save", lambda: self._save_fix(key), f).pack(
+            side="left", padx=(round(12 * s), 0)
+        )
+        kit.link(row, "Cancel", lambda: self._close_fix(key), f, kit.WHITE).pack(
+            side="left", padx=(round(10 * s), 0)
+        )
+        self._fix_rows[key] = (row, wrong, right)
+        (right if selected else wrong).focus_set()
+        self.model.message, self.model.error = (
+            "Type how it should be. ShoutAbout will remember it.",
+            False,
+        )
+        self._set_status()
+        self._fit_scroll()
+
+    def _close_fix(self, key: str) -> None:
+        row = self._fix_rows.pop(key, None)
+        if row is not None:
+            row[0].destroy()
+            self._fit_scroll()
+
+    def _save_fix(self, key: str) -> None:
+        if key not in self._fix_rows:
+            return
+        _row, wrong_box, right_box = self._fix_rows[key]
+        wrong, right = wrong_box.get(), right_box.get()
+        model = self.model
+
+        def done(fixed: Any, _error: BaseException | None) -> None:
+            if self.closed:
+                return
+            text = self._texts.get(key)
+            if fixed is not None and text is not None:
+                text.configure(state="normal")
+                text.delete("1.0", "end")
+                text.insert("1.0", fixed)
+                text.configure(state="disabled")
+                self._fit_text(text)
+                self._close_fix(key)
+            self._set_status()
+
+        self.run_async(lambda: model.fix_word(key, wrong, right), done)
 
     def _retry(self, item_id: str) -> None:
         model = self.model

@@ -178,10 +178,10 @@ source-IP check (every path) -> rate limit -> auth-failure lockout -> bearer tok
   - Enter is never pressed, and the output is always a single paragraph.
   - Admin windows are detected. The text is left on the clipboard and a toast tells you.
 - **Teach it your words.**
-  - Add a word from the iPhone (**Teach ShoutAbout** shortcut), the tray (**Teach words…**)
-    or `vocab add`.
-  - **Suggest from my project folders** (in Teach words) suggests names from your projects,
-    only when you press it. This is all local, and nothing is added without your OK
+  - A word came out wrong? Press **Fix a word** on that dictation in Recent, type the right
+    spelling and save. It comes out right from then on.
+  - Or add a word from the iPhone (**Teach ShoutAbout** shortcut), the tray (**Teach
+    words…**) or `vocab add`. A word can also be a replacement: say "omw", get "on my way"
     ([docs/vocab.md](docs/vocab.md)).
 - **Tray icon.** The brand mouth shows the status:
   - grey and humming while starting;
@@ -197,7 +197,8 @@ source-IP check (every path) -> rate limit -> auth-failure lockout -> bearer tok
   the tray items open it on that page. Opening ShoutAbout again while it runs shows it at
   Home: how to talk, and one line when something needs attention.
 - **Recent, no history.** The last 3 dictations meant for this PC, newest first, with Copy, so
-  text that landed in the wrong spot isn't lost. If the speech engine fails after a recording,
+  text that landed in the wrong spot isn't lost, and **Fix a word** to teach a word that came
+  out wrong. If the speech engine fails after a recording,
   the recording waits there too, with **Try again**. All in memory: nothing is written to disk,
   and it's gone when ShoutAbout quits ([docs/history.md](docs/history.md)).
 - **Pairing without typing.** The PC announces itself on the Wi-Fi (DNS-SD
@@ -269,8 +270,8 @@ Next:
 - **Vocabulary:** add names and jargon to `vocab.txt` (tray > **Teach words…** >
   **Open vocab.txt**), one term per line, most important first. Saving is enough; it reloads
   without a restart.
-- **Recent:** tray > **Recent…** has the last 3 dictations, with Copy
-  ([docs/history.md](docs/history.md)).
+- **Recent:** tray > **Recent…** has the last 3 dictations, with Copy and **Fix a word**
+  ([docs/history.md](docs/history.md), [docs/vocab.md](docs/vocab.md)).
 
 ## Repository layout
 
@@ -357,7 +358,7 @@ console script inside the venv is equivalent.
 | `settings` | Opens the ShoutAbout window on Settings. |
 | `devices list [--json] \| remove NAME_OR_ID` | Lists paired phones (name, id, paired, last used; never tokens) or unpairs one, which revokes its token at once. |
 | `doctor [--skip-model] [--skip-ollama] [--skip-tunnel] [--url URL] [--cf-client-id ID --cf-client-secret S]` | Checks everything and prints `[PASS]`, `[WARN]`, `[FAIL]` or `[SKIP]` with a fix hint for each check. It exits 1 on any FAIL. The service token can also come from `SHOUTABOUT_CF_CLIENT_ID` and `SHOUTABOUT_CF_CLIENT_SECRET`. |
-| `vocab list\|add\|remove\|dismiss\|suggest [--projects]\|seed [ROOT...]\|review` | Teach, review and edit the vocabulary. `suggest` lists the suggestions waiting (`--projects` looks through your project folders first), `seed` looks through project folders, and `review` opens Teach words in the ShoutAbout window ([docs/vocab.md](docs/vocab.md)). Run it from a normal terminal, not from inside an app that redirects `%APPDATA%`. |
+| `vocab list [--json]\|add\|remove\|review` | Teach, review and edit the vocabulary. `add` puts a word at the top of `vocab.txt`; `vocab add "omw -> on my way"` (with the quotes) adds a replacement. `review` opens Teach words in the ShoutAbout window ([docs/vocab.md](docs/vocab.md)). Run it from a normal terminal, not from inside an app that redirects `%APPDATA%`. |
 | `download-model` | Fetches the Whisper model into the cache (about 1.6 GB the first time). |
 | `encode-m4a SRC DST [--bitrate N]` | Developer helper: encodes any audio file as AAC `.m4a` to mimic an iPhone recording. Needs PyAV, so it works from a source checkout only (the installed app has no FFmpeg). |
 
@@ -475,18 +476,14 @@ Cloudflare Access JWT validation on the tunnel route. It is enabled only when bo
 | `overlay` | `true` | Shows the mouth pill at the top of the screen. |
 | `max_seconds` | `600` | Stops listening after this long (5-600). |
 
-### `[learn]` and `[logging]`
+### `[logging]`
 
 | Key | Default | Meaning |
 |---|---|---|
-| `learn.enabled` | `true` | `false` turns the daily look below off even with `seed_projects = true`. **Suggest from my project folders** and the CLI still work. |
-| `learn.seed_projects` | `false` | Project folders are only looked at when you press **Suggest from my project folders** in Teach words (or run `vocab seed`). `true` also looks by itself, 90 s after start and every 24 h. An upgrade switches `true` off once; setting it again afterwards sticks. |
-| `learn.project_roots` | `[]` | Folders scanned two levels deep. Empty means `~/Documents`, `~/source/repos`, `~/repos`, `~/code` and `~/projects` (those that exist); on a Mac only folders macOS doesn't guard (`~/Developer`, `~/code`, `~/projects`, `~/src`, `~/git`…), never Documents, Desktop or Downloads. |
-| `learn.notify` | `true` | One notification when the daily look finds new words. |
-| `logging.level` | `"INFO"` | `DEBUG`, `INFO`, `WARNING` or `ERROR`. |
+| `level` | `"INFO"` | `DEBUG`, `INFO`, `WARNING` or `ERROR`. |
 
-A `[history]` section from an earlier version still loads (ignored) until the first start of
-this version removes it.
+A `[history]` or `[learn]` section from an earlier version still loads (ignored) until the
+first start of this version removes it.
 
 ### Files in `%APPDATA%\shoutabout\`
 
@@ -495,7 +492,6 @@ this version removes it.
 | `config.toml` | Settings (above). |
 | `vocab.txt` | Vocabulary, one term per line. `#` starts a comment line, and order sets priority. It hot-reloads. |
 | `hub_token.txt` | Hub bearer token: 256 bits, 43 URL-safe characters. `init --rotate-token` replaces it. |
-| `vocab-suggestions.json` | Pending, accepted and dismissed word suggestions ([docs/vocab.md](docs/vocab.md)). |
 | `logs\hub.log` | Hub log, rotating at 5 MB with 5 backups. |
 | `logs\stdout.log` | Stray stdout/stderr under `pythonw` (download progress, library prints). |
 | `install-state.json` | Written by the setup scripts: repo path, port, task and firewall names, public hostname, tunnel mode, what was created. |
@@ -505,7 +501,8 @@ this version removes it.
 | `migrations.json` | Which one-time upgrades have run. |
 
 ShoutAbout writes nothing you dictate here. An earlier version's `history.jsonl`, `audio\` and
-`failed\` are deleted once on upgrade ([docs/history.md](docs/history.md)).
+`failed\` are deleted once on upgrade ([docs/history.md](docs/history.md)), and so is the old
+`vocab-suggestions.json` ([docs/vocab.md](docs/vocab.md)).
 
 ## API (summary)
 

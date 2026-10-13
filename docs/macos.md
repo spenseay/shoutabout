@@ -87,7 +87,7 @@ ShoutAbout.app (main process, "hub")                     window process ("mac-ui
    mouth pill NSPanel (mac/overlay_mac.py)                  words, Recent, Settings), setup,
    native pairing alert (fallback only)                     pairing prompt (the shared Tk
    app delegate: "reopen" -> the window at Home             windows, with mac/tkmac.py's tweaks)
- Recent (memory), server, engine, warmer, learn      <---- JSON lines on stdin/stdout ---->
+ Recent (memory), server, engine, warmer             <---- JSON lines on stdin/stdout ---->
  "hotkey-hook": CGEventTap + CFRunLoop (mac/eventtap.py)     open a page, pair, Recent changed;
  "hotkey": HotkeyMachine worker (hotkey.py, shared)          approve/deny, settings saved,
  "permissions": turns the hotkey on once allowed             downloads, Recent, Try again,

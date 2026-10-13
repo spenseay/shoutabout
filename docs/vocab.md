@@ -1,9 +1,10 @@
 # Vocabulary: teaching ShoutAbout your words
 
-Whisper gets everyday English right. It gets names wrong: your projects, your colleagues,
-product names, jargon. `vocab.txt` is the list of words you want spelled your way. This page
-covers how the list is used, the four ways to add to it, word suggestions, and the `/vocab`
-API.
+The speech model gets everyday English right. It gets names wrong: your projects, your colleagues,
+product names, jargon. `vocab.txt` is the list of words you want spelled your way, plus any
+replacements (like your phone's text replacement: say "omw", get "on my way"). This page
+covers how the list is used, the ways to add to it (mainly **Fix a word** on the Recent page),
+and the `/vocab` API.
 
 Run the CLI as `.\.venv\Scripts\python.exe -m shoutabout ...` from the repo folder.
 
@@ -18,27 +19,56 @@ Run the CLI as `.\.venv\Scripts\python.exe -m shoutabout ...` from the repo fold
 - The file **reloads automatically**. The hub re-reads it on the next dictation after it
   changes, so you never need to restart.
 
-Each dictation passes the terms to Whisper in two ways, as `hotwords` and as an
+Each dictation passes the terms to the speech model in two ways, as `hotwords` and as an
 `initial_prompt`, in the form `In this dictation I mention A, B, C.` The LLM cleanup also gets
 the list, so it can fix near-miss spellings such as "better shel" to "Better Shell".
 
-**The budget.** Whisper's prompt is small. The vocab text gets `[stt] max_prompt_tokens`
+That's only a hint, though: a name the speech model already knows another spelling of still comes out
+its way ("Sofia" as "Sophia"). So every dictation also gets a spelling pass at the end, with
+or without the cleanup (`shoutabout/vocabfix.py`, the same rules as the iPhone app):
+- A word said with different capitals or spacing gets your spelling: "better shell" becomes
+  "Better Shell", "shout about" becomes "ShoutAbout".
+- A word that **sounds like** yours and is spelled almost like it becomes yours: "Sophia"
+  becomes "Sofia". To avoid false hits, an everyday word ("sofa", "cloud") only changes when
+  the speech model capitalised it mid-sentence, as it does for a name.
+- A word with a symbol also matches when you say the symbol: "/consolidate" catches "slash
+  consolidate", "C#" catches "C sharp", "Node.js" catches "node dot js".
+
+## Replacements
+
+A line with an arrow is a replacement: what you say on the left, what gets written on the
+right. Matching ignores case and works on whole words only.
+
+```text
+omw -> on my way
+slash consolidate -> /consolidate
+Sophia -> Sofia
+```
+
+Use one for a shortcut (`omw`), for anything that doesn't sound like what's written, or to
+force a fix the sound-alike rules don't make. Replacements aren't sent to the speech model and don't
+count toward the budget. Each spoken phrase can have one replacement; the first line wins.
+`=>` and `→` work as the arrow too. To add one, fill in **When I say** on the Teach words
+page, or run `vocab add "omw -> on my way"` (with the quotes).
+
+**The budget.** The speech model's prompt is small. The vocab text gets `[stt] max_prompt_tokens`
 (default 200) tokens, which is roughly 40 to 60 short terms. Terms past the budget are dropped
 from the bottom up, and the hub log warns once per reload:
 `vocab: 3 of 64 term(s) don't fit ...`. For that reason, a word you teach goes **to the top** of
 the list, just below the comment header. To give an older word priority again, move it up in
 the file.
 
-## Four ways to teach a word
+## Ways to teach a word
 
 | Where | How | Best for |
 |---|---|---|
-| iPhone | The **Teach ShoutAbout** shortcut: say or type the word | A name you just noticed was wrong |
-| PC tray | Right-click the tray icon, then **Teach words…** | Reviewing suggestions and the whole list |
+| Recent | **Fix a word** on the dictation, then type the right spelling ([below](#fix-a-word-recent)) | A word that just came out wrong on this computer. This is the main way. |
+| iPhone | The **Teach ShoutAbout** shortcut: say or type the word | A name you just noticed was wrong on the phone |
+| PC tray | Right-click the tray icon, then **Teach words…** | Adding words ahead of time, replacements, and the whole list |
 | CLI | `vocab add Chameleon CV` | Scripts and quick fixes |
 | Editor | Teach words > **Open vocab.txt**, then edit it | Reordering and bulk edits |
 
-All four write the same file. The phone, tray and CLI clean up what you give them:
+All of them write the same file. The phone, tray and CLI clean up what you give them:
 - They trim whitespace, surrounding quotes and brackets, and trailing punctuation, so
   `“Chameleon CV.”` becomes `Chameleon CV`.
 - They reject a term that is empty, longer than 64 characters or 6 words, has no letter, spans
@@ -60,29 +90,24 @@ shows the `reason` instead. See [the API reference](#api-reference) and
 
 Tray > **Teach words…** opens the ShoutAbout window on its **Teach words** page (or
 `vocab review`).
-- **Top:** a box plus an **Add word** button. Press Enter to add; the word goes to the top.
-- **Suggestions** (left), each with the reason it was suggested. Tick some, then choose:
-  - **Add selected** puts them at the top of the vocab, in the order shown.
-  - **Dismiss** means they are never suggested again.
-  - **Suggest from my project folders** looks through your project folders once, now
-    ([below](#from-your-project-folders)).
-- **Your words** (right): your vocab in priority order. Select one or more words, then
-  **Remove** (or press Delete). **Open vocab.txt** opens the file in your editor.
+- **Top:** a **Word** box plus an **Add** button. Press Enter to add; the word goes to the
+  top. Fill in **When I say** as well to add a replacement instead: Word "on my way", When I
+  say "omw".
+- **Your words**: your words and replacements (`omw → on my way`) in priority order. Select
+  one or more, then **Remove** (or press Delete). **Open vocab.txt** opens the file in your
+  editor.
 
 ### 3. CLI
 
 ```powershell
 .\.venv\Scripts\python.exe -m shoutabout vocab list [--json]      # priority order
 .\.venv\Scripts\python.exe -m shoutabout vocab add Chameleon CV    # one phrase; goes to the top
+.\.venv\Scripts\python.exe -m shoutabout vocab add "omw -> on my way"  # a replacement (keep the quotes)
 .\.venv\Scripts\python.exe -m shoutabout vocab remove Chameleon CV
-.\.venv\Scripts\python.exe -m shoutabout vocab suggest [--json]    # list waiting suggestions
-.\.venv\Scripts\python.exe -m shoutabout vocab suggest --projects  # look through project folders first
-.\.venv\Scripts\python.exe -m shoutabout vocab seed [ROOT ...]     # look through project folders
-.\.venv\Scripts\python.exe -m shoutabout vocab dismiss Some Word   # never suggest it again
 .\.venv\Scripts\python.exe -m shoutabout vocab review              # Teach words in the window
 ```
 
-`add`, `remove` and `dismiss` join their arguments into one phrase, so `vocab add Chameleon CV`
+`add` and `remove` join their arguments into one phrase, so `vocab add Chameleon CV`
 adds "Chameleon CV". `add` exits with code 1 and prints the reason if the term isn't valid.
 
 ### 4. Editing vocab.txt
@@ -93,83 +118,38 @@ atomically, through a temp file and a rename, under a `vocab.txt.lock` lock file
 from the phone never clobbers a half-written file. If a crash ever leaves a `vocab.txt.lock`
 behind, it is ignored after 30 seconds.
 
-## Suggestions
+## Fix a word (Recent)
 
-ShoutAbout can suggest names from your project folders. **Nothing is added until you approve
-it**: tick it and press **Add selected**, or use `vocab add`.
+You usually notice a wrong word right after you dictate it. Fix it there:
+1. Open the **Recent** page (tray > **Recent…**, or the menu bar on a Mac).
+2. Optionally select the wrong word in that dictation's text.
+3. Press **Fix a word** next to **Copy**. A row opens under the text: **Wrong** (filled in
+   with what you selected), **Right**, **Save** and **Cancel**.
+4. Type the right spelling and press **Save** (or Enter). Escape cancels.
 
-### From your project folders
+ShoutAbout then works out what to teach:
+- If the right spelling as a plain word would already fix the wrong one, it adds that
+  **word**. That covers the same word with other capitals or spacing, a sound-alike ("Sophia"
+  becomes "Sofia"), and a symbol said aloud ("slash consolidate" becomes "/consolidate").
+- Otherwise it adds a **replacement**, such as `cloud code -> Claude Code`.
 
-Project folders are only looked at when you ask: **Suggest from my project folders** in Teach
-words, `vocab seed` or `vocab suggest --projects`. ShoutAbout then scans these folders 2 levels
-deep, whichever exist:
-- Windows: `~/Documents`, `~/source/repos`, `~/repos`, `~/code` and `~/projects`.
-- Mac: only folders macOS doesn't guard: `~/Developer`, `~/code`, `~/Code`, `~/repos`,
-  `~/projects`, `~/Projects`, `~/src`, `~/git` and `~/source/repos`. Never `~/Documents`,
-  `~/Desktop` or `~/Downloads`.
-
-You can set your own with `[learn] project_roots`, or with `vocab seed ROOT...`.
-
-A folder is a project if it has `.git`, `pyproject.toml`, `package.json`, `Cargo.toml`,
-`go.mod` or a `*.sln`. Candidates come from:
-- the folder name
-- git remote repo names, read from `.git/config` (git itself never runs)
-- the package name in `package.json`, `pyproject.toml`, `Cargo.toml` or `go.mod`
-- the README's first `# Title`
-
-Names are turned into how you'd say them: `chameleon-cv` becomes "Chameleon CV",
-`better_shell` becomes "Better Shell", and `ios-app` becomes "iOS App". Common acronyms stay in
-capitals (AI, API, CV, UI, UX, GPU, LLM, SDK, CLI, DB, ID…), and mixed-case names stay as they
-are (`ShoutAbout`). Clones and git worktrees of the same repo count as one suggestion, so you
-might see "+10 more folders". Variant folders such as `app-review`, `app-src` or
-`plot-twist-beta` fold into their project. The scan never enters hidden folders, `.venv`,
-`node_modules` or other projects, and it stops after a few thousand folders. Left out: terms
-already in your vocab, anything you accepted or dismissed before, and generic folder names
-(`src`, `docs`, `demo`…).
-
-### When suggestions are refreshed
-
-- **When you ask:** **Suggest from my project folders**, `vocab seed` and
-  `vocab suggest --projects`.
-- **By itself, only with `seed_projects = true`** (set by hand in `config.toml`): the hub looks
-  90 seconds after it starts, then every 24 hours. When it finds **new** suggestions it shows
-  one notification, **Teach words**: "N new words to teach." It doesn't nag about the same
-  words again.
-
-Settings in `config.toml` take effect after a hub restart:
-
-```toml
-[learn]
-enabled = true
-seed_projects = false      # true = also look through your project folders every day by itself
-project_roots = []         # folders to scan; empty = the defaults above
-notify = true              # one notification when the daily look finds new words
-```
-
-**Upgrading:** an existing install's `seed_projects = true` is switched off once
-(`learn-projects-off` in `migrations.py`), and project suggestions still waiting are dropped.
-Accepted and dismissed words stay remembered, so they don't come back (where they came from is
-forgotten). Setting `seed_projects = true` again afterwards sticks.
-
-### Where suggestions are kept
-
-`%APPDATA%\shoutabout\vocab-suggestions.json` holds each suggestion with its `status`:
-`pending`, `accepted` or `dismissed`, plus `source`, `count`, `detail` and `first_seen`.
-
-Accepted and dismissed words are remembered, so they never come back, even if you later remove
-an accepted word from `vocab.txt`. To start over, delete the file. To un-dismiss one word, add
-it with `vocab add`.
+Either way it goes to the top of `vocab.txt`. The dictation's text is corrected right away, so
+**Copy** copies the fixed text, and the status line says, for example,
+`Saved. "Sophia" will come out "Sofia" from now on.` To undo it, remove the word or the
+replacement on the Teach words page.
 
 ## Privacy
 
-- **Everything stays on this computer.** The scan runs locally, and nothing is uploaded.
-- Project folders are looked at only when you ask (or with `seed_projects = true`). The scan is
-  **read-only**: it lists folders and reads small files: `.git/config`, `package.json`,
-  `pyproject.toml`, `Cargo.toml`, `go.mod` and the first 8 KB of a README.
+- **Everything stays on this computer.** Nothing is uploaded, and ShoutAbout never looks
+  through your folders for words.
 - `hub.log` never contains vocabulary terms. `/vocab` logs only counts, such as
-  `vocab add route=lan added=true status=added chars=12 count=31`, and suggestion refreshes log
-  `vocab suggestions refreshed: 3 new, 12 pending`.
+  `vocab add route=lan added=true status=added chars=12 count=31`.
 - `/vocab` only ever reads or edits `vocab.txt`. It never pastes or types anything on the PC.
+
+**Upgrading:** earlier versions could suggest words from your project folders. That is gone.
+The first start of this version deletes `vocab-suggestions.json` and the `[learn]` section of
+`config.toml`, once (`suggestions-gone` in `migrations.py`). Words you already added stay in
+`vocab.txt`.
 
 ## API reference
 
@@ -187,10 +167,13 @@ caller extra attempts on the other.
 ### `GET /vocab`
 
 ```json
-{"terms": ["Chameleon CV", "Better Shell", "Claude Code"], "version": 4, "count": 3}
+{"terms": ["Chameleon CV", "Better Shell", "Claude Code"],
+ "replacements": [{"say": "omw", "write": "on my way"}], "version": 4, "count": 3}
 ```
 
-The terms are in priority order. `version` goes up each time the hub reloads the file.
+The terms are in priority order. `replacements` lists the `say -> write` lines (the iPhone
+applies them to offline dictations too); `count` counts the terms only. `version` goes up each
+time the hub reloads the file.
 
 ### `POST /vocab`
 

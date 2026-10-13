@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// The hub's custom vocabulary (`GET /vocab`), cached on the phone for offline mode, plus
-/// "add a word" (`POST /vocab`). Terms live on the PC in vocab.txt; this is a remote control.
+/// The hub's custom vocabulary (`GET /vocab`): words and replacements, cached on the phone for
+/// offline mode, plus "add a word" (`POST /vocab`; "omw -> on my way" adds a replacement).
+/// Terms live on the PC in vocab.txt; this is a remote control.
 struct VocabView: View {
     @Environment(AppModel.self) private var model
     @State private var newTerm = ""
@@ -33,6 +34,18 @@ struct VocabView: View {
                 }
                 ForEach(model.vocab, id: \.self) { term in
                     Text(term).font(Theme.Typography.body(16))
+                }
+            }
+            if !model.vocabReplacements.isEmpty {
+                Section {
+                    ForEach(model.vocabReplacements, id: \.self) { replacement in
+                        Text("\(replacement.say) \u{2192} \(replacement.write)")
+                            .font(Theme.Typography.body(16))
+                    }
+                } header: {
+                    Text("Replacements (\(model.vocabReplacements.count))")
+                } footer: {
+                    Text("When you say the left side, ShoutAbout writes the right side.")
                 }
             }
         }

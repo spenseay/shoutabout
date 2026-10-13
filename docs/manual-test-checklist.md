@@ -353,12 +353,20 @@ the overlay and the model choice is **not verified**.
   - Not verified on a Mac (the hub-to-window link is unit-tested on Windows).
 - [ ] **Upgrade deletes the old history once.**
   - Steps: on a PC with an earlier version that kept history (`history.jsonl`, `audio`, `failed` in `%APPDATA%\shoutabout`, `[history]` in config.toml), install this version and start it. Then create an empty `history.jsonl` there and restart.
-  - Expected: after the first start `history.jsonl`, `audio` and `failed` are gone, config.toml has no `[history]` (every other line and comment kept), `migrations.json` lists `history-gone`; a `seed_projects = true` now says `false` (`learn-projects-off`). After the restart the new empty file is still there (it runs once).
+  - Expected: after the first start `history.jsonl`, `audio` and `failed` are gone, config.toml has no `[history]` (every other line and comment kept), `migrations.json` lists `history-gone`. After the restart the new empty file is still there (it runs once).
   - Partly verified during build: unit tests on scratch folders; not run on a real upgraded install.
-- [ ] **Suggest from my project folders.**
-  - Steps: tray > Teach words…; press **Suggest from my project folders**. Tick one suggestion and **Add selected**; tick another and **Dismiss**; press the button again. Then type a word in the box and press Enter.
-  - Expected: the status line says "Looking through your project folders…", then "Found N new words." (or "Nothing new in your project folders."); each suggestion shows the folder it came from; the added and the typed word are first under YOUR WORDS and at the top of `vocab.txt`; the dismissed one doesn't come back. Without pressing the button, ShoutAbout never reads the project folders (no "vocab suggestions refreshed" line in `hub.log` after a start). On a Mac it never asks for access to Documents, Desktop or Downloads.
-  - Partly verified during build: a Tk test adds a word, scans a scratch folder and accepts a suggestion; not run against real folders. Mac: not verified.
+- [ ] **Upgrade removes word suggestions once.**
+  - Steps: on a PC with an earlier version that had `vocab-suggestions.json` in `%APPDATA%\shoutabout` and a `[learn]` section in config.toml, install this version and start it. Then create an empty `vocab-suggestions.json` there and restart.
+  - Expected: after the first start `vocab-suggestions.json` (and any `vocab-suggestions.json.lock`) is gone, config.toml has no `[learn]` (every other line and comment kept), `vocab.txt` is unchanged, `migrations.json` lists `suggestions-gone`. After the restart the new empty file is still there (it runs once). Teach words has no SUGGESTIONS panel, and ShoutAbout never reads your project folders.
+  - Partly verified during build: unit tests on scratch folders; not run on a real upgraded install.
+- [ ] **Fix a word.**
+  - Steps: dictate a sentence with a name it gets wrong, for example "Sofia". Open tray > Recent…. In that dictation's card select "Sophia", press **Fix a word**, type "Sofia" in **Right** and press **Save**. Press **Copy** and paste into Notepad. Open Teach words. Dictate the name again. Then do the same with a phrase that doesn't sound like what it should be (for example Wrong "cloud code", Right "Claude Code"). Also press Fix a word and then Escape.
+  - Expected: **Wrong** is filled in with "Sophia"; the status line says `Saved. "Sophia" will come out "Sofia" from now on.`; the card text shows "Sofia" at once, and Copy pastes the fixed text; Teach words lists "Sofia" at the top of YOUR WORDS (and it's at the top of `vocab.txt`); the next dictation with that name comes out "Sofia". The second fix shows up on Teach words as `cloud code → Claude Code`. Escape closes the row without saving. Removing the word or replacement on Teach words undoes it.
+  - Partly verified during build: unit tests and a Tk test under Xvfb on Linux; not run on Windows or a Mac.
+- [ ] **Teach words: add a word or a replacement.**
+  - Steps: tray > Teach words…; type a word in **Word** and press Enter. Then type "on my way" in **Word**, "omw" in **When I say** and press **Add**. Select the first word and press Delete. Dictate "omw".
+  - Expected: each new entry is first under YOUR WORDS and at the top of `vocab.txt`; the replacement shows as `omw → on my way`; Delete removes the selected word; the dictation comes out "on my way".
+  - Partly verified during build: Tk tests; not run on Windows or a Mac.
 - [ ] **Microphone privacy switch.**
   - Steps: Settings > Privacy & security > Microphone: turn off "Let desktop apps access your microphone"; hold Right Ctrl. Turn it back on.
   - Expected: red "Mic blocked" pill and a notification that names the switch.

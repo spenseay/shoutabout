@@ -41,7 +41,7 @@ def test_process_audio_skips_decoding_and_marks_the_route():
     assert (r.route, r.target, r.pasted) == ("local", "pc", True)
     assert r.audio_seconds == pytest.approx(2.0)
     assert r.timings.decode == 0
-    assert p.injector.pasted == ["hello better shell"]
+    assert p.injector.pasted == ["hello Better Shell"]
     assert p.state.status == HubStatus.IDLE
 
 

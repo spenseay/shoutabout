@@ -34,7 +34,8 @@ hub (pythonw.exe -m shoutabout run, logon task, user session, not elevated)
 | `wavdecode.py`, `resample.py` | Uncompressed WAV (PCM 8/16/24/32-bit, float, extensible, RF64) read with numpy; the mono downmix and the polyphase Kaiser-windowed-sinc resampler. |
 | `mfdecode.py` | Windows Media Foundation through plain ctypes COM calls: byte stream -> source resolver -> source reader -> float PCM. COM per call, `MFStartup` once per process; plain-words errors for Windows "N" editions. |
 | `pyavdecode.py`, `avshim.py` | The optional PyAV/FFmpeg decoder (source checkouts only, never in the installed app); the placeholder `av` module that lets faster-whisper import without PyAV. |
-| `vocab.py` | `vocab.txt` parsing, mtime-based hot reload, building the prompt/hotword hints within a token budget. |
+| `vocab.py` | `vocab.txt` parsing (words and `wrong -> right` replacements), mtime-based hot reload, building the prompt/hotword hints within a token budget. |
+| `vocabfix.py` | The deterministic spelling pass on every transcript: replacements, custom-word spellings (capitals, spacing, symbols said aloud) and sound-alikes. A port of the iPhone app's VocabFixer ([vocab.md](vocab.md)). |
 | `engine/base.py`, `engine/__init__.py` | The `SpeechEngine` protocol and `create_engine` factory. |
 | `engine/faster_whisper_engine.py` | `WhisperModel` on CUDA (CPU fallback optional), warm-up, transcription with hints. |
 | `engine/cuda_dlls.py` | Puts the pip-installed `nvidia\*\bin` folders on the DLL search path and on `PATH`. |
@@ -47,9 +48,8 @@ hub (pythonw.exe -m shoutabout run, logon task, user session, not elevated)
 | `local_dictation.py`, `hotkey.py`, `mic.py`, `overlay.py` | v2 "Talk to this PC": the observe-only `WH_KEYBOARD_LL` hotkey listener and its state machine, the microphone recorder (sounddevice), the mouth-pill layered window, and the controller that feeds `Pipeline.process_audio` ([local-dictation.md](local-dictation.md)). |
 | `voice_runtime.py` | What `hub.py` calls for the above: choose the models at start, download in the engine thread (progress in `HubState`), turn "auto" cleanup on when Ollama appears, start/stop/reload "Talk to this PC". |
 | `recent.py` | `Recent`: the last 3 dictations meant for this computer and the last 3 recordings the speech engine couldn't write out, in memory only (nothing on disk); thread-safe, never raises; a version counter the Recent page watches ([history.md](history.md)). |
-| `recent_model.py` / `recent_ui.py` | The Recent page: logic (Tk-free, tested) and its Tk view (Copy, Try again, Delete). |
-| `learn.py` | Word suggestions from project folders, only when asked (or with `[learn] seed_projects = true`); `vocab-suggestions.json` ([vocab.md](vocab.md)). |
-| `migrations.py` | One-time upgrades, remembered in `migrations.json`: config values an older version generated (toggle mode and the 600 s limit); `learn-projects-off` (`seed_projects` off once); `history-gone` (deletes the old `history.jsonl`, `audio`, `failed` and `[history]`). |
+| `recent_model.py` / `recent_ui.py` | The Recent page: logic (Tk-free, tested) and its Tk view (Copy, Fix a word, Try again, Delete). Fix a word adds a word or a replacement to `vocab.txt` and corrects the card's text ([vocab.md](vocab.md#fix-a-word-recent)). |
+| `migrations.py` | One-time upgrades, remembered in `migrations.json`: config values an older version generated (toggle mode and the 600 s limit); `suggestions-gone` (deletes `vocab-suggestions.json` and `[learn]`); `history-gone` (deletes the old `history.jsonl`, `audio`, `failed` and `[history]`). |
 | `doctor.py` | Setup checks, printed as `[PASS]`/`[WARN]`/`[FAIL]`/`[SKIP]` with fix hints. |
 | `shortcuts.py` | The iPhone shortcuts (Dictate, Dictation Target) as plists, with the secrets as import questions; signing through RoutineHub's HubSign (setup time only). |
 | `config.py` | Paths, the TOML schema (pydantic, unknown keys rejected), token generation and loading, `ensure_initialized`. |
@@ -57,7 +57,7 @@ hub (pythonw.exe -m shoutabout run, logon task, user session, not elevated)
 | `discovery.py` | DNS-SD announcement of `_shoutabout._tcp` (TXT `v`, `id`, `name`, `ver`) with `DnsServiceRegister` / `DnsServiceDeRegister` through ctypes ([protocol.md](protocol.md)). |
 | `pair_requests.py`, `devices.py`, `identity.py` | Pairing requests (single pending, codes, expiry, rate limits, approval only from the PC UI); per-device tokens stored as SHA-256 in devices.json; the installation id and friendly name. |
 | `hub_v2.py`, `app_services.py` | The hub's v2 wiring (pairing, discovery, windows, hot reload) and the bundle of services the windows use; `# v2-voice:` marks the hooks into hardware detection, model pick and download, and hotkey dictation. |
-| `app_window.py`, `review_ui.py` | The one ShoutAbout window: tabs (Home, Teach words, Recent, Settings), Home, Ctrl+Tab and Esc; the Teach words page. Every way in (tray, menu bar, reopen, CLI) opens this window on a page, never a second copy. |
+| `app_window.py`, `review_ui.py` | The one ShoutAbout window: tabs (Home, Teach words, Recent, Settings), Home, Ctrl+Tab and Esc; the Teach words page (add a word or a replacement, your words, Remove). Every way in (tray, menu bar, reopen, CLI) opens this window on a page, never a second copy. |
 | `setup_flow.py` / `setup_ui.py`, `settings_model.py` / `settings_ui.py`, `approval_ui.py`, `ui_host.py`, `ui_kit.py` | First-run setup, the Settings page and the pairing prompt: logic (Tk-free, tested) and Tk views on one UI thread ([setup-experience.md](setup-experience.md)). |
 | `reopen.py` | Opening ShoutAbout while it runs shows its window at Home: a named event on Windows (the Start menu's second `ShoutAbout.exe` sets it), the "reopen" Apple event on macOS. |
 | `firstrun.py`, `winstartup.py` | First-run detection (existing installs never see the wizard) and port choice; Start with Windows (per-user Run key, installed app only). |
@@ -76,7 +76,6 @@ hub (pythonw.exe -m shoutabout run, logon task, user session, not elevated)
 | `hotkey-hook`, `hotkey`, `overlay`, `overlay-warm`, `mic-warm`, `dictation-transcribe` | "Talk to this PC" ([local-dictation.md](local-dictation.md)) | The hook thread only queues key events; the worker runs the state machine; transcriptions take `HubState.busy` like phone requests. Stopped on Pause and Quit. |
 | `discovery` | Waits until uvicorn listens, then announces the hub with DNS-SD | Windows calls the registration callback on its own thread pool. |
 | `ui` | Tk: the ShoutAbout window, the setup window and pairing prompts (`ui_host`) | Started on demand, ends when the last window closes. Workers never hold Tk objects. |
-| `learn` | Only with `[learn] seed_projects = true`: project folders 90 s after start, then every 24 h | One notification when new words wait. Otherwise it ends at once. |
 | worker pool | `Pipeline.process_file` | The pipeline lock allows only one transcription at a time. A paste schedules a clipboard restore on a timer. |
 
 ## Request lifecycle (`POST /transcribe`)

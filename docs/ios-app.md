@@ -114,11 +114,12 @@ tour runs in the iOS Simulator. Nothing has run on a real iPhone yet (see
   wrong spot, so there's no setting. Older versions could keep up to 200 on disk (Settings ›
   Keep history); the first launch of this version deletes that file and the old switch
   (`HistoryStore.removeSavedHistory`).
-- **Vocabulary**: the PC's custom words (`GET/POST /vocab`), cached for dictating away from
+- **Vocabulary**: the PC's custom words and replacements (`GET/POST /vocab`), cached for dictating away from
   home. Fetched every time the app comes forward and the PC answers, when a recording starts
   and after it (on the home network), right after adding a word, and over the tunnel at most
-  hourly when away. On-device text then gets the custom spelling, also for words that only
-  sound alike ("Sophia" -> "Sofia", see `VocabFixer`).
+  hourly when away. On-device text then gets the replacements ("omw" -> "on my way") and the
+  custom spelling, also for words that only sound alike ("Sophia" -> "Sofia", see
+  `VocabFixer`). Custom words lists the replacements under the words.
 - **Advanced** (Settings): the on-device engine (Automatic by default), downloading the model
   ahead of time, the older code pairing (QR or manual), and the owner's Cloudflare tunnel
   ("Use my tunnel when away"). The loud red alternate icon is in Settings.
@@ -143,8 +144,8 @@ ios/
       DictationActivityState  the Live Activity's content + level throttle
       Pairing.swift           legacy pairing QR payload + URL rules (private hosts, VPN)
       RoutePlanner.swift      which failures are worth trying the next route for
-      VocabFixer.swift        custom spelling of vocab terms in on-device transcripts (same
-                              spelling, then sound-alike)
+      VocabFixer.swift        replacements and custom spelling of vocab terms in on-device
+                              transcripts (replacements, same spelling, then sound-alike)
       SoundAlike.swift        phonetic key (simplified Metaphone), edit distance, common words
       HistoryStore.swift      Recent: the last 3 dictations, in memory only (+ deletes the
                               history older versions saved)
@@ -273,7 +274,9 @@ addresses; public URLs must be HTTPS (ATS `NSAllowsLocalNetworking`).
 | `SpeechTranscriber` (iOS 26 long-form model) | Automatic without custom words, if the iPhone supports it (it ignores hints); also the fallback when `DictationTranscriber` can't run |
 | `SFSpeechRecognizer` on-device | last resort (needs the speech permission, asked in onboarding) |
 
-Whichever wrote it, `VocabFixer` then gives the custom words their spelling: same spelling in
+Whichever wrote it, `VocabFixer` first applies the PC's replacements (`say -> write`, whole
+words, ignoring case; a custom word with a symbol also matches it said aloud: "slash
+consolidate" -> "/consolidate"), then gives the custom words their spelling: same spelling in
 another case or spacing ("better shell" -> "Better Shell"), and sound-alikes ("Sophia" ->
 "Sofia"): same number of words, the same simplified-Metaphone key and at most 2 edits per
 word, evidence the speaker meant it (the recognizer capitalised it, or another word of the

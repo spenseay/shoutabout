@@ -255,14 +255,15 @@ def test_transcribe_end_to_end_with_fakes(tmp_path, home, capsys, monkeypatch):
     assert lines[1]["file"].endswith("vocab-01.m4a")
     by_name = {line["file"].rsplit("\\", 1)[-1].rsplit("/", 1)[-1]: line for line in lines}
     assert by_name["vocab-01.m4a"]["word_accuracy"] == 1.0
-    assert by_name["vocab-01.m4a"]["terms"] == {"Better Shell": False}
+    # The fake engine writes "better shell"; the vocab fixes spell it "Better Shell".
+    assert by_name["vocab-01.m4a"]["terms"] == {"Better Shell": True}
     assert by_name["vocab-01.m4a"]["cleanup"] == "disabled"
     assert "expected" not in by_name["other.wav"]
 
     assert cli.main(["transcribe", "--no-cleanup", str(d / "vocab-01.m4a")]) == 0
     out = capsys.readouterr().out
     assert "raw:" in out and "expected: Open Better Shell now." in out
-    assert "Better Shell [MISS]" in out
+    assert "Better Shell [hit]" in out
 
 
 def test_transcribe_missing_file(home, capsys):
@@ -670,7 +671,8 @@ def test_vocab_add_list_remove(tmp_path, capsys):
     assert "already in" in capsys.readouterr().out
     assert cli.main(["vocab", "list", "--home", h, "--json"]) == 0
     listed = json.loads(capsys.readouterr().out)
-    assert listed == {"terms": ["Chameleon CV", "Better Shell", "Claude Code"], "count": 3}
+    terms = ["Chameleon CV", "Better Shell", "Claude Code"]
+    assert listed == {"terms": terms, "replacements": [], "count": 3}
     assert cli.main(["vocab", "list", "--home", h]) == 0
     out = capsys.readouterr().out
     assert "  1. Chameleon CV" in out and "3 term(s)" in out
@@ -682,47 +684,28 @@ def test_vocab_add_list_remove(tmp_path, capsys):
     assert text == "# my vocab\nBetter Shell\nClaude Code\n"
 
 
+def test_vocab_replacements(tmp_path, capsys):
+    h = str(_vocab_home(tmp_path))
+    assert cli.main(["vocab", "add", "--home", h, "omw -> on my way"]) == 0
+    assert 'added "omw -> on my way"' in capsys.readouterr().out
+    assert cli.main(["vocab", "add", "--home", h, "OMW => oh my word"]) == 0
+    assert "already in" in capsys.readouterr().out  # one replacement per spoken phrase
+    assert cli.main(["vocab", "list", "--home", h, "--json"]) == 0
+    listed = json.loads(capsys.readouterr().out)
+    assert listed["terms"] == ["Better Shell", "Claude Code"]
+    assert listed["replacements"] == [{"say": "omw", "write": "on my way"}]
+    assert cli.main(["vocab", "list", "--home", h]) == 0
+    assert "  1. omw -> on my way" in capsys.readouterr().out
+    assert cli.main(["vocab", "remove", "--home", h, "omw -> on my way"]) == 0
+    text = (tmp_path / "vhome" / "vocab.txt").read_text("utf-8")
+    assert text == "# my vocab\nBetter Shell\nClaude Code\n"
+
+
 def test_vocab_add_invalid_is_error(tmp_path, capsys):
     h = str(_vocab_home(tmp_path))
     assert cli.main(["vocab", "add", "--home", h, "#hashtag"]) == 1
     assert "comment" in capsys.readouterr().err
     assert cli.main(["vocab", "--home", h]) == 2  # no action given
-
-
-def test_vocab_suggest_seed_dismiss(tmp_path, capsys):
-    home_dir = _vocab_home(tmp_path)
-    h = str(home_dir)
-    projects = tmp_path / "projects"
-    (projects / "chameleon-cv").mkdir(parents=True)
-    (projects / "chameleon-cv" / "package.json").write_text('{"name": "chameleon-cv"}', "utf-8")
-    (projects / "better_shell").mkdir(parents=True)
-    (projects / "better_shell" / "package.json").write_text('{"name": "kestrel"}', "utf-8")
-    (home_dir / "config.toml").write_text(
-        f"[learn]\nproject_roots = [{json.dumps(str(projects))}]\n", "utf-8"
-    )
-
-    # Nothing is looked at unless asked: suggest only lists what's waiting.
-    assert cli.main(["vocab", "suggest", "--home", h, "--json"]) == 0
-    assert json.loads(capsys.readouterr().out) == {"new": 0, "pending": []}
-    assert cli.main(["vocab", "suggest", "--home", h, "--projects", "--json"]) == 0
-    out = json.loads(capsys.readouterr().out)
-    assert out["new"] == 2
-    assert sorted(s["term"] for s in out["pending"]) == ["Chameleon CV", "Kestrel"]
-
-    assert cli.main(["vocab", "seed", "--home", h, str(projects)]) == 0
-    out = capsys.readouterr().out
-    assert "0 new suggestion(s)" in out
-    assert "From your projects" in out and "Chameleon CV" in out
-
-    assert cli.main(["vocab", "dismiss", "--home", h, "Kestrel"]) == 0
-    capsys.readouterr()
-    assert cli.main(["vocab", "suggest", "--home", h]) == 0
-    out = capsys.readouterr().out
-    assert "0 new suggestion(s); 1 waiting" in out
-    assert "Kestrel" not in out and "Chameleon CV" in out
-
-    assert cli.main(["vocab", "seed", "--home", h, str(tmp_path / "missing")]) == 1
-    assert "not a folder" in capsys.readouterr().err
 
 
 def test_vocab_review_and_settings_open_the_window(tmp_path, monkeypatch):

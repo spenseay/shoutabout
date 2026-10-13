@@ -638,7 +638,13 @@ def create_app(ctx: HubContext) -> FastAPI:
         vocab = await run_in_threadpool(store.get)
         log.info("vocab list route=%s count=%d", route, len(vocab.terms))
         return JSONResponse(
-            {"terms": list(vocab.terms), "version": vocab.version, "count": len(vocab.terms)}
+            {
+                "terms": list(vocab.terms),
+                # "say -> write" lines; the iPhone applies them to offline dictations too.
+                "replacements": [{"say": say, "write": write} for say, write in vocab.replacements],
+                "version": vocab.version,
+                "count": len(vocab.terms),
+            }
         )
 
     @app.post("/vocab")

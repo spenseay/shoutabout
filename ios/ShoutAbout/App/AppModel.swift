@@ -40,6 +40,7 @@ struct DictationJob: Sendable {
     var copyInPCMode: Bool
     var offlineEngine: OfflineEnginePreference
     var vocab: [String]
+    var replacements: [VocabReplacement] = []
 }
 
 enum StartResult: Equatable, Sendable {
@@ -91,6 +92,7 @@ final class AppModel {
     /// The PC's last `/info` (speed, name).
     private(set) var hubInfo: CachedHubInfo?
     private(set) var vocab: [String] = []
+    private(set) var vocabReplacements: [VocabReplacement] = []
     private(set) var vocabFetchedAt: Date?
     private(set) var loudIcon = false
 
@@ -170,6 +172,7 @@ final class AppModel {
         pairedComputer = settings.pairedComputer
         hubInfo = settings.cachedHubInfo
         vocab = settings.vocabTerms
+        vocabReplacements = settings.vocabReplacements
         vocabFetchedAt = settings.vocabFetchedAt
         refreshSecretsSummary()
         // People who paired with the QR code before onboarding existed skip it.
@@ -431,7 +434,8 @@ final class AppModel {
             cachedInfo: freshInfo(for: link),
             copyInPCMode: copyInPCMode,
             offlineEngine: offlineEngine,
-            vocab: vocab
+            vocab: vocab,
+            replacements: vocabReplacements
         )
     }
 
@@ -514,7 +518,9 @@ final class AppModel {
         )
         let router = DictationRouter(
             transport: LiveHubTransport(),
-            onDevice: OnDeviceEngine(vocab: job.vocab, preference: job.offlineEngine)
+            onDevice: OnDeviceEngine(
+                vocab: job.vocab, replacements: job.replacements, preference: job.offlineEngine
+            )
         )
         let result = await router.run(request) { [weak self] stage in
             await self?.show(stage)
@@ -718,6 +724,8 @@ final class AppModel {
         settings.cachedHubInfo = nil
         vocab = []
         settings.vocabTerms = []
+        vocabReplacements = []
+        settings.vocabReplacements = []
         settings.vocabVersion = nil
         settings.vocabFetchedAt = nil
         vocabFetchedAt = nil
@@ -961,7 +969,7 @@ final class AppModel {
             // the next dictation on this iPhone uses the new word.
             if let list = try? await HubClient.fetchVocab(endpoint) {
                 storeVocab(list)
-            } else if result.added, !vocab.contains(result.term) {
+            } else if result.added, !vocab.contains(result.term), !result.term.contains(" -> ") {
                 vocab.append(result.term)
                 settings.vocabTerms = vocab
             }
@@ -975,9 +983,11 @@ final class AppModel {
 
     private func storeVocab(_ list: VocabList) {
         vocab = list.terms
+        vocabReplacements = list.replacements ?? []
         vocabFetchedAt = Date()
         guard !isDemo else { return }
         settings.vocabTerms = list.terms
+        settings.vocabReplacements = vocabReplacements
         settings.vocabVersion = list.version
         settings.vocabFetchedAt = vocabFetchedAt
     }

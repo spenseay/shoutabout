@@ -3,8 +3,10 @@
 It lists the last few dictations meant for this computer (:mod:`shoutabout.recent`, kept in
 the hub's memory only), newest first: when, where it came from ("This PC" or the phone's
 name), and the text, each with **Copy**, so text that landed in the wrong spot is never
-lost. Above them, recordings the speech engine couldn't write out, with **Try again** and
-**Delete**. That's all: nothing is kept on disk, nothing to search or clear.
+lost, and **Fix a word**: "Sophia" should be "Sofia" teaches it for next time (a custom word,
+or a replacement when it can't be told from the sound; :func:`shoutabout.vocabfix.teach_fix`)
+and corrects the text shown. Above them, recordings the speech engine couldn't write out,
+with **Try again** and **Delete**. Nothing is kept on disk, nothing to search or clear.
 
 The page watches :meth:`RecentModel.stamp` (cheap) and reloads when it changes, so a new
 dictation shows up by itself. :mod:`recent_ui` only draws this; tests drive it with fakes.
@@ -29,6 +31,16 @@ COPIED = "Copied."
 RETRIED = "Done. It's at the top."
 RETRY_NEEDS_HUB = "Start ShoutAbout first, then try again."
 FAILED_TITLE = "Couldn't write these out"
+
+
+def fix_message(wrong: str, right: str, status: str, existing: str = "") -> str:
+    """Status line after **Fix a word**."""
+    from shoutabout.vocab import split_replacement
+
+    pair = split_replacement(existing) if status == "exists" else None
+    if pair and pair[1] != right:  # one replacement per spoken phrase
+        return f'"{pair[0]}" already turns into "{pair[1]}". Change it on Teach words.'
+    return f'Saved. "{wrong}" will come out "{right}" from now on.'
 
 
 # --------------------------------------------------------------------- pure copy
@@ -124,6 +136,7 @@ class RecentModel:
         self.message = ""
         self.error = False
         self.busy: set[str] = set()  # failed ids being tried again
+        self.fixed: dict[str, str] = {}  # item id -> its text after Fix a word
 
     # -------------------------------------------------------------- reading
 
@@ -150,7 +163,13 @@ class RecentModel:
 
     def view(self, now: datetime | None = None) -> RecentView:
         entries = [
-            Entry(i.id, when_label(i.ts, now), source_label(i.route, i.source), i.text, note_for(i))
+            Entry(
+                i.id,
+                when_label(i.ts, now),
+                source_label(i.route, i.source),
+                self.fixed.get(i.id, i.text),
+                note_for(i),
+            )
             for i in self.items
         ]
         failed = [
@@ -174,7 +193,7 @@ class RecentModel:
     def text_of(self, key: str) -> str | None:
         for item in self.items:
             if item.id == key:
-                return item.text
+                return self.fixed.get(key, item.text)
         return None
 
     # -------------------------------------------------------------- actions
@@ -192,6 +211,41 @@ class RecentModel:
             return False
         self.message, self.error = COPIED, False
         return True
+
+    def fix_word(self, key: str, wrong: str, right: str) -> str | None:
+        """**Fix a word**: teach "``wrong`` should be ``right``" (vocab.txt, which the hub
+        reloads by itself) and correct this dictation's text. Returns the corrected text,
+        or None (``message`` says why). Call off the UI thread (the vocab.txt lock)."""
+        from shoutabout.vocab import add_terms
+        from shoutabout.vocabfix import teach_fix
+
+        text = self.text_of(key)
+        wrong, right = " ".join(wrong.split()), " ".join(right.split())
+        if text is None:
+            self.message, self.error = "That dictation is gone.", True
+            return None
+        if not wrong or not right:
+            self.message, self.error = "Type the wrong word and how it should be.", True
+            return None
+        if wrong == right:
+            self.message, self.error = "That's the same. Type how it should be.", True
+            return None
+        teaching = teach_fix(text, wrong, right)
+        try:
+            (result,) = add_terms(self.svc.paths.vocab_file, [teaching.entry])
+        except OSError as exc:
+            log.warning("couldn't update vocab.txt: %s", exc)
+            self.message, self.error = "Couldn't save that. Try again.", True
+            return None
+        if result.status == "invalid":
+            self.message, self.error = f"Can't save that: {result.reason}.", True
+            return None
+        self.message = fix_message(wrong, right, result.status, result.term)
+        self.error = False
+        if not self.message.startswith("Saved"):
+            return None
+        self.fixed[key] = teaching.fixed_text
+        return teaching.fixed_text
 
     def retry(self, item_id: str) -> bool:
         """Transcribe a kept recording again (slow: call off the UI thread)."""
