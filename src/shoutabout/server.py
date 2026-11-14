@@ -1,7 +1,9 @@
 """HTTP API (FastAPI): ``GET /health``, ``POST /transcribe``, ``GET``/``POST /vocab``, and the
 v2 phone protocol (docs/protocol.md): ``GET /hello``, ``POST /pair/request``,
-``GET /pair/status`` (unauthenticated, home-network route only), ``GET /info`` and
-``POST /paste`` (authenticated).
+``GET /pair/status`` (unauthenticated, home-network route only), ``GET /info``,
+``POST /paste`` and the streamed dictations ``POST /stream/start``,
+``POST /stream/{id}/audio``, ``POST /stream/{id}/finish``, ``DELETE /stream/{id}``
+(authenticated; :mod:`shoutabout.streaming`).
 
 Order of checks for /transcribe (PLAN §5): source IP (middleware, every path) -> rate
 limit per (route, ip) -> auth-failure lockout -> bearer -> Access JWT (tunnel route, if
@@ -24,14 +26,13 @@ import re
 import shutil
 import tempfile
 import time
-import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -40,8 +41,8 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from shoutabout import __version__
 from shoutabout.config import Config
-from shoutabout.models import TARGETS, CleanupResult, PasteResult, Timings, TranscribeResult
-from shoutabout.pipeline import PASTE_ERROR_WARNING, PAUSED_WARNING, Pipeline, format_log_line
+from shoutabout.models import TARGETS, CleanupResult, Timings, TranscribeResult
+from shoutabout.pipeline import PAUSED_WARNING, Pipeline, deliver_result, format_log_line
 from shoutabout.security import (
     ACCESS_JWT_HEADER,
     HUB_TOKEN,
@@ -54,6 +55,7 @@ from shoutabout.security import (
     sha256_digest,
 )
 from shoutabout.state import HubState
+from shoutabout.streaming import MAX_CHUNK_BYTES, StreamError, StreamRegistry
 from shoutabout.text import normalize_whitespace
 from shoutabout.vocab import VocabStore, VocabTermError, add_term
 
@@ -76,6 +78,12 @@ PAIR_MAX_BODY_BYTES = 2048
 PASTE_MAX_CHARS = 10_000
 # 10,000 characters, each possibly a 12-byte JSON escape (a surrogate pair), plus framing.
 PASTE_MAX_BODY_BYTES = 160 * 1024
+# Streamed dictations: chunk posts (one every ~2 s) have their own, generous limit and
+# don't count against rate_limit_per_minute.
+STREAM_CHUNK_RATE_PER_MINUTE = 300
+STREAM_JSON_MAX_BODY_BYTES = 1024
+SAMPLE_RATE = 16_000
+ACCEPTS = ["audio", "text", "stream"]
 TIERS = ("best", "balanced", "light")
 TIER_SPEED = {"best": "fast", "balanced": "ok", "light": "slow"}
 
@@ -383,11 +391,12 @@ def _vocab_message(term: str, status: str, count: int) -> str:
 
 
 async def _read_json_body(
-    request: Request, max_bytes: int, *, route: str, ip: str
+    request: Request, max_bytes: int, *, route: str, ip: str, empty: Any = None
 ) -> Any | JSONResponse:
     """The request body parsed as JSON, or the error response (413 too big, 422 not JSON).
 
-    The content type isn't trusted either way: a body that isn't UTF-8 JSON is a 422."""
+    The content type isn't trusted either way: a body that isn't UTF-8 JSON is a 422.
+    ``empty``: what an empty body means (None = it's a 422 too)."""
     content_length = request.headers.get("content-length")
     if content_length is not None:
         try:
@@ -403,10 +412,33 @@ async def _read_json_body(
         return _reject(413, "request body too large", route=route, ip=ip, reason="too-large")
     except ClientDisconnect:
         return _reject(400, "client disconnected", route=route, ip=ip, reason="disconnect")
+    if empty is not None and not raw.strip():
+        return empty
     try:
         return json.loads(raw.decode("utf-8-sig"))
     except (UnicodeDecodeError, ValueError, RecursionError):
         return _reject(422, "send a JSON body", route=route, ip=ip, reason="bad-json")
+
+
+async def _read_limited_body(request: Request, max_bytes: int) -> bytes:
+    """The raw body, at most ``max_bytes`` (raises _UploadTooLarge / ClientDisconnect)."""
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            declared = int(content_length)
+        except ValueError:
+            declared = 0  # the streaming cap below still applies
+        if declared > max_bytes:
+            raise _UploadTooLarge
+    limited = Request(request.scope, _limited_receive(request.receive, max_bytes))
+    return await limited.body()
+
+
+def _parse_seq(value: str | None) -> int | None:
+    """A chunk number: a whole number from 0 (None if it isn't one)."""
+    if value is None or not value.isascii() or not value.isdigit() or len(value) > 9:
+        return None
+    return int(value)
 
 
 def describe_stt(choice: Any, cfg: Config) -> tuple[dict[str, str], bool]:
@@ -455,6 +487,14 @@ def _source_of(request: Request) -> str | None:
     return str(name) if name else None
 
 
+def _owner_of(request: Request) -> str:
+    """Who a stream belongs to: only the same token can feed, finish or cancel it."""
+    who = getattr(request.state, "auth", None)
+    if who is None or who is HUB_TOKEN:
+        return "hub"
+    return f"device:{getattr(who, 'key', '')}"
+
+
 def _keep_failed(
     ctx: HubContext,
     exc: BaseException,
@@ -482,34 +522,25 @@ def _keep_failed(
 def _paste_text(
     ctx: HubContext, text: str, route: str, source: str | None = None
 ) -> TranscribeResult:
-    """Paste phone-made text like a transcription result: same injector, same paste-chord
-    rules, same trailing-space setting, no cleanup. Kept in Recent like one."""
+    """Paste phone-made text like a transcription result: the same delivery as every
+    dictation (paste rules, trailing-space setting, Recent), no cleanup."""
     t0 = time.perf_counter()
-    payload = text + (" " if ctx.config.paste.trailing_space else "")
     # Take turns with phone audio and "Talk to this PC" (the pipeline holds the same lock).
     busy = getattr(ctx.state, "busy", None) or contextlib.nullcontext()
-    try:
-        with busy:
-            paste = ctx.injector.paste(payload)
-    except Exception:
-        log.exception("paste failed")
-        paste = PasteResult(pasted=False, warning=PASTE_ERROR_WARNING)
-    elapsed = (time.perf_counter() - t0) * 1000.0
-    result = TranscribeResult(
-        text=text,
-        raw_text=text,
-        target="pc",
-        route=route,
-        pasted=bool(paste.pasted),
-        warning=paste.warning,
-        cleanup=CleanupResult(text=text, status="disabled", reason="text from the phone"),
-        timings=Timings(paste=elapsed, total=elapsed),
-        request_id=uuid.uuid4().hex[:12],
-        extra={"stt_model": "phone", "llm_model": None, "source": source},
-    )
-    if ctx.recent is not None:
-        ctx.recent.add(result)
-    return result
+    with busy:
+        return deliver_result(
+            config=ctx.config,
+            injector=ctx.injector,
+            state=ctx.state,
+            recent=ctx.recent,
+            raw_text=text,
+            cleaned=CleanupResult(text=text, status="disabled", reason="text from the phone"),
+            target="pc",
+            route=route,
+            timings=Timings(),
+            started=t0,
+            extra={"stt_model": "phone", "llm_model": None, "source": source},
+        )
 
 
 def create_app(ctx: HubContext) -> FastAPI:
@@ -524,6 +555,9 @@ def create_app(ctx: HubContext) -> FastAPI:
     rate = RateLimiter(server_cfg.rate_limit_per_minute, RATE_WINDOW_S)
     failures = RateLimiter(server_cfg.max_auth_failures, AUTH_FAILURE_WINDOW_S)
     public_rate = RateLimiter(PUBLIC_RATE_PER_MINUTE, RATE_WINDOW_S)
+    chunk_rate = RateLimiter(STREAM_CHUNK_RATE_PER_MINUTE, RATE_WINDOW_S)
+    streams = StreamRegistry()
+    app.state.streams = streams
     vocab_stores: dict[Path, VocabStore] = {}
     digest_cache: dict[str, bytes] = {}
 
@@ -547,11 +581,14 @@ def create_app(ctx: HubContext) -> FastAPI:
             store = vocab_stores[Path(path)] = VocabStore(Path(path))
         return store
 
-    async def authorize(request: Request) -> tuple[str, str, JSONResponse | None]:
+    async def authorize(
+        request: Request, limiter: RateLimiter | None = None
+    ) -> tuple[str, str, JSONResponse | None]:
         """Steps 1-4, shared by every authenticated endpoint: ``(route, ip, rejection)``.
 
         One rate-limit bucket and one auth-failure bucket per (route, ip) across all
-        endpoints, so /vocab can't be used to get extra token guesses.
+        endpoints, so /vocab can't be used to get extra token guesses. ``limiter``
+        replaces the rate limit (streamed audio chunks); the lockout is always shared.
         """
         route: str = getattr(request.state, "route", None) or "-"
         ip = request.client.host if request.client else "-"
@@ -575,7 +612,7 @@ def create_app(ctx: HubContext) -> FastAPI:
             )
 
         # 1. rate limit per (route, ip)
-        if not rate.allow(key):
+        if not (limiter or rate).allow(key):
             return deny(
                 429,
                 "rate limited; try again shortly",
@@ -821,7 +858,7 @@ def create_app(ctx: HubContext) -> FastAPI:
                 "version": ctx.version,
                 "stt": stt,
                 "cleanup": cleanup,
-                "accepts": ["audio", "text"],
+                "accepts": list(ACCEPTS),
             }
         )
 
@@ -868,6 +905,144 @@ def create_app(ctx: HubContext) -> FastAPI:
         if result.warning is not None:
             out["warning"] = result.warning
         return JSONResponse(out)
+
+    # ------------------------------------------- streamed dictations (with auth)
+
+    def stream_error(exc: StreamError, route: str, ip: str) -> JSONResponse:
+        log.warning(
+            "rejected route=%s ip=%s status=%d reason=stream (%s)", route, ip, exc.status, exc
+        )
+        body: dict[str, Any] = {"detail": exc.detail}
+        if exc.next_seq is not None:
+            body["next_seq"] = exc.next_seq
+        return JSONResponse(body, status_code=exc.status)
+
+    @app.post("/stream/start")
+    async def stream_start(request: Request) -> JSONResponse:
+        route, ip, rejection = await authorize(request)
+        if rejection is not None:
+            return rejection
+        pipeline = ctx.pipeline
+        if pipeline is None:
+            detail = ctx.startup_error or "hub is starting"
+            return _reject(503, detail, route=route, ip=ip, reason="not-ready")
+        body = await _read_json_body(
+            request, STREAM_JSON_MAX_BODY_BYTES, route=route, ip=ip, empty={}
+        )
+        if isinstance(body, JSONResponse):
+            return body
+        if not isinstance(body, dict):
+            return _reject(422, "send a JSON object", route=route, ip=ip, reason="bad-json")
+        raw_target = body.get("target")
+        target = _normalize_target(raw_target) if isinstance(raw_target, str | None) else None
+        if target is None:
+            return _reject(
+                422, "target must be 'pc' or 'phone'", route=route, ip=ip, reason="bad-target"
+            )
+        sample_rate = body.get("sample_rate", SAMPLE_RATE)
+        encoding = body.get("encoding", "s16le")
+        if type(sample_rate) is not int or sample_rate != SAMPLE_RATE or encoding != "s16le":
+            return _reject(
+                422,
+                'send {"sample_rate": 16000, "encoding": "s16le"} (16 kHz mono 16-bit PCM)',
+                route=route,
+                ip=ip,
+                reason="bad-format",
+            )
+        source = _source_of(request)
+        try:
+            session = await run_in_threadpool(
+                streams.start,
+                pipeline,
+                target=target,
+                route=route,
+                extra={"source": source} if source else None,
+                owner=_owner_of(request),
+                max_seconds=ctx.config.server.max_audio_seconds,
+            )
+        except StreamError as exc:
+            return stream_error(exc, route, ip)
+        return JSONResponse(
+            {"stream_id": session.id, "max_chunk_bytes": MAX_CHUNK_BYTES},
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.post("/stream/{stream_id}/audio")
+    async def stream_audio(stream_id: str, request: Request) -> JSONResponse:
+        route, ip, rejection = await authorize(request, chunk_rate)
+        if rejection is not None:
+            return rejection
+        seq = _parse_seq(request.query_params.get("seq"))
+        if seq is None:
+            return _reject(
+                422, "seq must be a whole number from 0", route=route, ip=ip, reason="bad-seq"
+            )
+        try:
+            session = streams.get(stream_id, _owner_of(request))
+        except StreamError as exc:
+            return stream_error(exc, route, ip)
+        try:
+            pcm = await _read_limited_body(request, MAX_CHUNK_BYTES)
+        except _UploadTooLarge:
+            return _reject(
+                413,
+                f"chunk too large (max {MAX_CHUNK_BYTES} bytes)",
+                route=route,
+                ip=ip,
+                reason="too-large",
+            )
+        except ClientDisconnect:
+            return _reject(400, "client disconnected", route=route, ip=ip, reason="disconnect")
+        try:
+            next_seq, received = await run_in_threadpool(session.append, seq, pcm)
+        except StreamError as exc:
+            return stream_error(exc, route, ip)
+        return JSONResponse({"next_seq": next_seq, "received_s": round(received, 3)})
+
+    @app.post("/stream/{stream_id}/finish")
+    async def stream_finish(stream_id: str, request: Request) -> JSONResponse:
+        route, ip, rejection = await authorize(request)
+        if rejection is not None:
+            return rejection
+        body = await _read_json_body(
+            request, STREAM_JSON_MAX_BODY_BYTES, route=route, ip=ip, empty={}
+        )
+        if isinstance(body, JSONResponse):
+            return body
+        chunks = body.get("chunks") if isinstance(body, dict) else False
+        if chunks is not None and (type(chunks) is not int or chunks < 0):
+            return _reject(
+                422,
+                'send {"chunks": <number of chunks sent>}',
+                route=route,
+                ip=ip,
+                reason="bad-chunks",
+            )
+        try:
+            session = streams.get(stream_id, _owner_of(request))
+            result, repeated = await run_in_threadpool(session.finish_detailed, chunks=chunks)
+        except StreamError as exc:
+            return stream_error(exc, route, ip)
+        except Exception as exc:
+            status, detail = _map_pipeline_error(exc)
+            if status == 500:
+                log.exception("streamed transcription failed route=%s ip=%s", route, ip)
+            return _reject(status, detail, route=route, ip=ip, reason=type(exc).__name__)
+        if repeated:
+            log.info("stream finish repeated id=%s route=%s", result.request_id, route)
+        else:
+            log.info("%s", format_log_line(result))
+        out = result.to_response()
+        out["streamed"] = True
+        return JSONResponse(out)
+
+    @app.delete("/stream/{stream_id}")
+    async def stream_cancel(stream_id: str, request: Request) -> Response:
+        _route, _ip, rejection = await authorize(request)
+        if rejection is not None:
+            return rejection
+        await run_in_threadpool(streams.cancel, stream_id, _owner_of(request))
+        return Response(status_code=204)
 
     @app.post("/transcribe")
     async def transcribe(request: Request) -> JSONResponse:

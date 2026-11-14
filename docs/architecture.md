@@ -14,9 +14,11 @@ iPhone Shortcut --HTTPS--> Cloudflare Access --> cloudflared service --> hub via
 hub (pythonw.exe -m shoutabout run, logon task, user session, not elevated)
  |- tray (main thread) ---- HubState (status, paused) <---- pipeline
  |- server thread: FastAPI --> Pipeline --> engine (Whisper, CUDA)
- |                                     |--> cleaner (Ollama HTTP, 127.0.0.1:11434) + guard
- |                                     |--> injector (clipboard + SendInput) --> focused window
- |                                     '--> Recent (the last 3, in memory only)
+ |       |                             |--> cleaner (Ollama HTTP, 127.0.0.1:11434) + guard
+ |       |                             |--> injector (clipboard + SendInput) --> focused window
+ |       |                             '--> Recent (the last 3, in memory only)
+ |       '- /stream/* --> StreamRegistry --> StreamSession (stretches in the background,
+ |                                           the tail at finish, then the same delivery)
  |- engine loader thread (loads Whisper, then publishes ctx.pipeline)
  '- warmer thread (keeps the Ollama model loaded)
 ```
@@ -29,7 +31,8 @@ hub (pythonw.exe -m shoutabout run, logon task, user session, not elevated)
 | `hub.py` | `run_hub`: single-instance mutex, logging, startup warnings, and the four threads below. |
 | `server.py` | `create_app(HubContext)`: the source-IP middleware (pure ASGI), `/health`, `/transcribe`, the order of checks, size caps, and the error-to-status mapping. OpenAPI and docs pages are disabled. |
 | `security.py` | `classify_source` (peer IP to route), `bearer_ok` (constant-time compare), `AccessJwtValidator` (RS256 with a JWKS cache), `RateLimiter` (sliding window). |
-| `pipeline.py` | `Pipeline.process_file`, serialised by a lock: decode, STT, normalise, cleanup, normalise, deliver, Recent. Sets the hub status. |
+| `pipeline.py` | `Pipeline.process_file` / `process_audio`, serialised by a lock: decode, STT, normalise, cleanup, normalise, deliver, Recent. Sets the hub status. `deliver_result` is the one delivery every dictation shares (`/transcribe`, `/paste`, streams, "Talk to this PC"): the paste rules, pause, "No speech detected.", trailing space, Recent. `foreground()` / `background_turn()` let background stretches take the lock only when no one waits for it. |
+| `streaming.py` | Streamed dictations ("transcribe while you talk"): `StreamSession` keeps the audio in memory, cuts finished stretches at pauses (Silero VAD, or loudness), transcribes them in the background (vocab hints plus the previous stretch's last sentence) and cleans each one; `finish` does the tail and delivers like `/transcribe`, once. `StreamRegistry`: the phone's stream ids, at most 2 open, 60 s expiry ([protocol.md](protocol.md#streamed-dictations-transcribe-while-you-talk)). |
 | `audio.py` | The decoder chain (see [Audio decoding](#audio-decoding)): container sniffing, WAV -> Media Foundation -> PyAV, mono + 16 kHz, duration checks, error types; `encode_m4a` for tests (PyAV only). |
 | `wavdecode.py`, `resample.py` | Uncompressed WAV (PCM 8/16/24/32-bit, float, extensible, RF64) read with numpy; the mono downmix and the polyphase Kaiser-windowed-sinc resampler. |
 | `mfdecode.py` | Windows Media Foundation through plain ctypes COM calls: byte stream -> source resolver -> source reader -> float PCM. COM per call, `MFStartup` once per process; plain-words errors for Windows "N" editions. |
@@ -44,7 +47,7 @@ hub (pythonw.exe -m shoutabout run, logon task, user session, not elevated)
 | `inject/windows.py`, `inject/clipboard.py` | Foreground and integrity checks, clipboard snapshot/set/restore with exclusion formats, `SendInput` paste chord. |
 | `tray.py`, `icons.py`, `brand.py` | ctypes `Shell_NotifyIcon` tray icon, menu and balloon toasts. Icons are the brand mouth rendered in pure Python (`brand.py`): one per state, plus a talking animation while transcribing ([brand.md](brand.md)). |
 | `hardware.py`, `modelpick.py`, `modelstore.py` | v2 automatic model choice: NVIDIA GPU / CPU / RAM detection (NVML, nvidia-smi, CTranslate2), the best / balanced / light tiers with config.toml overrides, and the resumable model download with byte progress ([models.md](models.md)). |
-| `local_dictation.py`, `hotkey.py`, `mic.py`, `overlay.py` | v2 "Talk to this PC": the observe-only `WH_KEYBOARD_LL` hotkey listener and its state machine, the microphone recorder (sounddevice), the mouth-pill layered window, and the controller that feeds `Pipeline.process_audio` ([local-dictation.md](local-dictation.md)). |
+| `local_dictation.py`, `hotkey.py`, `mic.py`, `overlay.py` | v2 "Talk to this PC": the observe-only `WH_KEYBOARD_LL` hotkey listener and its state machine, the microphone recorder (sounddevice), the mouth-pill layered window, and the controller that feeds a streamed dictation while recording (`Pipeline.open_stream`; `process_audio` as the fallback) ([local-dictation.md](local-dictation.md)). |
 | `voice_runtime.py` | What `hub.py` calls for the above: choose the models at start, download in the engine thread (progress in `HubState`), turn "auto" cleanup on when Ollama appears, start/stop/reload "Talk to this PC". |
 | `recent.py` | `Recent`: the last 3 dictations meant for this computer and the last 3 recordings the speech engine couldn't write out, in memory only (nothing on disk); thread-safe, never raises; a version counter the Recent page watches ([history.md](history.md)). |
 | `recent_model.py` / `recent_ui.py` | The Recent page: logic (Tk-free, tested) and its Tk view (Copy, Try again, Delete). |
@@ -77,7 +80,8 @@ hub (pythonw.exe -m shoutabout run, logon task, user session, not elevated)
 | `discovery` | Waits until uvicorn listens, then announces the hub with DNS-SD | Windows calls the registration callback on its own thread pool. |
 | `ui` | Tk: the ShoutAbout window, the setup window and pairing prompts (`ui_host`) | Started on demand, ends when the last window closes. Workers never hold Tk objects. |
 | `learn` | Only with `[learn] seed_projects = true`: project folders 90 s after start, then every 24 h | One notification when new words wait. Otherwise it ends at once. |
-| worker pool | `Pipeline.process_file` | The pipeline lock allows only one transcription at a time. A paste schedules a clipboard restore on a timer. |
+| worker pool | `Pipeline.process_file`, stream finish | The pipeline lock allows only one transcription at a time. A paste schedules a clipboard restore on a timer. |
+| `stream`, `stream-cleanup` | one pair per streamed dictation (phone or "Talk to this PC") | `stream` finds pauses and transcribes stretches while the person talks: one stretch at a time under the pipeline lock, never while a request waits for it, never setting the status to "transcribing". `stream-cleanup` cleans each stretch meanwhile. Both end at finish, cancel or expiry. |
 
 ## Request lifecycle (`POST /transcribe`)
 
@@ -184,10 +188,15 @@ the same PyAV decode changed 16 of 87 transcripts, and -70 dB of noise changed 8
 ## The phone protocol (v2)
 
 `GET /hello`, `POST /pair/request` and `GET /pair/status` need no token but answer only on the
-`lan` route (404 through the tunnel and from loopback). `GET /info` and `POST /paste` go
-through the same steps 1-5 as `/transcribe`. A bearer token is the hub token or a paired
-phone's token, hashed once and compared in constant time with all of them. Full contract,
-examples and limits: [protocol.md](protocol.md).
+`lan` route (404 through the tunnel and from loopback). `GET /info`, `POST /paste` and the
+streamed dictations (`POST /stream/start`, `POST /stream/{id}/audio`, `POST
+/stream/{id}/finish`, `DELETE /stream/{id}`) go through the same steps 1-5 as `/transcribe`
+(audio chunks with their own rate limit of 300 a minute instead of step 2's). A bearer token is
+the hub token or a paired phone's token, hashed once and compared in constant time with all of
+them. Full contract, examples and limits: [protocol.md](protocol.md).
+
+A streamed dictation's `finish` runs the same delivery as step 9 (`deliver_result`), so its
+answer is the `/transcribe` response plus `"streamed": true`.
 
 ## Route and auth rules
 

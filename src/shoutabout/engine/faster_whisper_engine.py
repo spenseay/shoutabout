@@ -165,9 +165,27 @@ class _HintEcho:
         return False
 
 
+CONTEXT_ECHO_MIN_WORDS = 4
+
+
+def echoes_context(text: str, context: str | None) -> bool:
+    """True when ``text`` is only a repeat of the previous stretch's words (``context``):
+    at least four words, all of them a contiguous run of the context. Whisper sometimes
+    "transcribes" its prompt on near-silence; this catches that for the context too."""
+    if not context:
+        return False
+    out = _norm_words(text)
+    if len(out) < CONTEXT_ECHO_MIN_WORDS:
+        return False
+    words = _norm_words(context)
+    n = len(out)
+    return any(words[i : i + n] == out for i in range(len(words) - n + 1))
+
+
 def filter_segments(segments: Sequence[Any], hints: SttHints) -> str:
     """Join segment texts, dropping no-speech segments and echoes of the hint text."""
     echo = _HintEcho(hints)
+    context = getattr(hints, "context", None)
     kept: list[str] = []
     for seg in segments:
         text = (getattr(seg, "text", "") or "").strip()
@@ -182,6 +200,9 @@ def filter_segments(segments: Sequence[Any], hints: SttHints) -> str:
             log.info(
                 "dropped a segment that only repeats the vocabulary hint (%d chars)", len(text)
             )
+            continue
+        if not kept and echoes_context(text, context):
+            log.info("dropped a segment that only repeats the previous words (%d chars)", len(text))
             continue
         kept.append(text)
     joined = " ".join(kept)
@@ -381,6 +402,11 @@ class FasterWhisperEngine:
             }
         hotwords = (hints.hotwords or "").strip()
         initial_prompt = (hints.initial_prompt or "").strip()
+        context = (hints.context or "").strip()
+        if context:
+            # The previous stretch's last words go last: Whisper reads the initial prompt
+            # as the text just before this audio (faster-whisper keeps its last 223 tokens).
+            initial_prompt = f"{initial_prompt} {context}".strip()
         if hotwords:
             opts["hotwords"] = hotwords
         if initial_prompt:

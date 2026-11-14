@@ -76,10 +76,18 @@ class FakeListener:
 
 class FakeRecorder:
     def __init__(
-        self, *, max_seconds, on_level, on_limit, audio=None, start_error=None, stop_error=None
+        self,
+        *,
+        max_seconds,
+        on_level,
+        on_limit,
+        on_audio=None,
+        audio=None,
+        start_error=None,
+        stop_error=None,
     ):
         self.max_seconds = max_seconds
-        self.on_level, self.on_limit = on_level, on_limit
+        self.on_level, self.on_limit, self.on_audio = on_level, on_limit, on_audio
         self.audio = audio if audio is not None else np.full(16_000 * 2, 0.1, np.float32)
         self.start_error, self.stop_error = start_error, stop_error
         self.started = self.stopped = self.cancelled = 0

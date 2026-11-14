@@ -583,7 +583,7 @@ def test_info_from_model_choice(tmp_path):
         "version": "9.9.9",
         "stt": {"tier": "balanced", "device": "cuda", "speed": "ok"},
         "cleanup": True,
-        "accepts": ["audio", "text"],
+        "accepts": ["audio", "text", "stream"],
     }
 
 

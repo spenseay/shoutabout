@@ -8,9 +8,14 @@ It uses exactly the same steps as dictating from the iPhone in "Computer" mode: 
 the optional text tidying with its safety guard, one paragraph, the same paste rules (Ctrl+V, or
 Shift+Insert in terminals, never Enter), Pause, and Recent. Audio and text never leave the PC.
 
+Long dictations finish fast: while you talk, ShoutAbout already transcribes (and tidies) what
+you said so far, so after the second press only the last few seconds are left. Two minutes
+take about as long to come out as twenty seconds.
+
 Code: [`local_dictation.py`](../src/shoutabout/local_dictation.py) (the controller),
 [`hotkey.py`](../src/shoutabout/hotkey.py), [`mic.py`](../src/shoutabout/mic.py),
-[`overlay.py`](../src/shoutabout/overlay.py), [`recent.py`](../src/shoutabout/recent.py).
+[`overlay.py`](../src/shoutabout/overlay.py), [`streaming.py`](../src/shoutabout/streaming.py),
+[`recent.py`](../src/shoutabout/recent.py).
 
 ## Using it
 
@@ -139,10 +144,14 @@ keyboard hook thread ("hotkey-hook")   WH_KEYBOARD_LL; observe-only: always Call
 hotkey worker ("hotkey")                HotkeyMachine: taps, holds, shortcuts, Esc; checks the
    |  START / STOP / CANCEL               physical key while busy (a release the lock screen
    v                                      swallowed still counts as a release)
-LocalDictation                          START: overlay "listening" FIRST, then open the mic
+LocalDictation                          START: overlay "listening" FIRST, then open the mic;
+   |                                           every mic block also goes to a stream session
    |                                     STOP: close the mic, overlay "thinking",
-   |                                           worker thread -> Pipeline.process_audio(...)
-   v                                     CANCEL: drop the recording
+   |                                           worker thread -> session.finish(recording)
+   v                                     CANCEL: drop the recording and the session
+StreamSession ("stream" thread)         while you talk: cut at pauses, transcribe each stretch
+   |                                     (one at a time, after any phone request), clean it
+   v                                     at STOP: transcribe the tail, join, deliver
 Pipeline (same as /transcribe)          holds HubState.busy: phone requests and local dictation
                                         take turns; STT -> cleanup -> paste -> Recent
 overlay thread ("overlay")              layered window, created at start; ~30 fps while visible
@@ -155,6 +164,25 @@ overlay-warm / mic-warm (at start)      pre-render the pill's frames for every m
 - A new dictation can start while the previous one is still being transcribed; it waits its turn
   for the pipeline, and the old result doesn't overwrite the new "listening" pill.
 - If a device refuses 16 kHz, the recorder opens it at its own rate and resamples.
+
+### Long dictations: transcribed while you talk
+
+The recorder hands every block to a stream session ([`streaming.py`](../src/shoutabout/streaming.py),
+the same machinery as the phone's streamed dictations in [protocol.md](protocol.md)). Once
+15 s are waiting it finds a pause (Silero VAD) and transcribes that stretch in the background
+with your vocabulary and the end of the previous stretch as context, then tidies it. The
+pill keeps listening; the tray doesn't say "transcribing" until you stop. At the second press
+only the tail (on average about 10 s) is left, so the wait is about the same for 20 s or for
+two minutes.
+
+- The recording itself is what counts: at "stop" the session gets the whole recording and adds
+  anything it missed (a device at another rate never feeds it, so it's all transcribed then).
+- Esc, a too-short press, Pause or Quit throw the session away with the recording.
+- A phone request that arrives meanwhile waits for one stretch at most (about half a second).
+- If the speech engine fails, the recording goes to Recent as before. If streaming fails for
+  any other reason, the whole recording is transcribed the normal way: nothing is lost.
+- A streamed dictation writes one `transcribe ... streamed=true` line to `hub.log` (timings
+  and lengths, never text).
 
 ### Speed: from the key to the pill
 
@@ -211,7 +239,10 @@ right, the zipped line with its teeth where it passed, no tongue once sealed, al
 pill, pre-rendered), the placement
 maths (top-centre, top-docked taskbar, other monitors), the controller end to end with the real
 pipeline (paste, Recent when pasting fails, pause, busy lock, errors, "No mic" once per session,
-failed recordings kept), and that a Right Ctrl + C never calls the overlay at all. The real
+failed recordings kept), streaming while recording (stretches done before "stop", only the
+tail after it, Esc / too short / stop discarding the session, the fallback to the whole
+recording, the recorder handing over 16 kHz blocks only), and that a Right Ctrl + C never calls
+the overlay at all. The real
 overlay window was shown (under a second) at the top of this PC's screen: it appeared within
 0.1 s of being asked, didn't take the focus, and sat at the top of the work area.
 

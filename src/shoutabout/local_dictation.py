@@ -17,6 +17,12 @@ Phone requests and local dictation take turns through the hub's busy lock
 (``HubState.busy``, which the pipeline holds while it works). A new recording may start
 while the previous one is still being transcribed; it simply waits its turn.
 
+Long dictations finish fast: while you talk, the microphone's blocks also go to a
+streamed dictation (:mod:`shoutabout.streaming`), which transcribes finished stretches in
+the background, so at "stop" only the last few seconds are left. Escape (or Pause, or
+stopping) throws it away with the recording. If streaming fails for any reason other
+than the speech engine, the whole recording is transcribed the normal way.
+
 When transcription fails after recording, the audio is kept in memory (:mod:`recent`) and
 the Recent page offers "Try again", so a long dictation is never lost.
 
@@ -42,7 +48,7 @@ from shoutabout.inject.base import ADMIN_WINDOW_WARNING, COPIED_NOTICE, NO_PASTE
 from shoutabout.mic import MicError, MicRecorder, has_input_device, no_mic_error, warm_up
 from shoutabout.models import HubStatus
 from shoutabout.overlay import OverlayLike, create_overlay
-from shoutabout.pipeline import NO_SPEECH_WARNING, PAUSED_WARNING
+from shoutabout.pipeline import NO_SPEECH_WARNING, PAUSED_WARNING, format_log_line
 from shoutabout.state import HubState
 
 log = logging.getLogger(__name__)
@@ -127,6 +133,7 @@ class LocalDictation:
         self._listener: Any = None
         self._overlay: OverlayLike | None = None
         self._recorder: Any = None
+        self._session: Any = None  # the streamed dictation fed while recording (or None)
         self._generation = 0  # bumps on every new recording
         self._jobs = 0  # transcriptions running
         self._listeners: list[Callable[[DictationState], None]] = []
@@ -189,12 +196,15 @@ class LocalDictation:
             if self._state == DictationState.OFF and self._listener is None:
                 return
             recorder, self._recorder = self._recorder, None
+            session, self._session = self._session, None
             listener, self._listener = self._listener, None
             overlay, self._overlay = self._overlay, None
             self._generation += 1
             self._set_state(DictationState.OFF)
         if recorder is not None:
             self._safe(recorder.cancel)
+        if session is not None:
+            self._safe(session.cancel)
         if listener is not None:
             self._safe(listener.stop)
         if overlay is not None:
@@ -260,7 +270,8 @@ class LocalDictation:
                 overlay.notice("Paused")
                 listener.force_stop()
                 return
-            if self._pipeline() is None:
+            pipeline = self._pipeline()
+            if pipeline is None:
                 self._not_ready(overlay)
                 listener.force_stop()
                 return
@@ -270,27 +281,48 @@ class LocalDictation:
                 return
             d = self.cfg.dictation
             overlay.listening()  # first: the pill shows at once
+            session = self._open_session(pipeline)
             recorder = self._recorder_factory(
                 max_seconds=d.max_seconds,
                 on_level=overlay.set_level,
                 on_limit=self._on_limit,
+                on_audio=session.feed if session is not None else None,
             )
             try:
                 recorder.start()
             except MicError as exc:
+                self._drop(session)
                 self._mic_problem(overlay, exc)
                 listener.force_stop()
                 return
             except Exception as exc:
                 log.exception("couldn't start recording")
+                self._drop(session)
                 self._mic_problem(
                     overlay, MicError(f"Couldn't use the microphone: {exc}", "Mic problem")
                 )
                 listener.force_stop()
                 return
             self._recorder = recorder
+            self._session = session
             self._generation += 1
             self._set_state(DictationState.LISTENING)
+
+    @staticmethod
+    def _open_session(pipeline: Any) -> Any:
+        """A streamed dictation fed while recording, when the pipeline has them."""
+        open_stream = getattr(pipeline, "open_stream", None)
+        if open_stream is None:
+            return None
+        try:
+            return open_stream(target="pc", route="local")
+        except Exception:
+            log.exception("talk to this PC: couldn't stream; transcribing at the end instead")
+            return None
+
+    def _drop(self, session: Any) -> None:
+        if session is not None:
+            self._safe(session.cancel)
 
     def _mic_problem(self, overlay: OverlayLike, exc: MicError) -> None:
         """The red pill every time; the notification only once per session (per problem)."""
@@ -315,16 +347,19 @@ class LocalDictation:
             if recorder is None or self._state != DictationState.LISTENING:
                 return
             self._recorder = None
+            session, self._session = self._session, None
             overlay = self._overlay
             try:
                 audio = recorder.stop()
             except MicError as exc:
+                self._drop(session)
                 if overlay is not None:
                     self._mic_problem(overlay, exc)
                 self._settle()
                 return
             except Exception:
                 log.exception("stopping the recording failed")
+                self._drop(session)
                 if overlay is not None:
                     overlay.error("Mic problem")
                 self._settle()
@@ -332,6 +367,7 @@ class LocalDictation:
             seconds = len(audio) / SAMPLE_RATE
             if seconds < MIN_SECONDS:
                 log.debug("talk to this PC: %.2f s is too short; ignored", seconds)
+                self._drop(session)
                 if overlay is not None:
                     overlay.cancelled()
                 self._settle()
@@ -344,7 +380,7 @@ class LocalDictation:
         log.debug("talk to this PC: %.1f s recorded (%s)", seconds, reason)
         threading.Thread(
             target=self._transcribe,
-            args=(audio, generation),
+            args=(audio, generation, session),
             name="dictation-transcribe",
             daemon=True,
         ).start()
@@ -352,9 +388,11 @@ class LocalDictation:
     def _cancel(self, reason: str) -> None:
         with self._lock:
             recorder, self._recorder = self._recorder, None
+            session, self._session = self._session, None
             if recorder is None:
                 return
             self._safe(recorder.cancel)
+            self._drop(session)
             overlay = self._overlay
             if overlay is not None:
                 if reason == "escape":
@@ -374,13 +412,14 @@ class LocalDictation:
             log.exception("couldn't keep the failed recording")
             return False
 
-    def _transcribe(self, audio: np.ndarray, generation: int) -> None:
+    def _transcribe(self, audio: np.ndarray, generation: int, session: Any = None) -> None:
         outcome: Callable[[OverlayLike], None]
         try:
             pipeline = self._pipeline()
             if pipeline is None:
+                self._drop(session)
                 raise EngineError("The speech engine isn't ready.")
-            result = pipeline.process_audio(audio, target="pc", route="local")
+            result = self._deliver(pipeline, audio, session)
         except EngineError as exc:
             log.error("talk to this PC: %s", exc)
             kept = self._keep(audio, str(exc))
@@ -411,6 +450,30 @@ class LocalDictation:
                 self._safe(lambda: outcome(overlay))
             if self._state == DictationState.THINKING and self._jobs <= 0:
                 self._set_state(DictationState.READY)
+
+    @staticmethod
+    def _deliver(pipeline: Any, audio: np.ndarray, session: Any) -> Any:
+        """Finish the streamed dictation (only its tail is left to transcribe), or
+        transcribe the whole recording. The recording itself is what counts: anything the
+        stream missed is added at finish. Engine errors go to the caller (Recent keeps the
+        recording); any other streaming failure falls back to the whole recording."""
+        if session is not None:
+            try:
+                result = session.finish(audio=audio)
+            except EngineError:
+                raise
+            except Exception:
+                if getattr(session, "delivered", False):
+                    raise
+                log.exception("talk to this PC: streaming failed; transcribing the recording")
+                try:
+                    session.cancel()  # stops its background work, if any is left
+                except Exception:
+                    log.debug("couldn't cancel the failed stream", exc_info=True)
+            else:
+                log.info("%s", format_log_line(result))
+                return result
+        return pipeline.process_audio(audio, target="pc", route="local")
 
     # ---------------------------------------------------------------- helpers
 

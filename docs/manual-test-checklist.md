@@ -284,6 +284,10 @@ stop.
   - Steps: dictate (or play audio) for about 10 minutes in PC mode at home, then once via the tunnel.
   - Expected: the full text is pasted as one paragraph with no 413 or 524. Cleanup may fall back with "transcript too long", which is acceptable.
   - Partly verified during build: a 9.5-minute (570 s) AAC m4a was transcribed with the CLI on the GPU. STT took 6.6 s and the total was 6.8 s. The output was a single paragraph with no newlines. Cleanup fell back to the raw text, as expected, because the transcript (about 6,400 tokens) is larger than `num_ctx` 4096. Uploading a long recording from the phone or through Cloudflare wasn't tested.
+- [ ] **Long dictations finish fast (transcribe while you talk).**
+  - Steps: with "Talk to this PC", and from the iPhone app at home (computer target), dictate about 2 minutes with normal pauses, then stop.
+  - Expected: the text appears about as fast as after a 20-second dictation (under a second or so); `hub.log` has one `transcribe ... streamed=true stretches=N` line with `bg_stt`/`bg_cleanup`; the tray only says "transcribing" after you stop; Esc while talking pastes nothing.
+  - Partly verified during build: with the hub's model and Ollama cleanup on the build PC, 2-minute TTS clips fed at real time came out 0.6–0.8 s after "stop" (3.5–4.3 s for the same files whole), with the same words. A real microphone and a real phone stream weren't tried.
 - [ ] **Over the limit is rejected cleanly.**
   - Steps: dictate for more than 10 minutes.
   - Expected: `413` with a clear message, and nothing pasted.
