@@ -14,12 +14,13 @@ struct ShoutAboutWidgetsBundle: WidgetBundle {
 
 // MARK: - Control Center: Computer / Phone toggle
 
-/// Control Center toggle: on = Phone (copy on the iPhone), off = Computer (type on the PC).
+/// Control Center toggle: on = Phone (copy on the iPhone), off = Computer (type on the selected
+/// computer, shown by its name).
 struct TargetControl: ControlWidget {
     var body: some ControlWidgetConfiguration {
-        StaticControlConfiguration(kind: WidgetKinds.targetControl, provider: TargetValueProvider()) { isPhone in
-            ControlWidgetToggle("Dictation Target", isOn: isPhone, action: SetPhoneModeIntent()) { isOn in
-                Label(isOn ? "Phone" : "Computer", systemImage: isOn ? "iphone" : "desktopcomputer")
+        StaticControlConfiguration(kind: WidgetKinds.targetControl, provider: TargetValueProvider()) { value in
+            ControlWidgetToggle("Dictation Target", isOn: value.isPhone, action: SetPhoneModeIntent()) { isOn in
+                Label(isOn ? "Phone" : value.computerName, systemImage: isOn ? "iphone" : "desktopcomputer")
             }
             .tint(Theme.Palette.tongueRed)
         }
@@ -28,11 +29,23 @@ struct TargetControl: ControlWidget {
     }
 }
 
-struct TargetValueProvider: ControlValueProvider {
-    var previewValue: Bool { false }
+/// The toggle's state: Phone or not, and what the computer side is called ("Desktop").
+struct TargetControlValue: Hashable, Codable, Sendable {
+    var isPhone: Bool
+    var computerName: String
+}
 
-    func currentValue() async throws -> Bool {
-        SharedSettings().target == .phone
+struct TargetValueProvider: ControlValueProvider {
+    var previewValue: TargetControlValue {
+        TargetControlValue(isPhone: false, computerName: DictationTarget.pc.label)
+    }
+
+    func currentValue() async throws -> TargetControlValue {
+        let settings = SharedSettings()
+        return TargetControlValue(
+            isPhone: settings.target == .phone,
+            computerName: settings.selectedComputerName ?? DictationTarget.pc.label
+        )
     }
 }
 
@@ -59,6 +72,18 @@ struct DictateControl: ControlWidget {
 struct TargetEntry: TimelineEntry {
     let date: Date
     let target: DictationTarget
+    /// The selected computer's short name ("Desktop").
+    var computerName: String? = nil
+
+    /// "Desktop" (the selected computer) or "Phone".
+    var destination: String {
+        target == .pc ? (computerName ?? target.label) : target.label
+    }
+
+    static func current() -> TargetEntry {
+        let settings = SharedSettings()
+        return TargetEntry(date: Date(), target: settings.target, computerName: settings.selectedComputerName)
+    }
 }
 
 struct TargetTimelineProvider: TimelineProvider {
@@ -67,12 +92,11 @@ struct TargetTimelineProvider: TimelineProvider {
     }
 
     func getSnapshot(in context: Context, completion: @escaping (TargetEntry) -> Void) {
-        completion(TargetEntry(date: Date(), target: SharedSettings().target))
+        completion(TargetEntry.current())
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<TargetEntry>) -> Void) {
-        let entry = TargetEntry(date: Date(), target: SharedSettings().target)
-        completion(Timeline(entries: [entry], policy: .never))
+        completion(Timeline(entries: [TargetEntry.current()], policy: .never))
     }
 }
 
@@ -107,12 +131,12 @@ struct DictateWidgetView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     Text("SHOUT")
                         .font(Theme.Typography.display(20))
-                    Text("to \(entry.target.label)")
+                    Text("to \(entry.destination)")
                         .font(.caption)
                 }
             }
         case .accessoryInline:
-            Label("Shout to \(entry.target.label)", systemImage: "mouth.fill")
+            Label("Shout to \(entry.destination)", systemImage: "mouth.fill")
         default:
             MouthView(ratio: Theme.Mouth.openRatio, tongue: true, style: .standard)
                 .padding(9)

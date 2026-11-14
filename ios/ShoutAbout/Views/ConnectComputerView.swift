@@ -11,6 +11,7 @@ struct ConnectComputerView: View {
     @State private var showManual = false
     @State private var showMore = false
     @State private var address = ""
+    @State private var changesBeforeSheet = 0
     var onConnected: () -> Void
     var onSkip: (() -> Void)?
 
@@ -47,9 +48,10 @@ struct ConnectComputerView: View {
         }
     }
 
-    /// The QR code or the manual form paired the old way.
+    /// The QR code or the manual form paired the old way (not just closed: with a computer
+    /// already paired, `hasComputer` alone doesn't tell).
     private func legacyPairingMaybeDone() {
-        if model.hasComputer, case .searching = pairing.step {
+        if model.pairingChanges != changesBeforeSheet, model.hasComputer, case .searching = pairing.step {
             pairing.markConnected(model.computerDisplayName)
         }
     }
@@ -73,7 +75,7 @@ struct ConnectComputerView: View {
 
                 VStack(spacing: Theme.Spacing.m) {
                     ForEach(pairing.finder.computers) { computer in
-                        ComputerRow(computer: computer) {
+                        ComputerRow(computer: computer, added: model.roster.computer(computer.id) != nil) {
                             pairing.connect(computer, model: model)
                         }
                     }
@@ -84,8 +86,11 @@ struct ConnectComputerView: View {
 
                 DisclosureGroup(isExpanded: $showMore) {
                     VStack(alignment: .leading, spacing: Theme.Spacing.m) {
-                        Button("Scan a code instead") { showScanner = true }
-                            .font(Theme.Typography.bold(15))
+                        Button("Scan a code instead") {
+                            changesBeforeSheet = model.pairingChanges
+                            showScanner = true
+                        }
+                        .font(Theme.Typography.bold(15))
                         Text("Or type the address your PC shows:")
                             .font(Theme.Typography.body(14))
                             .foregroundStyle(Theme.Colors.inkMuted)
@@ -99,8 +104,11 @@ struct ConnectComputerView: View {
                                 .font(Theme.Typography.bold(16))
                                 .disabled(address.trimmingCharacters(in: .whitespaces).isEmpty)
                         }
-                        Button("Enter pairing details (older PCs)") { showManual = true }
-                            .font(Theme.Typography.bold(15))
+                        Button("Enter pairing details (older PCs)") {
+                            changesBeforeSheet = model.pairingChanges
+                            showManual = true
+                        }
+                        .font(Theme.Typography.bold(15))
                     }
                     .padding(.top, Theme.Spacing.s)
                 } label: {
@@ -242,6 +250,8 @@ struct ConnectComputerView: View {
 
 private struct ComputerRow: View {
     var computer: DiscoveredComputer
+    /// Already paired with this iPhone (tapping it pairs it again).
+    var added = false
     var action: () -> Void
 
     var body: some View {
@@ -257,7 +267,7 @@ private struct ComputerRow: View {
                         .font(Theme.Typography.bold(19))
                         .foregroundStyle(Theme.Colors.cardInk)
                         .lineLimit(1)
-                    Text(computer.isCompatible ? "ShoutAbout \(computer.version ?? "")" : "Update ShoutAbout on this iPhone")
+                    Text(computer.isCompatible ? "\(added ? "Added · " : "")ShoutAbout \(computer.version ?? "")" : "Update ShoutAbout on this iPhone")
                         .font(Theme.Typography.body(13))
                         .foregroundStyle(Theme.Colors.cardInkMuted)
                 }

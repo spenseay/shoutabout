@@ -21,14 +21,21 @@ protocol HubTransport: Sendable {
     func pairingStatus(_ base: URL, requestID: String) async throws -> PairStatus
 }
 
-/// The computer this iPhone is paired with through the v2 flow (Bonjour + Allow on the PC).
-/// Stored in the App Group; the device token itself lives in the keychain.
-struct PairedComputer: Codable, Equatable, Sendable {
+/// A computer this iPhone is paired with through the v2 flow (Bonjour + Allow on the PC).
+/// Stored in the App Group (`ComputerRoster`); its device token lives in the keychain under
+/// its id.
+struct PairedComputer: Codable, Equatable, Sendable, Identifiable {
     /// The PC's installation UUID from `/hello` and the Bonjour TXT record.
     var id: String
+    /// The PC's own name, kept up to date from `/hello` and `/info`.
     var name: String
     var lanURL: URL
     var pairedAt: Date = Date()
+    /// A name given on this iPhone (Rename). Always wins over `name`.
+    var nickname: String? = nil
+
+    /// "Desktop": the nickname, else the PC's name made short (`ComputerNames`).
+    var displayName: String { ComputerNames.display(nickname: nickname, name: name) }
 }
 
 /// Everything a dictation needs to reach the paired computer, resolved from settings and the

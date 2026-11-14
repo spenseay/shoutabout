@@ -20,8 +20,12 @@ struct SharedSettings {
         static let vocabFetchedAt = "vocabFetchedAt"
         static let pendingDictationAt = "pendingDictationAt"
         static let pairedComputer = "pairedComputer"
+        static let pairedComputers = "pairedComputers"
+        static let selectedComputerID = "selectedComputerID"
+        static let codePairingOwner = "codePairingOwner"
         static let deviceID = "deviceID"
         static let hubInfo = "hubInfo"
+        static let hubInfos = "hubInfos"
         static let onboardingDone = "onboardingDone"
         static let useTunnel = "useTunnel"
         static let pendingCopy = "pendingCopy"
@@ -96,16 +100,66 @@ struct SharedSettings {
         nonmutating set { defaults.set(newValue, forKey: Key.vocabFetchedAt) }
     }
 
-    /// The computer paired through the v2 flow (the device token is in the keychain).
+    /// The computers paired through the v2 flow, the selected one, and which one has the code
+    /// pairing (the device tokens are in the keychain, one per computer).
+    var roster: ComputerRoster {
+        get {
+            var roster = ComputerRoster(
+                computers: decode([PairedComputer].self, Key.pairedComputers) ?? [],
+                selectedID: defaults.string(forKey: Key.selectedComputerID),
+                codePairingOwnerID: defaults.string(forKey: Key.codePairingOwner)
+            )
+            roster.normalize()
+            return roster
+        }
+        nonmutating set {
+            encode(newValue.computers.isEmpty ? nil : newValue.computers, Key.pairedComputers)
+            defaults.set(newValue.selectedID, forKey: Key.selectedComputerID)
+            defaults.set(newValue.codePairingOwnerID, forKey: Key.codePairingOwner)
+        }
+    }
+
+    /// The selected computer's short name ("Desktop") for controls and widgets; nil without one.
+    var selectedComputerName: String? {
+        let roster = self.roster
+        guard let selected = roster.selected else { return nil }
+        return roster.displayName(for: selected.id)
+    }
+
+    /// The last `/info` of each computer (by hub key).
+    var cachedHubInfos: [CachedHubInfo] {
+        get { decode([CachedHubInfo].self, Key.hubInfos) ?? [] }
+        nonmutating set { encode(newValue.isEmpty ? nil : newValue, Key.hubInfos) }
+    }
+
+    /// Before several computers: the one paired computer (now only read to move it into
+    /// `roster`, see `migrateSingleComputer`).
     var pairedComputer: PairedComputer? {
         get { decode(PairedComputer.self, Key.pairedComputer) }
         nonmutating set { encode(newValue, Key.pairedComputer) }
     }
 
-    /// The last `/info` of the paired computer.
+    /// Before several computers: the one `/info` cache (moved into `cachedHubInfos`).
     var cachedHubInfo: CachedHubInfo? {
         get { decode(CachedHubInfo.self, Key.hubInfo) }
         nonmutating set { encode(newValue, Key.hubInfo) }
+    }
+
+    /// Once, from the version with a single computer: it becomes the first (and selected)
+    /// computer in `roster`, keeping the code pairing if there is one, and its `/info` goes
+    /// into the per-computer cache. Nobody has to pair again. `moveToken` moves its device
+    /// token to the keychain item for its id; when it can't yet (the keychain is locked) the
+    /// old entry stays and this runs again on the next launch. Writes nothing otherwise.
+    func migrateSingleComputer(hasCodePairing: Bool, moveToken: (String) -> Bool) {
+        if let single = cachedHubInfo {
+            if cachedHubInfos.isEmpty { cachedHubInfos = [single] }
+            cachedHubInfo = nil
+        }
+        guard let old = pairedComputer else { return }
+        var roster = self.roster
+        roster.adopt(old, hasCodePairing: hasCodePairing)
+        self.roster = roster
+        if moveToken(old.id) { pairedComputer = nil }
     }
 
     /// First-launch setup finished (or skipped).

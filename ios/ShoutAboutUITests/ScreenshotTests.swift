@@ -92,6 +92,13 @@ final class ScreenshotTests: XCTestCase {
         snap("dark-05-main-computer")
     }
 
+    func test05bMainTwoComputers() {
+        launch("main-computers")
+        snap("light-05b-main-two-computers")
+        launch("main-computers", dark: true)
+        snap("dark-05b-main-two-computers")
+    }
+
     func test06MainPhone() {
         launch("main-phone")
         snap("light-06-main-phone")
