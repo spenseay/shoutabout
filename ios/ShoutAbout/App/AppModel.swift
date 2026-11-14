@@ -188,6 +188,8 @@ final class AppModel {
     @ObservationIgnored private var keyboardTypingWatch: Task<Bool, Never>?
 
     static let undoWindow: Duration = .seconds(8)
+    /// A cached `/info` that doesn't list "stream" is asked for again after this, not a day.
+    static let streamInfoRecheck: TimeInterval = 5 * 60
 
     private init() {
         // Once, from the version with a single computer: it keeps working, no pairing again.
@@ -547,7 +549,7 @@ final class AppModel {
         dropDiscarded()
         discarded = item
         discardTask = Task { [weak self] in
-            try? await Task.sleep(for: Self.undoWindow)
+            try? await Task.sleep(for: AppModel.undoWindow)
             guard let self, !Task.isCancelled else { return }
             self.dropDiscarded()
         }
@@ -802,7 +804,7 @@ final class AppModel {
     /// A phone dictation waiting for the clipboard also went to the keyboard: when the
     /// keyboard on screen types it (within a moment of the hand-off), it has copied it as well.
     private func watchKeyboardTyping(_ id: String) {
-        keyboardTypingWatch = Task { [weak self] in
+        keyboardTypingWatch = Task<Bool, Never> { [weak self] in
             for _ in 0..<8 {  // the keyboard types it ~0.1-0.3 s after the hand-off
                 try? await Task.sleep(for: .milliseconds(100))
                 guard let self, !Task.isCancelled else { return false }
@@ -1064,6 +1066,17 @@ final class AppModel {
         return cached.info
     }
 
+    /// No fresh `/info` for this computer, or one without "stream" that's a few minutes old:
+    /// the PC may have been updated since, and then streams from the next dictation on rather
+    /// than a day later (`CachedHubInfo.maxAge`).
+    private func needsInfo(for link: ComputerLink) -> Bool {
+        guard let key = link.hubKey,
+              let cached = hubInfos.first(where: { $0.hubKey == key }),
+              cached.isFresh(for: key)
+        else { return true }
+        return !cached.info.acceptsStream && Date().timeIntervalSince(cached.fetchedAt) > Self.streamInfoRecheck
+    }
+
     private func storeHubInfo(_ info: HubInfo, key: String) {
         let cached = CachedHubInfo(info: info, fetchedAt: Date(), hubKey: key)
         hubInfos.removeAll { $0.hubKey == key }
@@ -1111,7 +1124,7 @@ final class AppModel {
 
         var endpoint = lan
         endpoint.baseURL = base
-        if force || freshInfo(for: link) == nil, let key = link.hubKey,
+        if force || needsInfo(for: link), let key = link.hubKey,
            let info = try? await transport.info(endpoint, timeout: 3) {
             storeHubInfo(info, key: key)
         }
