@@ -148,15 +148,16 @@ private final class StreamConverter: @unchecked Sendable {
         guard buffer.frameLength > 0 else { return }
         let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 64
         guard let converted = AVAudioPCMBuffer(pcmFormat: output, frameCapacity: capacity) else { return }
-        let supply = SupplyOnce()
+        // The input block may be @Sendable in the SDK: it captures only the Sendable box.
+        let supply = SupplyOnce(buffer)
         var error: NSError?
         let status = converter.convert(to: converted, error: &error) { _, inputStatus in
-            guard supply.claim() else {
+            guard let input = supply.take() else {
                 inputStatus.pointee = .noDataNow
                 return nil
             }
             inputStatus.pointee = .haveData
-            return buffer
+            return input
         }
         guard status != .error, error == nil, converted.frameLength > 0, let channels = converted.floatChannelData else {
             return
@@ -166,14 +167,19 @@ private final class StreamConverter: @unchecked Sendable {
     }
 }
 
-/// The converter asks for input until it has enough; each tap buffer is given once.
+/// The converter asks for input until it has enough; each tap buffer is given once. Used on
+/// the tap's thread only (the converter calls its input block synchronously).
 private final class SupplyOnce: @unchecked Sendable {
-    private var supplied = false
+    private var buffer: AVAudioPCMBuffer?
 
-    func claim() -> Bool {
-        guard !supplied else { return false }
-        supplied = true
-        return true
+    init(_ buffer: AVAudioPCMBuffer) {
+        self.buffer = buffer
+    }
+
+    func take() -> AVAudioPCMBuffer? {
+        let taken = buffer
+        buffer = nil
+        return taken
     }
 }
 

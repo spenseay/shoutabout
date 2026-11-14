@@ -58,7 +58,7 @@ final class StreamingTests: XCTestCase {
         XCTAssertEqual(PCM16.sample(-3), -32767)
         XCTAssertEqual(PCM16.sample(.nan), 0)
         XCTAssertEqual(PCM16.sample(0.5), 16384)
-        XCTAssertEqual(PCM16.encode([0, 1, -1, 0.5]), Data([0x00, 0x00, 0xFF, 0x7F, 0x01, 0x80, 0x00, 0x40]))
+        XCTAssertEqual(PCM16.encode([0, 1, -1, 0.5] as [Float]), Data([0x00, 0x00, 0xFF, 0x7F, 0x01, 0x80, 0x00, 0x40]))
         XCTAssertEqual(PCM16.encode([Float]()), Data())
     }
 

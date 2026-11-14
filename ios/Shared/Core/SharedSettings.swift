@@ -113,7 +113,8 @@ struct SharedSettings {
             return roster
         }
         nonmutating set {
-            encode(newValue.computers.isEmpty ? nil : newValue.computers, Key.pairedComputers)
+            let computers: [PairedComputer]? = newValue.computers.isEmpty ? nil : newValue.computers
+            encode(computers, Key.pairedComputers)
             defaults.set(newValue.selectedID, forKey: Key.selectedComputerID)
             defaults.set(newValue.codePairingOwnerID, forKey: Key.codePairingOwner)
         }
@@ -129,7 +130,10 @@ struct SharedSettings {
     /// The last `/info` of each computer (by hub key).
     var cachedHubInfos: [CachedHubInfo] {
         get { decode([CachedHubInfo].self, Key.hubInfos) ?? [] }
-        nonmutating set { encode(newValue.isEmpty ? nil : newValue, Key.hubInfos) }
+        nonmutating set {
+            let infos: [CachedHubInfo]? = newValue.isEmpty ? nil : newValue
+            encode(infos, Key.hubInfos)
+        }
     }
 
     /// Before several computers: the one paired computer (now only read to move it into
