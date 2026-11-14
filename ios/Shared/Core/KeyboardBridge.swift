@@ -272,6 +272,15 @@ struct KeyboardLinkStore {
         defaults.string(forKey: Key.claim) == KeyboardClaim(id: handoff.id, claimant: claimant).stored
     }
 
+    /// For the app: a keyboard typed handoff `id` (it claimed it, then removed it). A claim
+    /// still settling, or given back, doesn't count.
+    func wasTyped(_ id: String) -> Bool {
+        guard let claim = defaults.string(forKey: Key.claim).flatMap(KeyboardClaim.init(stored:)),
+              claim.id == id
+        else { return false }
+        return decode(KeyboardHandoff.self, Key.handoff)?.id != id
+    }
+
     /// Gives a claim back (the keyboard went away before typing it), so the next one can.
     func releaseClaim(_ handoff: KeyboardHandoff, by claimant: String) {
         guard holdsClaim(handoff, by: claimant) else { return }

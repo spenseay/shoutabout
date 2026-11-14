@@ -206,6 +206,26 @@ final class KeyboardBridgeTests: XCTestCase {
         XCTAssertNil(store.handoff(now: now))
     }
 
+    /// The app skips bringing itself forward to copy when the keyboard typed the dictation.
+    func testTheAppSeesWhenTheKeyboardTypedAHandoff() {
+        let store = makeStore()
+        let handoff = KeyboardHandoff(id: "dictation-1", text: "Sample text", createdAt: now)
+        store.publish(handoff)
+        XCTAssertFalse(store.wasTyped("dictation-1"))
+        XCTAssertTrue(store.claim(handoff, by: "keyboard-a"))
+        XCTAssertFalse(store.wasTyped("dictation-1"))  // claimed, still settling
+        store.removeHandoff(id: "dictation-1")
+        XCTAssertTrue(store.wasTyped("dictation-1"))  // claimed and removed: typed
+        XCTAssertFalse(store.wasTyped("dictation-2"))
+
+        // A claim given back (the keyboard went away) is not typed.
+        let other = KeyboardHandoff(id: "dictation-3", text: "Sample text", createdAt: now)
+        store.publish(other)
+        XCTAssertTrue(store.claim(other, by: "keyboard-a"))
+        store.releaseClaim(other, by: "keyboard-a")
+        XCTAssertFalse(store.wasTyped("dictation-3"))
+    }
+
     // MARK: Typed once
 
     func testTheFirstClaimWins() {

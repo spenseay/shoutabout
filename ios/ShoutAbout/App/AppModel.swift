@@ -40,6 +40,15 @@ struct DictationJob: Sendable {
     var copyInPCMode: Bool
     var offlineEngine: OfflineEnginePreference
     var vocab: [String]
+    /// Streamed to the PC while it was recorded (`StreamingUploader`); the recording's file is
+    /// the fallback. Never kept for Retry.
+    var stream: StreamingUploader? = nil
+}
+
+/// A recording thrown away with Cancel, kept a few seconds for Undo.
+struct DiscardedRecording: Equatable, Sendable {
+    var recording: Recording
+    var target: DictationTarget
 }
 
 enum StartResult: Equatable, Sendable {
@@ -101,7 +110,10 @@ final class AppModel {
     // MARK: Dictation state
 
     private(set) var phase: DictationPhase = .idle {
-        didSet { keyboardPhaseChanged(from: oldValue) }
+        didSet {
+            keyboardPhaseChanged(from: oldValue)
+            if oldValue.isBusy, !phase.isBusy { resumeDeliveryWaiters() }
+        }
     }
     /// Smoothed mic level 0...1 while recording (drives the mouth).
     private(set) var level: Double = 0
@@ -116,6 +128,9 @@ final class AppModel {
     /// the app copy there) and waits for the app to be in front, or that took too long and
     /// the Copy button has to do it (see `putOnClipboard`).
     private(set) var clipboardPending = false
+    /// Cancel keeps the recording `undoWindow` for Undo ("Discarded · Undo"): a mis-tap on
+    /// Cancel mustn't lose minutes of talking.
+    private(set) var discarded: DiscardedRecording?
 
     // MARK: The ShoutAbout keyboard
 
@@ -164,6 +179,15 @@ final class AppModel {
     @ObservationIgnored private var keyboardStarting = false
     @ObservationIgnored private var keyboardStopRequested = false
     @ObservationIgnored private var keyboardOpenPending = false
+    /// The recording in progress, streamed to the PC meanwhile (nil: not streamed).
+    @ObservationIgnored private var stream: StreamingUploader?
+    @ObservationIgnored private var discardTask: Task<Void, Never>?
+    /// Intents waiting for the dictation being sent to land (`waitForDelivery`).
+    @ObservationIgnored private var deliveryWaiters: [CheckedContinuation<Void, Never>] = []
+    /// Did the keyboard on screen type the last phone dictation (and so copy it)?
+    @ObservationIgnored private var keyboardTypingWatch: Task<Bool, Never>?
+
+    static let undoWindow: Duration = .seconds(8)
 
     private init() {
         // Once, from the version with a single computer: it keeps working, no pairing again.
@@ -421,16 +445,47 @@ final class AppModel {
             showFailure(message)
             return .failed(message)
         }
+        if !forKeyboard { startStreamIfUseful(target: target) }
         recordingTarget = target
         level = 0
         elapsed = 0
         phase = .recording
         startTick += 1
         startMetering()
+        dropDiscarded()  // a new recording ends the Undo of a cancelled one
         discardPendingCopy()  // a new dictation supersedes one still waiting for the clipboard
         if !isDemo { keyboardLink.removeHandoff() }  // ...or for the keyboard
         refreshVocabQuietly()  // ready by the time you stop talking
         return .started
+    }
+
+    /// The recorder just started: when the PC transcribes while you talk (`StreamPolicy`), the
+    /// audio streams to it meanwhile, from an input tap of its own. Not for the keyboard (its
+    /// session's input already runs) or in the screenshot scenes.
+    private func startStreamIfUseful(target: DictationTarget) {
+        takeStream()?.cancel()
+        guard !isDemo, let link = computerLink(),
+              let endpoint = StreamPolicy.endpoint(
+                  for: link,
+                  info: freshInfo(for: link),
+                  keyboardSession: recorder.isLiveInputRunning
+              ),
+              let uploader = StreamingUploader.start(target: target, endpoint: endpoint, hubID: link.hubID)
+        else { return }
+        guard recorder.isRecording else {
+            uploader.cancel()  // the recording (the safe copy) comes first
+            return
+        }
+        stream = uploader
+    }
+
+    /// The stream's input stops (before the recorder closes the audio session); the stream goes
+    /// with the job, or is cancelled.
+    private func takeStream() -> StreamingUploader? {
+        let taken = stream
+        stream = nil
+        taken?.stopCapture()
+        return taken
     }
 
     private func microphoneDenied() -> StartResult {
@@ -445,25 +500,66 @@ final class AppModel {
     func stopAndSend() -> Task<Void, Never>? {
         guard phase == .recording else { return nil }
         stopMetering()
+        let stream = takeStream()
         let activity = self.activity
         guard let recording = recorder.stop() else {
+            stream?.cancel()
             phase = .idle
             return Task { await activity.cancel() }
         }
         guard recording.duration >= 0.3 else {
+            stream?.cancel()
             try? FileManager.default.removeItem(at: recording.url)
             phase = .idle
             return Task { await activity.cancel() }
         }
-        return run(makeJob(recording))
+        return run(makeJob(recording, stream: stream))
     }
 
+    /// Cancel: nothing is sent, but the recording is kept `undoWindow` for Undo.
     func cancelRecording() {
+        guard phase == .recording else { return }
         stopMetering()
-        recorder.cancel()
+        takeStream()?.cancel()
+        let target = recordingTarget ?? effectiveTarget
+        let recording = recorder.stop()
         phase = .idle
         let activity = self.activity
         Task { await activity.cancel() }
+        guard let recording else { return }
+        guard recording.duration >= 0.3 else {
+            try? FileManager.default.removeItem(at: recording.url)
+            return
+        }
+        keepForUndo(DiscardedRecording(recording: recording, target: target))
+    }
+
+    /// Undo after Cancel: sends the recording as if Stop had been pressed.
+    func undoCancel() {
+        guard let item = discarded, phase != .recording, !phase.isBusy else { return }
+        discardTask?.cancel()
+        discardTask = nil
+        discarded = nil
+        run(makeJob(item.recording, target: item.target))
+    }
+
+    private func keepForUndo(_ item: DiscardedRecording) {
+        dropDiscarded()
+        discarded = item
+        discardTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.undoWindow)
+            guard let self, !Task.isCancelled else { return }
+            self.dropDiscarded()
+        }
+    }
+
+    /// The Undo is over (its time ran out, or a new recording started): the audio is deleted.
+    private func dropDiscarded() {
+        discardTask?.cancel()
+        discardTask = nil
+        guard let item = discarded else { return }
+        discarded = nil
+        try? FileManager.default.removeItem(at: item.recording.url)
     }
 
     func cancelProcessing() {
@@ -485,7 +581,7 @@ final class AppModel {
         if !phase.isBusy, phase != .recording { phase = .idle }
     }
 
-    private func makeJob(_ recording: Recording, target: DictationTarget? = nil) -> DictationJob {
+    private func makeJob(_ recording: Recording, target: DictationTarget? = nil, stream: StreamingUploader? = nil) -> DictationJob {
         let link = computerLink()
         return DictationJob(
             recording: recording,
@@ -494,14 +590,21 @@ final class AppModel {
             cachedInfo: freshInfo(for: link),
             copyInPCMode: copyInPCMode,
             offlineEngine: offlineEngine,
-            vocab: vocab
+            vocab: vocab,
+            stream: stream
         )
     }
 
     @discardableResult
     private func run(_ job: DictationJob) -> Task<Void, Never> {
-        // Both targets ask a paired PC first (Phone: the PC writes the text when it's at home).
-        let first: DictationStage = job.computer?.lanEndpoint != nil ? .lookingForComputer : .transcribingOnPhone
+        // Both targets ask a paired PC first (Phone: the PC writes the text when it's at home);
+        // a streamed one is mostly there already.
+        let first: DictationStage
+        if job.stream != nil {
+            first = .sendingAudio(.lan)
+        } else {
+            first = job.computer?.lanEndpoint != nil ? .lookingForComputer : .transcribingOnPhone
+        }
         phase = .processing(first.message)
         activity.sending()
         processingTask?.cancel()
@@ -564,9 +667,15 @@ final class AppModel {
 
     // MARK: Routing and delivery
 
-    /// Runs the router; returns the Live Activity's ending task.
+    /// Runs the router; returns the Live Activity's ending task. A streamed dictation asks the
+    /// PC for its text first; if the stream didn't work out, the file goes the usual way.
     private func process(_ job: DictationJob) async -> Task<Void, Never>? {
         let started = ContinuousClock.now
+        if let stream = job.stream {
+            let outcome = await stream.finish(target: job.target, recordedSeconds: job.recording.duration)
+            if Task.isCancelled { return nil }
+            if let outcome { return finish(outcome, job: job, started: started) }
+        }
         let onWiFi = await NetworkPath.current().onWiFi
         let request = DictationRequest(
             audioURL: job.recording.url,
@@ -600,6 +709,8 @@ final class AppModel {
         if let info = outcome.learnedInfo, let key = job.computer?.hubKey {
             storeHubInfo(info, key: key)
         }
+        keyboardTypingWatch?.cancel()
+        keyboardTypingWatch = nil
         var copyWaits = false
         if !outcome.text.isEmpty, outcome.delivery == .clipboard || job.copyInPCMode {
             copyWaits = !putOnClipboard(outcome.text)
@@ -624,7 +735,8 @@ final class AppModel {
             text: outcome.text,
             keyboardSetUp: keyboardLink.keyboardIsSetUp
         ) {
-            publishKeyboardHandoff(outcome.text)
+            let handoffID = publishKeyboardHandoff(outcome.text)
+            if copyWaits { watchKeyboardTyping(handoffID) }
         }
         complete(item, job: job)
         refreshVocabQuietly()
@@ -677,6 +789,54 @@ final class AppModel {
         if !isDemo, settings.pendingCopy != nil { settings.pendingCopy = nil }
     }
 
+    /// A dictation from the system (Action Button, Control Center, Siri, the Live Activity's
+    /// Stop) whose text still waits for the clipboard: only the app in front can write it, so
+    /// the intent brings the app forward (`DictationLauncher`). Not when the ShoutAbout
+    /// keyboard on screen typed it: it put it on the clipboard too.
+    func copyWaitsForTheApp() async -> Bool {
+        guard clipboardPending else { return false }
+        if let watch = keyboardTypingWatch { _ = await watch.value }
+        return clipboardPending && UIApplication.shared.applicationState != .active
+    }
+
+    /// A phone dictation waiting for the clipboard also went to the keyboard: when the
+    /// keyboard on screen types it (within a moment of the hand-off), it has copied it as well.
+    private func watchKeyboardTyping(_ id: String) {
+        keyboardTypingWatch = Task { [weak self] in
+            for _ in 0..<8 {  // the keyboard types it ~0.1-0.3 s after the hand-off
+                try? await Task.sleep(for: .milliseconds(100))
+                guard let self, !Task.isCancelled else { return false }
+                if self.keyboardLink.wasTyped(id) {
+                    self.discardPendingCopy()
+                    self.activity.copied()
+                    return true
+                }
+            }
+            return false
+        }
+    }
+
+    /// Waits until the dictation being sent has landed (or failed, or was stopped).
+    func waitForDelivery() async {
+        guard phase.isBusy else { return }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            deliveryWaiters.append(continuation)
+        }
+    }
+
+    /// ...and its Live Activity has ended too.
+    func waitForCurrentDictation() async {
+        await processingTask?.value
+    }
+
+    private func resumeDeliveryWaiters() {
+        let waiters = deliveryWaiters
+        deliveryWaiters = []
+        for waiter in waiters {
+            waiter.resume()
+        }
+    }
+
     /// Writes the general pasteboard; true when it took the text (its change count moved).
     private static func writeClipboard(_ text: String) -> Bool {
         let pasteboard = UIPasteboard.general
@@ -712,7 +872,9 @@ final class AppModel {
         if let previous = lastFailedJob, previous.recording.url != job.recording.url {
             try? FileManager.default.removeItem(at: previous.recording.url)
         }
-        lastFailedJob = job  // keep the audio for Retry
+        var kept = job
+        kept.stream = nil
+        lastFailedJob = kept  // keep the audio for Retry
         showFailure(message)
         return activity.fail(message: message)
     }
@@ -1376,14 +1538,17 @@ final class AppModel {
     }
 
     /// The latest phone dictation, for the keyboard to type. Only ever the one, and gone
-    /// after a few minutes, typed or not (separate from Recent).
-    private func publishKeyboardHandoff(_ text: String) {
-        keyboardLink.publish(KeyboardHandoff(text: text))
+    /// after a few minutes, typed or not (separate from Recent). Returns its id.
+    @discardableResult
+    private func publishKeyboardHandoff(_ text: String) -> String {
+        let handoff = KeyboardHandoff(text: text)
+        keyboardLink.publish(handoff)
         KeyboardSignals.post(.result)
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(KeyboardHandoff.maxAge + 1))
             _ = self?.keyboardLink.handoff()  // removes it once expired
         }
+        return handoff.id
     }
 }
 
@@ -1630,6 +1795,10 @@ enum DictationLauncher {
     enum SystemOutcome: Equatable {
         case started
         case finished
+        /// Delivered, but the text waits for the clipboard, which iOS lets only the app in
+        /// front write: the intent brings the app forward (`continueInForeground`), then
+        /// `copyWaitingText`.
+        case copyWaits
         case busy
         case needsForeground(String)
         case failed(String)
@@ -1641,8 +1810,7 @@ enum DictationLauncher {
         let model = AppModel.shared
         switch model.phase {
         case .recording:
-            await model.stopAndSend()?.value
-            return .finished
+            return await deliver(model.stopAndSend())
         case .processing:
             return .busy
         default:
@@ -1655,11 +1823,33 @@ enum DictationLauncher {
         }
     }
 
-    /// The Live Activity's Stop button.
-    static func stopFromSystem() async {
+    /// The Live Activity's Stop button. True when the text waits for the app to copy it (see
+    /// `SystemOutcome.copyWaits`).
+    static func stopFromSystem() async -> Bool {
         let model = AppModel.shared
-        guard model.phase == .recording else { return }
-        await model.stopAndSend()?.value
+        guard model.phase == .recording else { return false }
+        return await deliver(model.stopAndSend()) == .copyWaits
+    }
+
+    /// Waits for the delivery. When its text couldn't go on the clipboard from the background,
+    /// says so right away (the intent then brings the app forward, which copies it);
+    /// otherwise waits for the Live Activity to end too, so iOS keeps the app running.
+    private static func deliver(_ sending: Task<Void, Never>?) async -> SystemOutcome {
+        guard let sending else { return .finished }
+        let model = AppModel.shared
+        await model.waitForDelivery()
+        if await model.copyWaitsForTheApp() { return .copyWaits }
+        await sending.value
+        return .finished
+    }
+
+    /// After `continueInForeground` for a waiting copy (or when iOS didn't allow it): copies
+    /// it if the app is in front (otherwise the scene does when it is, or the Live Activity's
+    /// "Tap here to copy it"), then waits for the Live Activity to end.
+    static func copyWaitingText() async {
+        let model = AppModel.shared
+        model.applyPendingCopy()
+        await model.waitForCurrentDictation()
     }
 
     /// After `continueInForeground`: record as soon as the scene is active.

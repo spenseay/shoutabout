@@ -7,7 +7,8 @@ import UIKit
 ///
 /// Privacy: nothing here goes over the network, and nothing typed is kept or logged. It reads
 /// the app's state and the latest phone dictation from the App Group (which needs Full Access),
-/// and reads the text just before the cursor only to decide on a space.
+/// reads the text just before the cursor only to decide on a space, and puts a dictation it
+/// typed on the clipboard (never reads it).
 final class KeyboardViewController: UIInputViewController {
     static let height: CGFloat = 236
 
@@ -195,6 +196,10 @@ final class KeyboardViewController: UIInputViewController {
             }
             self.store.removeHandoff(id: handoff.id)
             self.type(handoff.text)
+            // On the clipboard too (Full Access allows it), like a phone dictation from
+            // anywhere else: the app, in the background, couldn't (and so doesn't come forward
+            // for it either).
+            if self.hasFullAccess { UIPasteboard.general.string = handoff.text }
         }
     }
 

@@ -26,6 +26,8 @@ enum Theme {
         static let darkTaskbar = Color(hex: 0x202020)
         /// Paper / light cards. #FAF9F5
         static let paper = Color(hex: 0xFAF9F5)
+        /// Deep red: the recording screen in dark mode. #5C0000
+        static let recordingDeep = Color(hex: 0x5C0000)
 
         // Alternative "loud" palettes from the sheet (seasonal / beta variants).
         static let loudBlue = Color(hex: 0x1A2BFF)
@@ -39,6 +41,14 @@ enum Theme {
     enum Colors {
         /// Screen ground: yellow in light mode, black in dark mode (like the Dark app icon).
         static let ground = Color(light: Palette.shoutYellow, dark: Palette.black)
+        /// The ground while recording: the whole screen turns red, so nobody talks for minutes
+        /// without noticing it isn't recording. Tongue Red; deep red in dark mode.
+        static let groundRecording = Color(light: Palette.tongueRed, dark: Palette.recordingDeep)
+        /// Secondary type on the recording ground (`ink` stays readable on it as it is).
+        static let inkMutedRecording = Color(light: Palette.black.opacity(0.85), dark: Palette.shoutYellow.opacity(0.85))
+        /// The edge around the tile while recording, which pulses with the voice (on the
+        /// recording ground; never a ring around the mouth itself).
+        static let recordingStroke = Color(light: Palette.black, dark: Palette.tongueRed)
         /// Primary type on the ground.
         static let ink = Color(light: Palette.black, dark: Palette.shoutYellow)
         /// Secondary type on the ground.

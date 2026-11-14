@@ -15,13 +15,14 @@ struct KeyboardListeningView: View {
                         .shoutHeadline(36)
                     Text("Go back to keep typing.")
                         .font(Theme.Typography.body(17))
-                        .foregroundStyle(Theme.Colors.inkMuted)
+                        .foregroundStyle(Theme.Colors.inkMutedRecording)
                 }
                 .multilineTextAlignment(.center)
                 Spacer(minLength: 0)
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
-        .background(Theme.Colors.ground.ignoresSafeArea())
+        // Only shown while recording: the recording screen, like the main one.
+        .background(Theme.Colors.groundRecording.ignoresSafeArea())
     }
 }
