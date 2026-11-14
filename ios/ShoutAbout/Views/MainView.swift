@@ -69,7 +69,7 @@ private struct TopBar: View {
         HStack(spacing: Theme.Spacing.xs) {
             CircleIconButton(systemImage: "clock.arrow.circlepath", label: "Recent") { sheet = .history }
             Spacer(minLength: 0)
-            if model.hasComputer {
+            if model.computerChoices.contains(where: \.usable) {
                 TargetPill()
                     .layoutPriority(1)
             }
@@ -99,36 +99,176 @@ struct CircleIconButton: View {
     }
 }
 
-/// Computer | Phone. The computer side shows the PC's name.
+/// Computer | Phone. The computer side shows the computer's name; with several computers,
+/// one segment each ([Desktop | Laptop | Phone]), or when those don't fit the selected one
+/// with a menu to switch. A long-press on a computer renames it.
 private struct TargetPill: View {
     @Environment(AppModel.self) private var model
     @Namespace private var pill
+    @State private var renaming: ComputerRename?
 
     var body: some View {
+        let choices = model.computerChoices.filter(\.usable)
+        Group {
+            if choices.count > 1 {
+                ViewThatFits(in: .horizontal) {
+                    capsule {
+                        ForEach(choices) { computerSegment($0, variant: "icons", icons: true) }
+                        phoneSegment(variant: "icons", icons: true)
+                    }
+                    capsule {
+                        ForEach(choices) { computerSegment($0, variant: "plain", icons: false) }
+                        phoneSegment(variant: "plain", icons: false)
+                    }
+                    capsule {
+                        computerMenu(choices)
+                            .layoutPriority(1)
+                        phoneSegment(variant: "menu", icons: true)
+                            .fixedSize()
+                    }
+                }
+            } else if let only = choices.first {
+                capsule {
+                    computerSegment(only, variant: "one", icons: true)
+                        .layoutPriority(1)
+                    phoneSegment(variant: "one", icons: true)
+                        .fixedSize()
+                }
+            }
+        }
+        .sensoryFeedback(.selection, trigger: "\(model.effectiveTarget.rawValue)|\(model.selectedChoiceID ?? "")")
+        // Not `.disabled`: that would grey the switch out while recording.
+        .allowsHitTesting(!model.computerSwitchLocked)
+        .renameComputerAlert($renaming)
+    }
+
+    private func capsule<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         HStack(spacing: 0) {
-            segment(.pc, title: model.computerName ?? "Computer")
-                .layoutPriority(1)
-            segment(.phone, title: "Phone")
-                .fixedSize()
+            content()
         }
         .padding(3)
         .overlay(Capsule().stroke(Theme.Colors.ink, lineWidth: 2.5))
-        .sensoryFeedback(.selection, trigger: model.target)
-        // Not `.disabled`: that would grey the switch out while recording.
-        .allowsHitTesting(model.phase != .recording && !model.phase.isBusy)
     }
 
-    private func segment(_ option: DictationTarget, title: String) -> some View {
-        let selected = model.target == option
-        return Button {
-            withAnimation(.spring(duration: 0.3, bounce: 0.35)) { model.target = option }
+    private func isSelected(_ choice: ComputerChoice) -> Bool {
+        model.effectiveTarget == .pc && model.selectedChoiceID == choice.id
+    }
+
+    private func pick(_ choice: ComputerChoice) {
+        withAnimation(.spring(duration: 0.3, bounce: 0.35)) {
+            if !choice.isCodePairing { model.selectComputer(choice.id) }
+            model.target = .pc
+        }
+    }
+
+    private func startRename(_ choice: ComputerChoice) {
+        renaming = ComputerRename(id: choice.id, text: choice.name)
+    }
+
+    private func computerSegment(_ choice: ComputerChoice, variant: String, icons: Bool) -> some View {
+        renamable(
+            segment(title: choice.name, systemImage: icons ? DictationTarget.pc.systemImage : nil, selected: isSelected(choice), variant: variant) {
+                pick(choice)
+            }
+            .accessibilityLabel("Type on \(choice.name)"),
+            choice
+        )
+    }
+
+    private func phoneSegment(variant: String, icons: Bool) -> some View {
+        segment(
+            title: DictationTarget.phone.label,
+            systemImage: icons ? DictationTarget.phone.systemImage : nil,
+            selected: model.effectiveTarget == .phone,
+            variant: variant
+        ) {
+            withAnimation(.spring(duration: 0.3, bounce: 0.35)) { model.target = .phone }
+        }
+        .accessibilityLabel("Copy on this phone")
+    }
+
+    /// Doesn't fit as segments: the selected computer, with a menu of all of them.
+    private func computerMenu(_ choices: [ComputerChoice]) -> some View {
+        let current = choices.first(where: { $0.id == model.selectedChoiceID }) ?? choices[0]
+        let selected = isSelected(current)
+        return Menu {
+            ForEach(choices) { choice in
+                Button {
+                    pick(choice)
+                } label: {
+                    if isSelected(choice) {
+                        Label(choice.name, systemImage: "checkmark")
+                    } else {
+                        Text(choice.name)
+                    }
+                }
+            }
+            if !current.isCodePairing {
+                Divider()
+                Button("Rename \(current.name)…", systemImage: "pencil") { startRename(current) }
+            }
         } label: {
             HStack(spacing: 5) {
-                Image(systemName: option.systemImage)
+                Image(systemName: DictationTarget.pc.systemImage)
+                Text(current.name)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .bold))
+            }
+            .modifier(SegmentLook(selected: selected, id: "pill-menu", namespace: pill))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Type on \(current.name)")
+        .accessibilityHint("Chooses another computer")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func segment(
+        title: String,
+        systemImage: String?,
+        selected: Bool,
+        variant: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                if let systemImage {
+                    Image(systemName: systemImage)
+                }
                 Text(title)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
+            .modifier(SegmentLook(selected: selected, id: "pill-\(variant)", namespace: pill))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    /// A long-press (or the VoiceOver action) renames a computer; not the code pairing.
+    @ViewBuilder
+    private func renamable(_ view: some View, _ choice: ComputerChoice) -> some View {
+        if choice.isCodePairing {
+            view
+        } else {
+            view
+                .contextMenu {
+                    Button("Rename…", systemImage: "pencil") { startRename(choice) }
+                }
+                .accessibilityAction(named: "Rename") { startRename(choice) }
+        }
+    }
+}
+
+/// One segment of the switch: ink capsule behind the selected one (it slides between them).
+private struct SegmentLook: ViewModifier {
+    var selected: Bool
+    var id: String
+    var namespace: Namespace.ID
+
+    func body(content: Content) -> some View {
+        content
             .font(Theme.Typography.bold(13))
             .padding(.horizontal, 10)
             .padding(.vertical, 9)
@@ -138,14 +278,10 @@ private struct TargetPill: View {
                 if selected {
                     Capsule()
                         .fill(Theme.Colors.pillOn)
-                        .matchedGeometryEffect(id: "pill", in: pill)
+                        .matchedGeometryEffect(id: id, in: namespace)
                 }
             }
             .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(option == .pc ? "Type on \(title)" : "Copy on this phone")
-        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 

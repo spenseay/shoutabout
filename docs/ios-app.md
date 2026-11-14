@@ -45,9 +45,21 @@ tour runs in the iOS Simulator. Nothing has run on a real iPhone yet (see
 
   Every step can be skipped and redone (Settings › Connect a computer, Settings › Set up the
   Action Button / Add to Control Center, Settings › Advanced › Show the setup again).
+- **Several computers** (a desktop and a laptop, say). Settings › Your computers lists them:
+  tap one to dictate to it (a tick), swipe or long-press to **Rename** or **Remove**, and
+  **Add a computer** pairs another the same way. "Computer" always means the ticked one: the
+  main switch, the Live Activity, Control Center, the Lock Screen widget, the intents, the
+  word list. A dictation never goes to another computer than that one. Removing the ticked one
+  ticks the next; with none left, dictation goes to the phone.
+- **Short names.** A name you give a computer on this iPhone always wins. Otherwise it's the
+  PC's own name, kept up to date from `/hello` and `/info`; the names Windows makes up
+  (`DESKTOP-Q0DB401`, `LAPTOP-AB12CD3`) show as "Desktop" / "Laptop", and a name that's
+  already taken gets " 2". Settings shows the PC's real name under a shorter one.
 - **One screen.**
   - Top: a small **Computer | Phone** switch, only when a computer is paired; the computer side
-    shows the PC's name.
+    shows its name. With several: **Desktop | Laptop | Phone**, or when that doesn't fit, the
+    ticked computer with a menu to switch. Long-press a computer to rename it. Locked while a
+    dictation records or is on its way.
   - Middle: the big mouth button. Tap to talk, tap to send. While you talk the mouth opens and
     closes with your voice and punches on loud peaks; while it works it chews (saTalk) with a
     shimmer; when the words land (pasted or copied) it punches with a haptic and **zips shut**
@@ -140,6 +152,8 @@ ios/
                               DiscoveredComputer (Bonjour TXT)
       DictationRouter.swift   where a recording goes (the v2 phone routing), with notices
       DevicePairing.swift     /hello -> /pair/request -> poll /pair/status
+      ComputerRoster.swift    the paired computers, the selected one, who has the code
+                              pairing; short names (ComputerNames)
       DictationActivityState  the Live Activity's content + level throttle
       Pairing.swift           legacy pairing QR payload + URL rules (private hosts, VPN)
       RoutePlanner.swift      which failures are worth trying the next route for
@@ -251,10 +265,18 @@ Live Activities render archived SwiftUI: no timers or repeating animations. So:
   show "<iPhone> wants to dictate to this PC. Code 4821."; the phone shows the same code and
   polls `/pair/status` every second for up to 120 s. Five failed polls in a row (Wi-Fi blip)
   end it; a 404 means the PC forgot the request.
-- On approval the **device token** goes into the keychain (`AfterFirstUnlockThisDeviceOnly`,
-  App Group access group) and `{id, name, lan_url}` into the App Group.
-- If the PC's address changes (a new DHCP lease), the app looks for the same id with Bonjour
-  when it comes to the foreground and updates the address after `/hello` confirms the id.
+- On approval the **device token** goes into the keychain under the PC's id
+  (`device_token.<id>`, `AfterFirstUnlockThisDeviceOnly`, App Group access group) and
+  `{id, name, lan_url}` is added to the App Group's list of computers and ticked. Pairing the
+  same PC again replaces its token and keeps its place and nickname.
+- If a PC's address changes (a new DHCP lease), the app looks for the same id with Bonjour
+  when it comes to the foreground and updates the address after `/hello` confirms the id
+  (the ticked computer first, then the others, which only get `/hello`).
+- Upgrading from the one-computer version moves the paired PC and its token into the list on
+  the first launch; nobody pairs again (if the keychain is still locked, it tries next launch).
+- The older code pairing (QR: hub token, tunnel) belongs to one computer at most: the one it
+  went with before the upgrade, or the one at the code's address (never a guess). Its tunnel
+  is only ever used for that PC. With no computer paired it is the computer, as before.
 - The iPhone's name in the request is `UIDevice.current.name` (just "iPhone" without a special
   entitlement); the device id is a random UUID created once.
 
@@ -284,10 +306,10 @@ time).
 
 ### Secrets and settings
 
-- Keychain: the device token (v2), and for the older code pairing the hub token and the
-  Cloudflare service token. Never synced, never logged, never in the repo.
-- App Group `UserDefaults`: the target, the paired computer `{id, name, lan_url}`, the `/info`
-  cache, onboarding done, the legacy URLs.
+- Keychain: a device token per computer (v2), and for the older code pairing the hub token
+  and the Cloudflare service token. Never synced, never logged, never in the repo.
+- App Group `UserDefaults`: the target, the paired computers `{id, name, lan_url, nickname}`,
+  the ticked one, the `/info` cache per computer, onboarding done, the legacy URLs.
 - Unsigned simulator builds have no entitlements; the keychain falls back to the default group.
 
 ### Swift 6 and identifiers

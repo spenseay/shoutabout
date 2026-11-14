@@ -1,19 +1,20 @@
 import SwiftUI
 import UIKit
 
-/// Settings (a sheet from the main screen): the computer, the Action Button guide, a couple
+/// Settings (a sheet from the main screen): the computers, the Action Button guide, a couple
 /// of plain switches. Everything technical lives under Advanced.
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var showConnect = false
-    @State private var confirmDisconnect = false
+    @State private var removing: ComputerChoice?
+    @State private var renaming: ComputerRename?
 
     var body: some View {
         @Bindable var model = model
         NavigationStack {
             Form {
-                computerSection
+                computersSection
                 Section {
                     NavigationLink {
                         ScrollView {
@@ -81,9 +82,15 @@ struct SettingsView: View {
                         }
                 }
             }
-            .confirmationDialog("Disconnect \(model.computerDisplayName)?", isPresented: $confirmDisconnect, titleVisibility: .visible) {
-                Button("Disconnect", role: .destructive) { model.disconnectComputer() }
+            .confirmationDialog(
+                "Remove \(removing?.name ?? "this computer")?",
+                isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
+                titleVisibility: .visible,
+                presenting: removing
+            ) { choice in
+                Button("Remove", role: .destructive) { model.removeComputer(choice.id) }
             }
+            .renameComputerAlert($renaming)
             .task {
                 model.syncIconState()
             }
@@ -91,24 +98,16 @@ struct SettingsView: View {
         .tint(Theme.Colors.tint)
     }
 
+    /// Each computer (a tick on the selected one: tap to choose, swipe or long-press to rename
+    /// or remove), the connection check for the selected one, and "Add a computer".
     @ViewBuilder
-    private var computerSection: some View {
+    private var computersSection: some View {
+        let choices = model.computerChoices
         Section {
+            ForEach(choices) { choice in
+                computerRow(choice)
+            }
             if model.hasComputer {
-                HStack(spacing: Theme.Spacing.m) {
-                    Image(systemName: "desktopcomputer")
-                        .font(.system(size: 20, weight: .bold))
-                        .foregroundStyle(Theme.Palette.shoutYellow)
-                        .frame(width: 44, height: 44)
-                        .background(Circle().fill(Theme.Palette.black))
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(model.computerName ?? "Your PC")
-                            .font(Theme.Typography.bold(17))
-                        Text(statusLine)
-                            .font(Theme.Typography.body(13))
-                            .foregroundStyle(.secondary)
-                    }
-                }
                 Button {
                     Task { await model.testConnection() }
                 } label: {
@@ -133,18 +132,80 @@ struct SettingsView: View {
                         }
                     }
                 }
-                Button("Disconnect this computer", role: .destructive) { confirmDisconnect = true }
-            } else {
-                Button {
-                    showConnect = true
-                } label: {
-                    Label("Connect a computer", systemImage: "desktopcomputer")
-                        .font(Theme.Typography.bold(17))
-                }
+            }
+            Button {
+                showConnect = true
+            } label: {
+                Label(choices.isEmpty ? "Connect a computer" : "Add a computer", systemImage: choices.isEmpty ? "desktopcomputer" : "plus")
+                    .font(Theme.Typography.bold(17))
             }
         } header: {
-            Text("Your computer")
+            Text(choices.count > 1 ? "Your computers" : "Your computer")
         }
+    }
+
+    private func computerRow(_ choice: ComputerChoice) -> some View {
+        let selected = choice.id == model.selectedChoiceID
+        return Button {
+            if choice.usable {
+                model.selectComputer(choice.id)
+            } else {
+                showConnect = true  // no token on this iPhone any more: pair it again
+            }
+        } label: {
+            HStack(spacing: Theme.Spacing.m) {
+                Image(systemName: "desktopcomputer")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(Theme.Palette.shoutYellow)
+                    .frame(width: 44, height: 44)
+                    .background(Circle().fill(Theme.Palette.black))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(choice.name)
+                        .font(Theme.Typography.bold(17))
+                        .foregroundStyle(.primary)
+                    Text(detail(choice, selected: selected))
+                        .font(Theme.Typography.body(13))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                if selected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundStyle(Theme.Colors.tint)
+                        .accessibilityHidden(true)
+                }
+            }
+        }
+        .accessibilityLabel(choice.name)
+        .accessibilityValue(detail(choice, selected: selected))
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            // Not role .destructive: that animates the row away before the confirmation.
+            Button("Remove") { removing = choice }
+                .tint(Theme.Palette.tongueRed)
+            if !choice.isCodePairing {
+                Button("Rename") { renaming = ComputerRename(id: choice.id, text: choice.name) }
+            }
+        }
+        .contextMenu {
+            if !choice.isCodePairing {
+                Button("Rename", systemImage: "pencil") { renaming = ComputerRename(id: choice.id, text: choice.name) }
+            }
+            Button("Remove", systemImage: "trash", role: .destructive) { removing = choice }
+        }
+    }
+
+    /// "DESKTOP-Q0DB401 · Fast": the PC's own name when it's shown shorter (or renamed), and
+    /// for the selected one how it's doing.
+    private func detail(_ choice: ComputerChoice, selected: Bool) -> String {
+        var parts: [String] = []
+        if !choice.reportedName.isEmpty, choice.reportedName != choice.name { parts.append(choice.reportedName) }
+        if !choice.usable {
+            parts.append("Pair again")
+        } else if selected {
+            parts.append(statusLine)
+        }
+        return parts.isEmpty ? "Paired" : parts.joined(separator: " · ")
     }
 
     private var statusLine: String {
@@ -167,6 +228,49 @@ struct SettingsView: View {
         let short = info?["CFBundleShortVersionString"] as? String ?? "?"
         let build = info?["CFBundleVersion"] as? String ?? "?"
         return "\(short) (\(build))"
+    }
+}
+
+/// A computer being renamed: its id and the name typed so far.
+struct ComputerRename: Identifiable, Equatable {
+    var id: String
+    var text: String
+}
+
+extension View {
+    /// Renames a computer on this iPhone (Settings, a long-press on the main screen's switch).
+    func renameComputerAlert(_ rename: Binding<ComputerRename?>) -> some View {
+        modifier(RenameComputerAlert(rename: rename))
+    }
+}
+
+private struct RenameComputerAlert: ViewModifier {
+    @Environment(AppModel.self) private var model
+    @Binding var rename: ComputerRename?
+
+    func body(content: Content) -> some View {
+        content.alert("Rename", isPresented: Binding(
+            get: { rename != nil },
+            set: { if !$0 { rename = nil } }
+        )) {
+            TextField("Desktop", text: Binding(
+                get: { rename?.text ?? "" },
+                set: { newValue in
+                    if var current = rename {
+                        current.text = newValue
+                        rename = current
+                    }
+                }
+            ))
+            .textInputAutocapitalization(.words)
+            Button("Save") {
+                if let current = rename { model.renameComputer(current.id, to: current.text) }
+                rename = nil
+            }
+            Button("Cancel", role: .cancel) { rename = nil }
+        } message: {
+            Text("Only on this iPhone. Empty uses the PC's own name.")
+        }
     }
 }
 

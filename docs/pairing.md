@@ -5,6 +5,12 @@
 > That flow, and the per-phone tokens it creates, are in [protocol.md](protocol.md). The QR
 > code below still works: it's the "Scan a code instead" link in the setup window, and the
 > way to pair without DNS-SD.
+>
+> One iPhone can pair with several PCs (Settings › Add a computer), each with its own token;
+> dictation goes to the one ticked in Settings or picked on the main screen. A QR pairing
+> belongs to one of them (the PC at the code's address), and its tunnel only reaches that PC.
+> The phone shows a short name: a nickname given on the phone, else the PC's name, with
+> Windows' made-up `DESKTOP-XXXXXXX` / `LAPTOP-XXXXXXX` shown as "Desktop" / "Laptop".
 
 The ShoutAbout iPhone app sets itself up from one QR code that the PC shows:
 

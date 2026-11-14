@@ -79,17 +79,21 @@ final class AppModel {
     }
     private(set) var onboardingDone = false
 
-    // MARK: The computer
+    // MARK: The computers
 
-    /// v2 pairing (Bonjour + Allow on the PC).
-    private(set) var pairedComputer: PairedComputer?
+    /// v2 pairing (Bonjour + Allow on the PC): the computers, the selected one ("Computer"
+    /// always means it), and which one has the code pairing.
+    private(set) var roster = ComputerRoster()
     /// Legacy QR / manual pairing (LAN URL, public URL, Wi-Fi name).
     private(set) var configuration = HubConfiguration()
-    private(set) var hasDeviceToken = false
+    /// The computers whose device token is in the keychain.
+    private(set) var computersWithToken: Set<String> = []
     private(set) var hasLegacyToken = false
     private(set) var hasCloudflareToken = false
-    /// The PC's last `/info` (speed, name).
-    private(set) var hubInfo: CachedHubInfo?
+    /// Each computer's last `/info` (speed, name), by hub key.
+    private(set) var hubInfos: [CachedHubInfo] = []
+    /// Goes up with every pairing change (the connect screen tells a finished code pairing by it).
+    private(set) var pairingChanges = 0
     private(set) var vocab: [String] = []
     private(set) var vocabFetchedAt: Date?
     private(set) var loudIcon = false
@@ -162,13 +166,18 @@ final class AppModel {
     @ObservationIgnored private var keyboardOpenPending = false
 
     private init() {
+        // Once, from the version with a single computer: it keeps working, no pairing again.
+        let keychain = self.keychain
+        settings.migrateSingleComputer(hasCodePairing: settings.configuration.isPaired || keychain.secrets() != nil) {
+            keychain.moveSingleDeviceToken(to: $0)
+        }
         target = settings.target
         copyInPCMode = settings.copyInPCMode
         useTunnel = settings.useTunnel
         offlineEngine = settings.offlineEngine
         configuration = settings.configuration
-        pairedComputer = settings.pairedComputer
-        hubInfo = settings.cachedHubInfo
+        roster = settings.roster
+        hubInfos = settings.cachedHubInfos
         vocab = settings.vocabTerms
         vocabFetchedAt = settings.vocabFetchedAt
         refreshSecretsSummary()
@@ -189,22 +198,76 @@ final class AppModel {
 
     // MARK: Derived
 
-    /// A computer is paired and has credentials.
+    /// The selected computer (v2 pairing), if any. "Computer" means this one everywhere.
+    var pairedComputer: PairedComputer? { roster.selected }
+
+    /// The selected computer can be dictated to: it has a token on this iPhone (or the code
+    /// pairing alone stands in, with no v2 computer paired).
     var hasComputer: Bool {
-        if pairedComputer != nil, hasDeviceToken || hasLegacyToken { return true }
-        return configuration.isPaired && hasLegacyToken
+        if let selected = pairedComputer { return usableComputerIDs.contains(selected.id) }
+        return codePairingIsTheComputer
     }
 
     /// Where a new recording goes: Phone when no computer is paired.
     var effectiveTarget: DictationTarget { hasComputer ? target : .phone }
 
-    /// The PC's name when known ("Sample-Desktop"), for the switch and the Live Activity.
+    /// The selected computer's short name ("Desktop"), for the switch and the Live Activity.
     var computerName: String? {
-        pairedComputer?.name ?? hubInfo?.info.name.nonBlank
+        if let selected = pairedComputer { return roster.displayName(for: selected.id) }
+        return hubInfo?.info.name.nonBlank.map { ComputerNames.pretty($0) }
     }
 
-    /// For sentences: "Sample-Desktop" or "your PC".
+    /// For sentences: "Desktop" or "your PC".
     var computerDisplayName: String { computerName ?? "your PC" }
+
+    /// The selected computer's last `/info` (speed, name).
+    var hubInfo: CachedHubInfo? {
+        guard let key = selectedHubKey else { return nil }
+        return hubInfos.first { $0.hubKey == key }
+    }
+
+    /// Every paired computer with a short, distinct name (the code pairing when it's the only
+    /// one), for Settings and the main screen's switch.
+    var computerChoices: [ComputerChoice] {
+        guard roster.computers.isEmpty else { return roster.choices(usable: usableComputerIDs) }
+        guard codePairingIsTheComputer else { return [] }
+        let reported = hubInfo?.info.name.nonBlank
+        return [ComputerChoice(
+            id: ComputerRoster.codePairingID,
+            name: reported.map { ComputerNames.pretty($0) } ?? "Your PC",
+            reportedName: reported ?? "",
+            usable: true,
+            isCodePairing: true
+        )]
+    }
+
+    /// The id of the computer "Computer" means (`ComputerRoster.codePairingID` when the code
+    /// pairing stands in).
+    var selectedChoiceID: String? {
+        if let selected = pairedComputer { return selected.id }
+        return codePairingIsTheComputer ? ComputerRoster.codePairingID : nil
+    }
+
+    /// The computer can't be switched while a dictation records or is on its way.
+    var computerSwitchLocked: Bool { phase == .recording || phase.isBusy }
+
+    /// Computers with a token: their own, or the code pairing's when it is theirs.
+    private var usableComputerIDs: Set<String> {
+        var ids = computersWithToken
+        if hasLegacyToken, let owner = roster.codePairingOwnerID { ids.insert(owner) }
+        return ids
+    }
+
+    /// No v2 computer: the code pairing (QR) is the computer, as before v2.
+    private var codePairingIsTheComputer: Bool {
+        roster.computers.isEmpty && configuration.isPaired && hasLegacyToken
+    }
+
+    /// The `/info` cache key of the computer in use (`ComputerLink.hubKey`, without the keychain).
+    private var selectedHubKey: String? {
+        if let selected = pairedComputer { return selected.id }
+        return roster.computers.isEmpty ? configuration.lanURL?.absoluteString : nil
+    }
 
     var canRetry: Bool { lastFailedJob != nil && phase != .recording && !phase.isBusy }
 
@@ -690,40 +753,71 @@ final class AppModel {
     /// The name the PC shows in "<name> wants to dictate to this PC".
     var deviceName: String { UIDevice.current.name }
 
-    /// v2 pairing finished: the PC clicked Allow.
+    /// v2 pairing finished: the PC clicked Allow. A new computer is added (the same PC again
+    /// gets the new token) and becomes the selected one.
     func applyDevicePairing(token: String, hub: PairedHubInfo, address: URL, fallbackName: String) throws {
-        try keychain.saveDeviceToken(token)
+        try keychain.saveDeviceToken(token, for: hub.id)
         let lan = hub.lanURL.flatMap(URLRules.lanBaseURL) ?? address
         let name = hub.name.trimmingCharacters(in: .whitespacesAndNewlines)
         let computer = PairedComputer(id: hub.id, name: name.isEmpty ? fallbackName : name, lanURL: lan, pairedAt: Date())
-        pairedComputer = computer
-        settings.pairedComputer = computer
-        hasDeviceToken = true
-        hubInfo = nil
-        settings.cachedHubInfo = nil
+        let switched = pairedComputer?.id != hub.id
+        roster.add(computer, codePairing: hasLegacyToken ? configuration : nil)
+        saveRoster()
+        computersWithToken.insert(hub.id)
+        forgetHubInfo(for: hub.id)
         connectionChecks = []
+        pairingChanges += 1
+        if switched { vocabFetchedAt = nil }  // the new computer's words, right away
         target = .pc
         Task { await refreshComputer(force: true) }
     }
 
-    /// Forgets the computer: the device token, the legacy pairing and the tunnel secrets.
-    func disconnectComputer() {
-        try? keychain.saveDeviceToken(nil)
-        keychain.deleteLegacy()
-        pairedComputer = nil
-        settings.pairedComputer = nil
-        configuration = HubConfiguration()
-        settings.configuration = configuration
-        hubInfo = nil
-        settings.cachedHubInfo = nil
-        vocab = []
-        settings.vocabTerms = []
-        settings.vocabVersion = nil
-        settings.vocabFetchedAt = nil
-        vocabFetchedAt = nil
+    /// Settings or the main screen's switch: which computer "Computer" means. Not while a
+    /// dictation records or is on its way.
+    func selectComputer(_ id: String) {
+        guard !computerSwitchLocked, roster.select(id) else { return }
+        saveRoster()
         connectionChecks = []
+        vocabFetchedAt = nil  // its words, at the next chance
+        Task { await refreshComputer(force: true) }
+    }
+
+    /// A name for a computer on this iPhone only; empty brings back the PC's own name.
+    func renameComputer(_ id: String, to nickname: String) {
+        roster.rename(id, to: nickname)
+        saveRoster()
+    }
+
+    /// Forgets one computer and its token (`ComputerRoster.codePairingID`: the code pairing).
+    /// The code pairing and tunnel go too when they were that PC's. When it was the selected
+    /// one, the next one is selected; with none left, dictation goes to the phone.
+    func removeComputer(_ id: String) {
+        guard id != ComputerRoster.codePairingID else {
+            forgetLegacyPairing()
+            return
+        }
+        let wasSelected = pairedComputer?.id == id
+        try? keychain.saveDeviceToken(nil, for: id)
+        if roster.remove(id) {
+            keychain.deleteLegacy()
+            configuration = HubConfiguration()
+            settings.configuration = configuration
+        }
+        saveRoster()
+        forgetHubInfo(for: id)
         refreshSecretsSummary()
-        target = .phone
+        pairingChanges += 1
+        if wasSelected {
+            // Its word list.
+            vocab = []
+            settings.vocabTerms = []
+            settings.vocabVersion = nil
+            settings.vocabFetchedAt = nil
+            vocabFetchedAt = nil
+            connectionChecks = []
+            if hasComputer { Task { await refreshComputer(force: true) } }
+        }
+        if !hasComputer { target = .phone }
     }
 
     /// Legacy pairing QR (`python -m shoutabout pair`) or the manual form.
@@ -731,8 +825,11 @@ final class AppModel {
         try keychain.save(payload.secrets)
         configuration = payload.configuration
         settings.configuration = payload.configuration
+        roster.assignCodePairing(lanURL: payload.configuration.lanURL)
+        saveRoster()
         refreshSecretsSummary()
         connectionChecks = []
+        pairingChanges += 1
         if hasComputer { target = .pc }
         Task { await refreshComputer(force: true) }
     }
@@ -742,8 +839,11 @@ final class AppModel {
         keychain.deleteLegacy()
         configuration = HubConfiguration()
         settings.configuration = configuration
+        roster.codePairingOwnerID = nil
+        saveRoster()
         connectionChecks = []
         refreshSecretsSummary()
+        pairingChanges += 1
         if !hasComputer { target = .phone }
     }
 
@@ -753,16 +853,22 @@ final class AppModel {
         secrets.token = token.trimmingCharacters(in: .whitespacesAndNewlines)
         try keychain.save(secrets)
         refreshSecretsSummary()
+        pairingChanges += 1
     }
 
     func currentSecrets() -> HubSecrets? { keychain.secrets() }
 
+    /// How to reach the selected computer (its own token; the code pairing's token and tunnel
+    /// only when they are that PC's). Never another computer's.
     func computerLink() -> ComputerLink? {
-        ComputerLink.make(
-            paired: pairedComputer,
-            deviceToken: keychain.deviceToken(),
-            legacy: configuration,
-            legacySecrets: keychain.secrets(),
+        let selected = pairedComputer
+        // With no v2 computer the code pairing is the computer; otherwise only its owner's.
+        let withCode = selected.map { roster.codePairingOwnerID == $0.id } ?? roster.computers.isEmpty
+        return ComputerLink.make(
+            paired: selected,
+            deviceToken: selected.flatMap { keychain.deviceToken(for: $0.id) },
+            legacy: withCode ? configuration : HubConfiguration(),
+            legacySecrets: withCode ? keychain.secrets() : nil,
             useTunnel: useTunnel
         )
     }
@@ -771,48 +877,70 @@ final class AppModel {
         let secrets = keychain.secrets()
         hasLegacyToken = secrets != nil
         hasCloudflareToken = secrets?.hasCloudflareToken ?? false
-        hasDeviceToken = keychain.deviceToken() != nil
+        computersWithToken = Set(roster.computers.map(\.id).filter { keychain.deviceToken(for: $0) != nil })
+    }
+
+    /// Keeps the computers in the App Group and tells Control Center and the widget (they
+    /// show the selected computer's name).
+    private func saveRoster() {
+        guard !isDemo else { return }
+        settings.roster = roster
+        ControlCenter.shared.reloadControls(ofKind: WidgetKinds.targetControl)
+        WidgetCenter.shared.reloadTimelines(ofKind: WidgetKinds.lockScreen)
+    }
+
+    /// The PC said its name (`/hello`, `/info`): shown from now on, unless it has a nickname.
+    private func noteName(_ name: String?, for id: String) {
+        if roster.noteName(name, for: id) { saveRoster() }
     }
 
     private func freshInfo(for link: ComputerLink?) -> HubInfo? {
-        guard let key = link?.hubKey, let cached = hubInfo, cached.isFresh(for: key) else { return nil }
+        guard let key = link?.hubKey,
+              let cached = hubInfos.first(where: { $0.hubKey == key }),
+              cached.isFresh(for: key)
+        else { return nil }
         return cached.info
     }
 
     private func storeHubInfo(_ info: HubInfo, key: String) {
         let cached = CachedHubInfo(info: info, fetchedAt: Date(), hubKey: key)
-        hubInfo = cached
-        if !isDemo { settings.cachedHubInfo = cached }
+        hubInfos.removeAll { $0.hubKey == key }
+        hubInfos.append(cached)
+        if !isDemo { settings.cachedHubInfos = hubInfos }
+        // Its own name, kept fresh (key is the hub id for a v2 computer).
+        if info.id == nil || info.id == key { noteName(info.name, for: key) }
     }
 
-    /// On launch / return to the app: is the PC there, how fast is it, did its address change?
-    /// And its word list, every time it answers. Runs quietly; nothing here blocks a dictation.
+    private func forgetHubInfo(for key: String) {
+        hubInfos.removeAll { $0.hubKey == key }
+        if !isDemo { settings.cachedHubInfos = hubInfos }
+    }
+
+    /// On launch / return to the app: is the selected PC there, how fast is it, did its
+    /// address change? And its word list, every time it answers. Then the other computers'
+    /// addresses and names. Runs quietly; nothing here blocks a dictation.
     func refreshComputer(force: Bool = false) async {
         guard !isDemo, hasComputer else { return }
         if !force, let last = lastRefresh, Date().timeIntervalSince(last) < 60 { return }
         lastRefresh = Date()
         guard let link = computerLink() else { return }
+        let transport = LiveHubTransport()
+        await refreshSelectedComputer(link, force: force, transport: transport)
+        await refreshOtherComputers(transport)
+    }
+
+    private func refreshSelectedComputer(_ link: ComputerLink, force: Bool, transport: LiveHubTransport) async {
         guard let lan = link.lanEndpoint else {
             await refreshVocabOverTunnel(link)
             return
         }
-        let transport = LiveHubTransport()
-
         var base: URL?
         if let hello = try? await transport.hello(lan.baseURL, timeout: 2), hello.isShoutAbout,
            link.hubID == nil || hello.id == nil || hello.id == link.hubID {
             base = lan.baseURL
-        } else if let paired = pairedComputer,
-                  let found = await finder.findAddress(of: paired.id),
-                  found != paired.lanURL,
-                  let hello = try? await transport.hello(found, timeout: 2),
-                  hello.id == paired.id {
-            // Same PC, new address (a new DHCP lease): remember it.
-            var updated = paired
-            updated.lanURL = found
-            pairedComputer = updated
-            settings.pairedComputer = updated
-            base = found
+            if let id = link.hubID, hello.id == id { noteName(hello.name, for: id) }
+        } else if let id = link.hubID, let paired = roster.computer(id) {
+            base = await newAddress(of: paired, transport: transport)
         }
         guard let base else {
             await refreshVocabOverTunnel(link)
@@ -825,17 +953,46 @@ final class AppModel {
            let info = try? await transport.info(endpoint, timeout: 3) {
             storeHubInfo(info, key: key)
         }
-        // A cheap GET every time: words added on the PC reach this iPhone right away.
-        if let list = try? await HubClient.fetchVocab(endpoint) {
+        // A cheap GET every time: words added on the PC reach this iPhone right away (unless
+        // another computer was selected meanwhile).
+        if let list = try? await HubClient.fetchVocab(endpoint), selectedHubKey == link.hubKey {
             storeVocab(list)
         }
+    }
+
+    /// The other computers: still at their address (else found again with Bonjour), and their
+    /// current names. Only the unauthenticated `/hello`; nothing else goes to them.
+    private func refreshOtherComputers(_ transport: LiveHubTransport) async {
+        let selectedID = pairedComputer?.id
+        for computer in roster.computers where computer.id != selectedID {
+            if let hello = try? await transport.hello(computer.lanURL, timeout: 2), hello.id == computer.id {
+                noteName(hello.name, for: computer.id)
+            } else {
+                _ = await newAddress(of: computer, transport: transport)
+            }
+        }
+    }
+
+    /// The same PC at a new address (a new DHCP lease): found with Bonjour by its id, confirmed
+    /// with `/hello`, remembered.
+    private func newAddress(of computer: PairedComputer, transport: LiveHubTransport) async -> URL? {
+        guard let found = await finder.findAddress(of: computer.id),
+              found != computer.lanURL,
+              let hello = try? await transport.hello(found, timeout: 2),
+              hello.id == computer.id
+        else { return nil }
+        let moved = roster.noteAddress(found, for: computer.id)
+        let renamed = roster.noteName(hello.name, for: computer.id)
+        if moved || renamed { saveRoster() }
+        return found
     }
 
     /// The PC isn't on this network: over the owner's tunnel (if set up), at most hourly.
     private func refreshVocabOverTunnel(_ link: ComputerLink) async {
         guard let tunnel = link.tunnel,
               vocabFetchedAt.map({ Date().timeIntervalSince($0) > 3600 }) ?? true,
-              let list = try? await HubClient.fetchVocab(tunnel)
+              let list = try? await HubClient.fetchVocab(tunnel),
+              selectedHubKey == link.hubKey
         else { return }
         storeVocab(list)
     }
@@ -1001,7 +1158,8 @@ final class AppModel {
         guard onWiFi || URLRules.isVPNHost(lan.baseURL.host() ?? "") else { return }
         let router = DictationRouter(transport: LiveHubTransport(), onDevice: OnDeviceEngine(vocab: [], preference: offlineEngine))
         guard await router.isReachable(lan.baseURL, expectedID: link.hubID),
-              let list = try? await HubClient.fetchVocab(lan)
+              let list = try? await HubClient.fetchVocab(lan),
+              selectedHubKey == link.hubKey  // still the selected computer
         else { return }
         storeVocab(list)
     }
@@ -1254,6 +1412,7 @@ enum ScreenshotScene: String, CaseIterable, Sendable {
     case pairingCode = "pairing-code"
     case actionButton = "action-button"
     case mainComputer = "main-computer"
+    case mainComputers = "main-computers"
     case mainPhone = "main-phone"
     case recording
     case processing
@@ -1314,14 +1473,13 @@ extension AppModel {
         history = HistoryStore(Self.sampleHistory)
         // A made-up PC at a documentation-only address (192.0.2.0/24, RFC 5737).
         let sample = ScreenshotScene.sampleComputer
-        pairedComputer = PairedComputer(
-            id: sample.id,
-            name: sample.name,
-            lanURL: URL(string: "http://192.0.2.10:8766") ?? URL(fileURLWithPath: "/"),
-            pairedAt: Date()
+        let sampleURL = URL(string: "http://192.0.2.10:8766") ?? URL(fileURLWithPath: "/")
+        roster = ComputerRoster(
+            computers: [PairedComputer(id: sample.id, name: sample.name, lanURL: sampleURL, pairedAt: Date())],
+            selectedID: sample.id
         )
-        hasDeviceToken = true
-        hubInfo = CachedHubInfo(
+        computersWithToken = [sample.id]
+        hubInfos = [CachedHubInfo(
             info: HubInfo(
                 id: sample.id, name: sample.name, version: "2.0.0",
                 stt: HubInfo.STT(tier: "best", device: "cuda", speed: "fast"),
@@ -1329,21 +1487,36 @@ extension AppModel {
             ),
             fetchedAt: Date(),
             hubKey: sample.id
-        )
+        )]
         onboardingDone = true
         target = .pc
         offlineModelStatus = "Model installed"
         keyboardOn = true
+        if scene == .mainComputers || scene == .settings {
+            // Two computers with the names Windows makes up: they show as Desktop and Laptop.
+            let laptop = ScreenshotScene.sampleComputers[1]
+            roster = ComputerRoster(
+                computers: [
+                    PairedComputer(id: sample.id, name: "DESKTOP-SAMPLE1", lanURL: sampleURL, pairedAt: Date()),
+                    PairedComputer(
+                        id: laptop.id, name: "LAPTOP-SAMPLE2",
+                        lanURL: URL(string: "http://192.0.2.11:8766") ?? sampleURL, pairedAt: Date()
+                    ),
+                ],
+                selectedID: sample.id
+            )
+            computersWithToken = [sample.id, laptop.id]
+        }
 
         switch scene {
         case .onboarding, .discovery, .pairingCode, .actionButton:
             onboardingDone = false
-            pairedComputer = nil
-            hasDeviceToken = false
-            hubInfo = nil
+            roster = ComputerRoster()
+            computersWithToken = []
+            hubInfos = []
             history = HistoryStore()
             target = .phone
-        case .mainComputer:
+        case .mainComputer, .mainComputers:
             break
         case .mainPhone:
             target = .phone
@@ -1378,7 +1551,7 @@ extension AppModel {
         }
         if scene == .settings {
             connectionChecks = [
-                ConnectionCheck(title: "Home Wi-Fi", ok: true, detail: "Sample-Desktop answered in 38 ms."),
+                ConnectionCheck(title: "Home Wi-Fi", ok: true, detail: "\(computerDisplayName) answered in 38 ms."),
                 ConnectionCheck(title: "This iPhone is allowed", ok: true, detail: Self.speedDetail(hubInfo?.info ?? HubInfo())),
             ]
         }
