@@ -3,15 +3,29 @@
 One request at a time (serialised by a lock): the GPU model and the paste target are
 shared resources. Errors the server maps to HTTP statuses (AudioError,
 AudioTooLongError, EngineError) propagate to the caller.
+
+Every finished dictation reaches the PC through :func:`deliver_result`: phone uploads
+(``process_file``), the PC's own microphone (``process_audio``), streamed dictations
+(:mod:`shoutabout.streaming`) and phone-made text (``POST /paste``). It holds the paste
+rules (target pc only, not while paused, never empty text), the "No speech detected."
+warning, the trailing-space setting and Recent.
+
+Streamed dictations transcribe stretches in the background while the person talks. They
+take the same lock, one stretch at a time, and always after any job someone is waiting
+for (:meth:`Pipeline.foreground` / :meth:`Pipeline.background_turn`), so a phone upload
+waits for at most one stretch. They don't change the hub status: the tray shows
+"transcribing" only once the person has stopped talking.
 """
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -33,6 +47,7 @@ from shoutabout.text import normalize_whitespace
 
 if TYPE_CHECKING:
     from shoutabout.recent import Recent
+    from shoutabout.streaming import StreamSession
 
 log = logging.getLogger(__name__)
 
@@ -45,6 +60,81 @@ DecodeFn = Callable[[Path, float | None], np.ndarray]
 
 def _ms(start: float) -> float:
     return (time.perf_counter() - start) * 1000.0
+
+
+# ------------------------------------------------------------------- delivery
+
+
+def paste_text(config: Config, injector: Any, text: str) -> PasteResult:
+    """Paste ``text`` into the focused window (plus the trailing-space setting). Never
+    raises: a broken injector is a warning."""
+    payload = text + (" " if config.paste.trailing_space else "")
+    try:
+        result = injector.paste(payload)
+    except Exception:
+        log.exception("paste failed")
+        return PasteResult(pasted=False, warning=PASTE_ERROR_WARNING)
+    if not result.pasted and result.warning:
+        log.warning("not pasted: %s", result.warning)
+    return result
+
+
+def deliver_result(
+    *,
+    config: Config,
+    injector: Any,
+    state: HubState,
+    recent: Recent | None,
+    raw_text: str,
+    cleaned: CleanupResult,
+    target: Target,
+    route: str,
+    deliver: bool = True,
+    timings: Timings,
+    started: float,
+    audio_seconds: float = 0.0,
+    extra: dict[str, Any] | None = None,
+    paste: Callable[[str], PasteResult] | None = None,
+) -> TranscribeResult:
+    """The last step every dictation shares: the final text, the paste rules, Recent.
+
+    ``started`` is the ``time.perf_counter()`` the request started at (``timings.total``
+    is measured from it). ``deliver=False`` never pastes (the CLI, Recent > Try again).
+    ``paste`` overrides how the text is pasted (the pipeline's own ``_paste``)."""
+    text = normalize_whitespace(cleaned.text)
+    pasted, warning = False, None
+    if not text:
+        # Either target: lets the Shortcut tell "nothing heard" apart from a real result.
+        warning = NO_SPEECH_WARNING
+    elif target == "pc" and deliver:
+        if state.paused:
+            warning = PAUSED_WARNING
+        else:
+            t = time.perf_counter()
+            result = paste(text) if paste is not None else paste_text(config, injector, text)
+            timings.paste = _ms(t)
+            pasted, warning = bool(result.pasted), result.warning
+
+    timings.total = _ms(started)
+    out = TranscribeResult(
+        text=text,
+        raw_text=raw_text,
+        target=target,
+        route=route,
+        pasted=pasted,
+        warning=warning,
+        cleanup=cleaned,
+        timings=timings,
+        audio_seconds=audio_seconds,
+        request_id=uuid.uuid4().hex[:12],
+        extra=dict(extra or {}),
+    )
+    if recent is not None:
+        recent.add(out)  # never raises; keeps target pc only
+    return out
+
+
+# ------------------------------------------------------------------- pipeline
 
 
 class Pipeline:
@@ -75,6 +165,10 @@ class Pipeline:
         # One transcription at a time across the whole hub (phone requests, "Talk to this
         # PC", text pastes): HubState owns the lock when it has one.
         self._lock = getattr(state, "busy", None) or threading.RLock()
+        # Jobs waiting for the lock that someone is waiting for (background stretches of
+        # streamed dictations give way to them).
+        self._waiting = 0
+        self._waiting_cond = threading.Condition()
 
     # ----------------------------------------------------------------- public
 
@@ -91,22 +185,11 @@ class Pipeline:
         """Transcribe an audio file. ``extra`` is added to the result's extras (and so to
         Recent), e.g. ``{"source": "<phone name>"}``."""
         path = Path(path)
-        with self._lock:
-            self.state.set_status(HubStatus.TRANSCRIBING)
-            try:
-                result = self._process(
-                    path, target=target, route=route, cleanup=cleanup, deliver=deliver, extra=extra
-                )
-            except EngineError as exc:
-                self.state.set_status(HubStatus.ERROR, str(exc))
-                raise
-            except BaseException:
-                self.state.set_status(HubStatus.IDLE)
-                raise
-            if self.recent is not None:
-                self.recent.add(result)
-            self.state.set_status(HubStatus.IDLE)
-            return result
+        return self.run_job(
+            lambda: self._process(
+                path, target=target, route=route, cleanup=cleanup, deliver=deliver, extra=extra
+            )
+        )
 
     def process_audio(
         self,
@@ -121,32 +204,86 @@ class Pipeline:
         """Like :meth:`process_file` for samples that are already 16 kHz mono float32
         (the PC's own microphone): same STT, cleanup, paste rules, Recent and lock."""
         samples = np.ascontiguousarray(np.asarray(audio, dtype=np.float32).reshape(-1))
-        with self._lock:
+        return self.run_job(
+            lambda: self._process(
+                None,
+                target=target,
+                route=route,
+                cleanup=cleanup,
+                deliver=deliver,
+                audio=samples,
+                extra=extra,
+            )
+        )
+
+    def open_stream(
+        self,
+        *,
+        target: Target = "pc",
+        route: str = "local",
+        extra: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> StreamSession:
+        """A dictation transcribed while it is recorded (:mod:`shoutabout.streaming`):
+        feed it samples, then ``finish()`` delivers it like :meth:`process_audio`."""
+        from shoutabout.streaming import StreamSession
+
+        return StreamSession(self, target=target, route=route, extra=extra, **kwargs)
+
+    def decode(self, path: Path) -> np.ndarray:
+        """An audio file as 16 kHz mono float32 samples (what the pipeline transcribes)."""
+        return self._decode(Path(path), self.config.server.max_audio_seconds)
+
+    # ------------------------------------------------------ the lock and status
+
+    @contextlib.contextmanager
+    def foreground(self) -> Iterator[None]:
+        """Hold the lock for a job someone is waiting for. Background stretches of
+        streamed dictations don't take the lock while one of these waits."""
+        with self._waiting_cond:
+            self._waiting += 1
+        try:
+            self._lock.acquire()
+        finally:
+            with self._waiting_cond:
+                self._waiting -= 1
+                self._waiting_cond.notify_all()
+        try:
+            yield
+        finally:
+            self._lock.release()
+
+    def background_turn(self, stop: Callable[[], bool], poll_s: float = 0.1) -> bool:
+        """Take the lock for one background stretch, after every job that waits for it.
+        True = the caller holds the lock (and must ``release_turn()``); False = ``stop()``
+        turned true first."""
+        while not stop():
+            with self._waiting_cond:
+                if self._waiting:
+                    self._waiting_cond.wait(poll_s)
+                    continue
+            if self._lock.acquire(timeout=poll_s):
+                return True
+        return False
+
+    def release_turn(self) -> None:
+        self._lock.release()
+
+    def run_job(self, job: Callable[[], TranscribeResult]) -> TranscribeResult:
+        """Run a dictation's foreground work under the lock, with the hub status
+        "transcribing" while it runs (ERROR after an engine failure)."""
+        with self.foreground():
             self.state.set_status(HubStatus.TRANSCRIBING)
             try:
-                result = self._process(
-                    None,
-                    target=target,
-                    route=route,
-                    cleanup=cleanup,
-                    deliver=deliver,
-                    audio=samples,
-                    extra=extra,
-                )
+                result = job()
             except EngineError as exc:
                 self.state.set_status(HubStatus.ERROR, str(exc))
                 raise
             except BaseException:
                 self.state.set_status(HubStatus.IDLE)
                 raise
-            if self.recent is not None:
-                self.recent.add(result)
             self.state.set_status(HubStatus.IDLE)
             return result
-
-    def decode(self, path: Path) -> np.ndarray:
-        """An audio file as 16 kHz mono float32 samples (what the pipeline transcribes)."""
-        return self._decode(Path(path), self.config.server.max_audio_seconds)
 
     # ---------------------------------------------------------------- stages
 
@@ -164,7 +301,6 @@ class Pipeline:
         cfg = self.config
         timings = Timings()
         t_total = time.perf_counter()
-        request_id = uuid.uuid4().hex[:12]
 
         if audio is None:
             assert path is not None
@@ -174,52 +310,79 @@ class Pipeline:
         audio_seconds = float(len(audio)) / SAMPLE_RATE
 
         t = time.perf_counter()
-        hints = self._hints()
-        raw_text = normalize_whitespace(self.engine.transcribe(audio, hints) or "")
+        raw_text = self.stt(audio)
         timings.stt = _ms(t)
 
         t = time.perf_counter()
         cleaned = self._cleanup(raw_text, cleanup)
         timings.cleanup = _ms(t)
-        text = normalize_whitespace(cleaned.text)
 
-        pasted, warning = False, None
-        if not text:
-            # Either target: lets the Shortcut tell "nothing heard" apart from a real result.
-            warning = NO_SPEECH_WARNING
-        elif target == "pc" and deliver:
-            if self.state.paused:
-                warning = PAUSED_WARNING
-            else:
-                t = time.perf_counter()
-                paste = self._paste(text)
-                timings.paste = _ms(t)
-                pasted, warning = bool(paste.pasted), paste.warning
-
-        timings.total = _ms(t_total)
-        cleaner_model = getattr(getattr(self.cleaner, "cfg", None), "model", None)
-        llm_model = (
-            (cleaner_model or cfg.cleanup.model)
-            if cleaned.status in ("applied", "fallback")
-            else None
-        )
-        return TranscribeResult(
-            text=text,
+        return self.deliver(
             raw_text=raw_text,
+            cleaned=cleaned,
             target=target,
             route=route,
-            pasted=pasted,
-            warning=warning,
-            cleanup=cleaned,
+            deliver=deliver,
             timings=timings,
+            started=t_total,
             audio_seconds=audio_seconds,
-            request_id=request_id,
+            extra=extra,
+        )
+
+    def deliver(
+        self,
+        *,
+        raw_text: str,
+        cleaned: CleanupResult,
+        target: Target,
+        route: str,
+        deliver: bool,
+        timings: Timings,
+        started: float,
+        audio_seconds: float,
+        extra: dict[str, Any] | None = None,
+    ) -> TranscribeResult:
+        """:func:`deliver_result` with this pipeline's injector, state and Recent, plus the
+        models that made the text."""
+        return deliver_result(
+            config=self.config,
+            injector=self.injector,
+            state=self.state,
+            recent=self.recent,
+            raw_text=raw_text,
+            cleaned=cleaned,
+            target=target,
+            route=route,
+            deliver=deliver,
+            timings=timings,
+            started=started,
+            audio_seconds=audio_seconds,
             extra={
                 "stt_model": getattr(self.engine, "name", None),
-                "llm_model": llm_model,
+                "llm_model": self.llm_model(cleaned),
                 **(extra or {}),
             },
+            paste=self._paste,
         )
+
+    def stt(self, audio: np.ndarray, *, context: str | None = None) -> str:
+        """The engine's transcript of ``audio`` with the vocab hints (and the words said
+        just before, for a stretch of a streamed dictation), whitespace normalised. The
+        caller holds the lock."""
+        hints = self._hints()
+        if context:
+            hints = replace(hints, context=context)
+        return normalize_whitespace(self.engine.transcribe(audio, hints) or "")
+
+    def clean(self, raw_text: str, cleanup: bool | None = None) -> CleanupResult:
+        """LLM cleanup of one transcript (never raises). Needs no lock."""
+        return self._cleanup(raw_text, cleanup)
+
+    def llm_model(self, cleaned: CleanupResult) -> str | None:
+        if cleaned.status not in ("applied", "fallback"):
+            return None
+        cleaner_model = getattr(getattr(self.cleaner, "cfg", None), "model", None)
+        return cleaner_model or self.config.cleanup.model
 
     def _hints(self) -> SttHints:
         stt = self.config.stt
@@ -254,24 +417,27 @@ class Pipeline:
             )
 
     def _paste(self, text: str) -> PasteResult:
-        payload = text + (" " if self.config.paste.trailing_space else "")
-        try:
-            result = self.injector.paste(payload)
-        except Exception:
-            log.exception("paste failed")
-            return PasteResult(pasted=False, warning=PASTE_ERROR_WARNING)
-        if not result.pasted and result.warning:
-            log.warning("not pasted: %s", result.warning)
-        return result
+        return paste_text(self.config, self.injector, text)
 
 
 def format_log_line(result: TranscribeResult) -> str:
-    """The one-line request summary from PLAN §6 (no text, no secrets)."""
+    """The one-line request summary from PLAN §6 (no text, no secrets). A streamed
+    dictation adds how it was cut and the background work (``bg_*``, milliseconds spent
+    while the person was still talking); its own timings are the wait after "stop"."""
     t = result.timings.as_dict()
-    return (
+    line = (
         f"transcribe id={result.request_id} route={result.route} target={result.target} "
         f"chars={len(result.text)} pasted={str(result.pasted).lower()} "
         f"cleanup={result.cleanup.status} audio_s={result.audio_seconds:.1f} "
         f"decode={t['decode']} stt={t['stt']} cleanup={t['cleanup']} paste={t['paste']} "
         f"total={t['total']}"
     )
+    extra = result.extra or {}
+    if extra.get("streamed"):
+        line += (
+            f" streamed=true chunks={int(extra.get('chunks') or 0)}"
+            f" stretches={int(extra.get('stretches') or 0)}"
+            f" bg_stt={round(float(extra.get('bg_stt_ms') or 0))}"
+            f" bg_cleanup={round(float(extra.get('bg_cleanup_ms') or 0))}"
+        )
+    return line

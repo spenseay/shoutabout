@@ -21,10 +21,15 @@ class EngineError(RuntimeError):
 
 @dataclass(frozen=True)
 class SttHints:
-    """Vocabulary biasing for one transcription."""
+    """Vocabulary biasing for one transcription.
+
+    ``context`` is the end of what was said just before this audio (the previous stretch
+    of a streamed dictation, :mod:`shoutabout.streaming`). Engines put it after the
+    vocabulary prompt, as the text that came before."""
 
     initial_prompt: str | None = None
     hotwords: str | None = None
+    context: str | None = None
 
 
 @runtime_checkable

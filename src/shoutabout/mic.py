@@ -290,12 +290,16 @@ class MicRecorder:
         max_seconds: float = 120.0,
         on_level: Callable[[float], None] | None = None,
         on_limit: Callable[[], None] | None = None,
+        on_audio: Callable[[np.ndarray], None] | None = None,
         stream_factory: StreamFactory | None = None,
         privacy_reader: RegistryReader = _read_consent,
     ) -> None:
         self.max_seconds = float(max_seconds)
         self._on_level = on_level
         self._on_limit = on_limit
+        # Each block as it arrives (16 kHz only; a device at another rate is resampled at
+        # stop instead), for a dictation transcribed while it's recorded.
+        self._on_audio = on_audio
         self._factory: StreamFactory = stream_factory or sounddevice_stream
         self._read = privacy_reader
         self._lock = threading.Lock()
@@ -364,6 +368,11 @@ class MicRecorder:
         block = block.copy()
         self._chunks.append(block)
         self._frames += block.shape[0]
+        if self._on_audio is not None and self._rate == SAMPLE_RATE:
+            try:
+                self._on_audio(block)
+            except Exception:
+                log.debug("audio callback failed", exc_info=True)
         if self._on_level is not None:
             try:
                 self._on_level(self._meter.update(block))

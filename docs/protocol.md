@@ -1,8 +1,9 @@
 # The phone protocol (v2), as the PC implements it
 
 This is how the iPhone app finds a ShoutAbout PC, pairs with it and talks to it. The PC side
-lives in `src/shoutabout/` (`discovery.py`, `pair_requests.py`, `devices.py`, `identity.py`
-and the endpoints in `server.py`). Everything here runs over the home network only.
+lives in `src/shoutabout/` (`discovery.py`, `pair_requests.py`, `devices.py`, `identity.py`,
+`streaming.py` and the endpoints in `server.py`). Everything here runs over the home network
+only.
 
 1. [Discovery](#1-discovery-dns-sd)
 2. [Unauthenticated endpoints](#2-unauthenticated-endpoints-home-network-only)
@@ -153,9 +154,11 @@ Existing: `POST /transcribe`, `GET`/`POST /vocab`, `GET /health` (no auth) are u
 ```json
 {"id": "6f1c2a8e-…", "name": "DESKTOP-ABC", "version": "0.1.0",
  "stt": {"tier": "best", "device": "cuda", "speed": "fast"},
- "cleanup": true, "accepts": ["audio", "text"]}
+ "cleanup": true, "accepts": ["audio", "text", "stream"]}
 ```
 
+* `accepts`: `audio` = `POST /transcribe`, `text` = `POST /paste`, `stream` = the streamed
+  dictations below. Hubs before streaming don't list `stream`: never stream to them.
 * `stt.tier`: `best` | `balanced` | `light`; `stt.device`: `cuda` | `cpu`.
 * `stt.speed`: `fast` (best), `ok` (balanced), `slow` (light / CPU). When it reads `slow`
   the phone should transcribe on-device and send only the text (`POST /paste`).
@@ -184,6 +187,77 @@ the final text. The text is never interpreted, and only its length is logged.
 
 `/paste` works while the speech model is still loading.
 
+### Streamed dictations ("transcribe while you talk")
+
+For long dictations the wait after "stop" used to grow with the length (about 3.4 s for two
+minutes, most of it STT and a cleanup that timed out). With streaming the phone sends the
+audio while it records; the PC transcribes and cleans up finished stretches in the
+background, so at "stop" only the last few seconds are left (0.3–0.8 s for two minutes on
+the owner's PC, `scripts/bench_streaming.py`). The phone always keeps its normal `.m4a` recording too: if anything about
+the stream fails, it uploads that to `/transcribe` as before.
+
+All four endpoints are authenticated exactly like `/transcribe` (rate limit, lockout, bearer,
+Access JWT on the tunnel route). A stream belongs to the token that started it: any other
+token gets `404` for it. Audio stays in memory only; log lines never contain text.
+
+**`POST /stream/start`** — body `{"target": "pc" | "phone", "sample_rate": 16000,
+"encoding": "s16le"}` (target missing = `pc`; sample rate and encoding missing = these
+values).
+
+| Reply | When |
+|---|---|
+| `200 {"stream_id": "<32 url-safe chars>", "max_chunk_bytes": 262144}` | Started. |
+| `422` | Another sample rate or encoding, a bad target, or a body that isn't a JSON object. |
+| `429` | Two streams are already open (`{"detail": "too many open streams (max 2)"}`), or rate limited. |
+| `503` | The speech model isn't loaded yet: just record normally. |
+
+**`POST /stream/{stream_id}/audio?seq=<n>`** — raw body (`application/octet-stream`): 16 kHz
+mono PCM, signed 16-bit little-endian, 1 to `max_chunk_bytes` bytes, an even number. `seq`
+starts at 0 and goes up by one per chunk.
+
+| Reply | When |
+|---|---|
+| `200 {"next_seq": n + 1, "received_s": 12.0}` | Appended (`received_s`: all audio so far). |
+| `200`, same shape | `seq` below the expected one: a retry of a chunk that already arrived, ignored. |
+| `409 {"detail": "missing chunk", "next_seq": <expected>}` | `seq` above the expected one. |
+| `404` | Unknown, expired, cancelled or finished stream (or someone else's). |
+| `413` | Chunk over `max_chunk_bytes`, or the total would pass `[server] max_audio_seconds`. |
+| `422` | `seq` missing or not a whole number, or an empty / odd-length body. |
+
+Chunk posts don't count against `rate_limit_per_minute`; they have their own limit of 300 a
+minute per client (one every ~2 s is 30 a minute). Failed tokens still count towards the
+lockout.
+
+**`POST /stream/{stream_id}/finish`** — body `{"chunks": <N>}`, the number of chunks sent (the
+phone's next `seq`).
+
+| Reply | When |
+|---|---|
+| `200` | Exactly the `/transcribe` response (`text`, `raw_text`, `target`, `pasted`, `warning`, `status`, `route`, `cleanup`, `timings_ms`, and anything `/transcribe` gains later) plus `"streamed": true`. Delivered like `/transcribe`: target `pc` pastes unless paused, an empty transcript gets "No speech detected.", Recent for target `pc`. |
+| the same `200` again | Finish called again (the reply was lost): the same result, never pasted twice. Kept for 2 minutes. |
+| `409 {"detail": "missing chunks", "next_seq": <expected>}` | `chunks` isn't what arrived. |
+| `404` | Unknown, expired or cancelled stream. |
+| `422` | `chunks` isn't a whole number (leave it out or `null` to skip the check). |
+| `503` | The speech engine failed (as `/transcribe`); asking again gives the same `503`. Use the `.m4a`. |
+
+`timings_ms` is the wait after finish (`stt` includes waiting for a stretch that was still
+transcribing; `total` is the whole finish request). The background work goes in the log line
+(`streamed=true chunks=N stretches=K bg_stt=… bg_cleanup=…`).
+
+**`DELETE /stream/{stream_id}`** — cancel: the stream and its audio are thrown away. Always
+`204`, also for unknown ids.
+
+**Expiry and limits:** a stream with no request for 60 s is thrown away; at most 2 open at a
+time; nothing is written to disk.
+
+**How the PC cuts** (`streaming.py`; the phone needn't care): once 15 s are waiting it looks
+for a pause with Silero VAD (a loudness check if that can't load) and cuts in its middle,
+never mid-word: a 0.6 s pause at once, a 0.3 s one after 23 s, and with no pause by 28 s the
+quietest moment. Each stretch gets the vocabulary hints plus the previous stretch's last
+sentence as context, and its cleanup runs while the next stretch is transcribed. On the
+benchmark clips the streamed text matched the whole-file text word for word, or differed by
+one or two words.
+
 ## 6. Errors and limits
 
 | Endpoint | Limit | Over it |
@@ -191,6 +265,8 @@ the final text. The text is never interpreted, and only its length is logged.
 | `POST /pair/request` | 5 a minute per source address, 30 a minute in total; one pending request at a time; a minute's cool-down for an address after Don't allow | `429` (with `Retry-After`), `409` when another phone is waiting |
 | `GET /hello`, `GET /pair/status` | 120 a minute per source address (the phone polls once a second) | `429` |
 | Authenticated endpoints | as before: `rate_limit_per_minute` per (route, address) and the auth-failure lockout | `429` |
+| `POST /stream/{id}/audio` | 300 a minute per (route, address) instead of `rate_limit_per_minute`; the same lockout | `429` |
+| `POST /stream/start` | at most 2 open streams per hub | `429` |
 
 Bad input: `422` for a body that isn't the expected JSON (garbage, wrong types, too deeply
 nested); `413` for an oversized body (checked from `Content-Length` and while streaming).
@@ -227,6 +303,14 @@ curl 'http://192.168.1.50:47821/pair/status?request_id=<request_id>'
 curl -H 'Authorization: Bearer <token>' http://192.168.1.50:47821/info
 curl -H 'Authorization: Bearer <token>' -H 'Content-Type: application/json' \
      -d '{"text":"Hello from curl."}' http://192.168.1.50:47821/paste
+# a streamed dictation: raw 16 kHz mono s16le PCM in chunks
+curl -H 'Authorization: Bearer <token>' -H 'Content-Type: application/json' \
+     -d '{"target":"phone","sample_rate":16000,"encoding":"s16le"}' \
+     http://192.168.1.50:47821/stream/start
+curl -H 'Authorization: Bearer <token>' -H 'Content-Type: application/octet-stream' \
+     --data-binary @chunk0.pcm 'http://192.168.1.50:47821/stream/<stream_id>/audio?seq=0'
+curl -H 'Authorization: Bearer <token>' -H 'Content-Type: application/json' \
+     -d '{"chunks":1}' http://192.168.1.50:47821/stream/<stream_id>/finish
 ```
 
 Remove the test device afterwards: Settings > Phones > Remove, or
