@@ -119,7 +119,8 @@ def service_info(identity: Any, port: int, version: str = __version__) -> Servic
         ("name", str(identity.name)),
         ("ver", version),
     )
-    return ServiceInfo(instance=str(identity.name), port=int(port), txt=txt)
+    instance = str(getattr(identity, "announce_as", "") or identity.name)
+    return ServiceInfo(instance=instance, port=int(port), txt=txt)
 
 
 @dataclass

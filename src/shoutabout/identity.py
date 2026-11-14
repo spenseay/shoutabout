@@ -8,14 +8,16 @@
   so it can tell "my PC" from any other ShoutAbout PC on the Wi-Fi even after a rename or
   a new IP address. It's not a secret (it's in the DNS-SD TXT record and ``/hello``).
 * ``name`` is the user's own name for this PC (Settings > Computer name), or null for the
-  default: the Windows computer name ("DESKTOP-ABC"), read fresh each time so a renamed PC
-  is picked up.
+  default: the Windows computer name, read fresh each time so a renamed PC is picked up.
+  A name Windows made up at setup ("DESKTOP-Q0DB401", "LAPTOP-AB12CD3") means nothing on a
+  phone, so it shows as "Desktop" / "Laptop" instead (:func:`default_name`).
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import re
 import socket
 import sys
 import threading
@@ -33,6 +35,8 @@ log = logging.getLogger(__name__)
 NAME_MAX_BYTES = 63
 NAME_MAX_CHARS = 40
 FALLBACK_NAME = "My PC"
+# Windows names a new PC "DESKTOP-" or "LAPTOP-" plus 7 random letters and digits.
+_GENERATED_NAME = re.compile(r"(DESKTOP|LAPTOP)-[A-Z0-9]{7}", re.IGNORECASE)
 
 
 def computer_name() -> str:
@@ -50,6 +54,17 @@ def computer_name() -> str:
     return clean_friendly_name(name) or FALLBACK_NAME
 
 
+def friendly_default(name: str) -> str:
+    """``name``, or "Desktop" / "Laptop" for a name Windows generated at setup."""
+    match = _GENERATED_NAME.fullmatch(name.strip())
+    return match.group(1).capitalize() if match else name
+
+
+def default_name() -> str:
+    """The name phones see when nobody chose one: the computer name, made friendly."""
+    return friendly_default(computer_name())
+
+
 def clean_friendly_name(raw: object) -> str:
     """A name fit for the phone list and a DNS-SD instance label ("" if unusable)."""
     return clean_name(raw, max_chars=NAME_MAX_CHARS, max_utf8_bytes=NAME_MAX_BYTES)
@@ -60,14 +75,24 @@ class Identity:
     id: str
     name: str
     custom_name: bool  # False = the computer name (follows a Windows rename)
+    # The DNS-SD instance name when it isn't ``name``: two PCs both shown as "Desktop" must
+    # still announce different instance names, so those keep the unique computer name.
+    announce_as: str = ""
 
 
 class IdentityStore:
     """Thread-safe access to identity.json (created on first use)."""
 
-    def __init__(self, path: Path, *, default_name: Callable[[], str] = computer_name) -> None:
+    def __init__(
+        self,
+        path: Path,
+        *,
+        default_name: Callable[[], str] = default_name,
+        machine_name: Callable[[], str] = computer_name,
+    ) -> None:
         self.path = Path(path)
         self._default_name = default_name
+        self._machine_name = machine_name
         self._lock = threading.Lock()
         self._id: str | None = None
         self._custom: str | None = None
@@ -106,7 +131,10 @@ class IdentityStore:
             assert self._id is not None
             if self._custom:
                 return Identity(self._id, self._custom, True)
-            return Identity(self._id, self._default_name() or FALLBACK_NAME, False)
+            name = self._default_name() or FALLBACK_NAME
+        machine = self._machine_name()
+        friendly = machine != name and friendly_default(machine) == name
+        return Identity(self._id, name, False, machine if friendly else "")
 
     def reload(self) -> None:
         """Forget the cached file contents (another process changed identity.json)."""

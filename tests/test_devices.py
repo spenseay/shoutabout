@@ -274,3 +274,40 @@ def test_friendly_names_fit_a_dns_label():
 )
 def test_clean_name(raw, clean):
     assert clean_name(raw) == clean
+
+
+def test_generated_windows_names_show_as_desktop_or_laptop(tmp_path):
+    from shoutabout.identity import friendly_default
+
+    assert friendly_default("DESKTOP-Q0DB401") == "Desktop"
+    assert friendly_default("laptop-ab12cd3") == "Laptop"
+    assert friendly_default("SPENCERTOP") == "SPENCERTOP"
+    assert friendly_default("DESKTOP-SHOUT") == "DESKTOP-SHOUT"  # not 7 random characters
+    assert friendly_default("My DESKTOP-Q0DB401") == "My DESKTOP-Q0DB401"
+    store = IdentityStore(
+        tmp_path / "identity.json",
+        default_name=lambda: friendly_default("DESKTOP-Q0DB401"),
+        machine_name=lambda: "DESKTOP-Q0DB401",
+    )
+    ident = store.get()
+    # Phones see "Desktop"; DNS-SD keeps the unique computer name as the instance.
+    assert (ident.name, ident.custom_name, ident.announce_as) == (
+        "Desktop",
+        False,
+        "DESKTOP-Q0DB401",
+    )
+    assert store.rename("Office").announce_as == ""
+    plain = IdentityStore(
+        tmp_path / "p.json", default_name=lambda: "SPENCERTOP", machine_name=lambda: "SPENCERTOP"
+    ).get()
+    assert plain.announce_as == ""
+
+
+def test_discovery_announces_the_unique_instance_name():
+    from shoutabout.discovery import service_info
+    from shoutabout.identity import Identity
+
+    ident = Identity("6f1c2a8e-0b7d-4a43-9d5e-2c1b0a9f8e7d", "Desktop", False, "DESKTOP-Q0DB401")
+    info = service_info(ident, 47821, "1.0.5")
+    assert info.instance == "DESKTOP-Q0DB401"
+    assert ("name", "Desktop") in info.txt
