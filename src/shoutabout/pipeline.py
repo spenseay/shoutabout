@@ -102,7 +102,7 @@ def deliver_result(
     is measured from it). ``deliver=False`` never pastes (the CLI, Recent > Try again).
     ``paste`` overrides how the text is pasted (the pipeline's own ``_paste``)."""
     text = normalize_whitespace(cleaned.text)
-    pasted, warning = False, None
+    pasted, warning, copied = False, None, False
     if not text:
         # Either target: lets the Shortcut tell "nothing heard" apart from a real result.
         warning = NO_SPEECH_WARNING
@@ -114,6 +114,8 @@ def deliver_result(
             result = paste(text) if paste is not None else paste_text(config, injector, text)
             timings.paste = _ms(t)
             pasted, warning = bool(result.pasted), result.warning
+            # Left on the computer's clipboard (no text box had the focus, ...).
+            copied = bool(getattr(result, "copied", False))
 
     timings.total = _ms(started)
     out = TranscribeResult(
@@ -128,6 +130,7 @@ def deliver_result(
         audio_seconds=audio_seconds,
         request_id=uuid.uuid4().hex[:12],
         extra=dict(extra or {}),
+        copied=copied,
     )
     if recent is not None:
         recent.add(out)  # never raises; keeps target pc only

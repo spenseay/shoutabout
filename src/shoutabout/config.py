@@ -246,6 +246,9 @@ class PasteConfig(_Section):
     restore_clipboard: bool = True
     restore_delay_ms: int = Field(default=500, ge=0, le=5000)
     exclude_from_history: bool = True
+    # Look for a text box before pasting (inject/focus.py). With none, the text is left on
+    # the clipboard and a small pop-up says so. false = paste and restore as before.
+    check_focus: bool = True
     # Processes (exe names, case-insensitive) that don't paste on Ctrl+V; these get the
     # other standard paste chord, Shift+Insert, instead. Never any other key.
     shift_insert_processes: list[str] = Field(

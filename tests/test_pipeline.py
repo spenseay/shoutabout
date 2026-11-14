@@ -405,3 +405,31 @@ def test_cleanup_result_type_preserved():
 
     r = make(cleaner=Reasoned()).process_file(AUDIO, target="phone", route="lan")
     assert r.cleanup.reason == "guard: too different"
+
+
+def test_copied_reaches_the_response_through_the_shared_delivery():
+    """A paste that left the text on the clipboard says so, for every caller of
+    deliver_result (/transcribe, /paste, streamed dictations, Talk to this PC)."""
+    import time as _time
+
+    from shoutabout.models import Timings
+    from shoutabout.pipeline import deliver_result
+
+    class LeftOnClipboard:
+        def paste(self, text):
+            return PasteResult(pasted=False, warning="No text box was selected.", copied=True)
+
+    result = deliver_result(
+        config=Config(),
+        injector=LeftOnClipboard(),
+        state=HubState(),
+        recent=None,
+        raw_text="hello there",
+        cleaned=CleanupResult(text="Hello there.", status="disabled"),
+        target="pc",
+        route="lan",
+        timings=Timings(),
+        started=_time.perf_counter(),
+    )
+    out = result.to_response()
+    assert (out["pasted"], out["copied"], out["status"]) == (False, True, "warning")

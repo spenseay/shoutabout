@@ -452,6 +452,7 @@ The config file is `%APPDATA%\shoutabout\config.toml`.
 | `restore_clipboard` | `true` | Puts the previous clipboard contents back after pasting. |
 | `restore_delay_ms` | `500` | Wait before restoring (0-5000). Raise it for RDP or VM windows. The restore is skipped if something else changed the clipboard in the meantime. |
 | `exclude_from_history` | `true` | Marks the transcript, and the restored contents, as excluded from Win+V history and cloud clipboard. |
+| `check_focus` | `true` | Checks that a text box has the focus before pasting. When none does, the text stays on the clipboard and a small pill says "Not pasted · Ctrl+V to paste". `false` pastes and restores as before. |
 | `shift_insert_processes` | `["mintty.exe", "putty.exe", "kitty.exe"]` | Executables that get Shift+Insert instead of Ctrl+V. These are the only two key chords ever sent. |
 
 ### `[access]`

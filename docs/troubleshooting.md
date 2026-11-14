@@ -485,6 +485,21 @@ with the warning `No focused window on the PC (locked?) — text is on your clip
 foreground at paste time. If you got the warning, click where the text should go and press
 Ctrl+V.
 
+### "Not pasted · Ctrl+V to paste"
+
+Just before pasting, the hub checks that a text box has the focus. When none does (the
+desktop, a file list, a button, a web page with nothing selected) it still sends Ctrl+V, but
+leaves your words on the clipboard and shows this little pill for a few seconds. The phone
+gets `pasted: false`, `"copied": true` and "No text box was selected on <PC name>, so it's on
+that computer's clipboard." Click where the text should go and press Ctrl+V.
+
+When the hub can't tell (some apps don't describe their windows), it pastes as usual and
+quietly leaves your words on the clipboard instead of putting your old clipboard back.
+
+If the pill shows up although the text was pasted, run
+`.venv\Scripts\python.exe scripts\focus_probe.py --watch`, click into that app and send the
+lines it prints. To turn the check off: `[paste] check_focus = false`.
+
 ### The PC is locked, or the screen is off and locked
 
 **Cause:** before pasting, the hub checks which desktop is receiving input. While the PC is
@@ -559,6 +574,8 @@ clipboard before the remote side has fetched the transcript.
 - Something changed the clipboard during the 500 ms restore delay. The restore is skipped by
   design.
 - `restore_clipboard = false`.
+- No text box had the focus, or the hub couldn't tell: your dictation is kept on the clipboard
+  instead (see "Not pasted · Ctrl+V to paste" above).
 - The previous content used formats that can't be safely copied, such as GDI or metafile
   handles, OLE private data or delayed-render data from some apps. Plain text, rich text, HTML,
   images (DIB) and file lists are restored.

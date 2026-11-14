@@ -8,6 +8,8 @@ import pytest
 
 from shoutabout import overlay as ov
 from shoutabout.config import PasteConfig
+from shoutabout.inject.base import NOT_PASTED_NOTICE_MAC
+from shoutabout.inject.focus import NONE, TEXT, UNKNOWN, Focus
 from shoutabout.mac import keys, mic_mac, paste
 from shoutabout.mac.overlay_mac import MacOverlay, place_top_centre, prewarm_looks
 from shoutabout.mac.paste import (
@@ -318,6 +320,100 @@ def test_paste_keystroke_failure_is_reported():
     inj._poster = FakePoster(fail=True)
     result = inj.paste("x")
     assert not result.pasted and "keystroke" in result.warning
+
+
+class ScriptedProbe:
+    def __init__(self, *kinds):
+        self.kinds = list(kinds)
+        self.calls = 0
+
+    def probe(self):
+        self.calls += 1
+        kind = self.kinds.pop(0) if len(self.kinds) > 1 else self.kinds[0]
+        return Focus(kind, f"fake {kind}", 2.0)
+
+
+def make_probed_injector(*kinds, name="Sam's MacBook", **cfg):
+    board, poster, timers, notes = FakeBoard(), FakePoster(), Timers(), Notes()
+    probe, popups, sleeps = ScriptedProbe(*kinds), [], []
+    inj = MacPasteInjector(
+        PasteConfig(**cfg),
+        notes,
+        pasteboard=board,
+        poster=poster,
+        trusted=lambda: True,
+        secure_input=lambda: False,
+        vkey=VKey(lookup=lambda: None),
+        timer=timers,
+        probe=probe,
+        popup=popups.append,
+        pc_name=lambda: name,
+        sleep=sleeps.append,
+    )
+    return inj, board, poster, timers, probe, popups, sleeps
+
+
+def test_mac_text_focus_pastes_and_restores():
+    inj, board, poster, timers, probe, popups, _ = make_probed_injector(TEXT)
+    result = inj.paste("hello")
+    assert result.pasted and result.copied is False and result.focus == TEXT
+    assert TRANSIENT in board.writes[0][1] and timers.pending and popups == []
+
+
+def test_mac_no_text_box_keeps_the_text_and_shows_the_pill():
+    inj, board, poster, timers, probe, popups, sleeps = make_probed_injector(NONE, NONE)
+    result = inj.paste("dictated")
+    assert poster.posted == [keys.KC_ANSI_V]  # Cmd+V still sent
+    assert timers.pending == []  # never restored
+    text, markers = board.writes[0]
+    assert text == "dictated" and TRANSIENT not in markers  # it stays: not transient
+    assert result.pasted is False and result.copied is True
+    assert result.warning == (
+        "No text box was selected on Sam's MacBook, so it's on that computer's clipboard."
+    )
+    assert popups == [NOT_PASTED_NOTICE_MAC] and "⌘V" in NOT_PASTED_NOTICE_MAC
+    assert len(NOT_PASTED_NOTICE_MAC) <= 28
+    assert probe.calls == 2 and sleeps == [paste.REPROBE_DELAY_S]
+
+
+def test_mac_no_text_box_then_one_appeared():
+    inj, _board, _poster, timers, _probe, popups, _ = make_probed_injector(NONE, TEXT)
+    result = inj.paste("x")
+    assert result.pasted and result.copied and popups == [] and timers.pending == []
+
+
+def test_mac_unknown_focus_pastes_and_keeps_the_text():
+    inj, board, poster, timers, _probe, popups, _ = make_probed_injector(UNKNOWN)
+    result = inj.paste("x")
+    assert result.pasted and result.copied and result.focus == UNKNOWN
+    assert poster.posted and timers.pending == [] and popups == []
+    assert TRANSIENT not in board.writes[0][1]
+
+
+def test_mac_warning_without_a_name():
+    inj, *_ = make_probed_injector(NONE, NONE, name=None)
+    assert inj.paste("x").warning == (
+        "No text box was selected on the Mac, so it's on the Mac's clipboard."
+    )
+
+
+def test_mac_without_accessibility_reports_copied():
+    inj, *_ = make_injector(trusted=False)
+    assert inj.paste("x").copied is True
+
+
+def test_mac_overlay_notice_hold():
+    overlay, panel, clock = make_overlay()
+    overlay.start()
+    text = "Not pasted · ⌘V to paste"
+    assert ov.notice_hold(text) < 3.5
+    overlay.notice(text, hold=4.0)
+    clock.now += 3.5  # past the usual hold for this text, inside the 4 s one
+    panel.timer()
+    assert panel.shown[-1][3] == pytest.approx(1.0) and panel.hidden == 0
+    clock.now += 1.0
+    panel.timer()
+    assert panel.hidden == 1
 
 
 def test_find_keycode_prefers_ansi_v_and_follows_the_layout():

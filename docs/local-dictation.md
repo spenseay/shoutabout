@@ -55,6 +55,7 @@ The mouth means:
 | Yellow, "Didn't catch that" | Nothing was heard |
 | Yellow, "Getting ready… 42%" | The speech model is still downloading or loading |
 | Yellow, "Ready · Right Ctrl to talk" | You just opened ShoutAbout (Start menu, the installer's last page) and it's ready. Starting at sign-in stays quiet. |
+| Yellow, "Not pasted · Ctrl+V to paste" | No text box had the focus. Your words are on the clipboard: click where they go and press Ctrl+V. Phone dictations show it too. |
 | Red, "No mic" | This PC has no microphone. A notification explains, once per session. |
 | Red, a few words ("Mic blocked", "Admin window", "PC is locked", "Not pasted") | A problem. When the text wasn't pasted it is on the clipboard (and in **Recent**), and a notification explains. |
 | Red, "Not working" | Transcription failed. The recording is kept in memory: **Recent > Try again**. |
@@ -133,6 +134,7 @@ Hotkey notes:
 | "Not working" | The speech engine failed. The notification says why; the recording is in **Recent** with **Try again**. |
 | Nothing happens when you press the key | Is the hub paused? Is `[dictation] enabled = true`? Did you hold it longer than half a second (toggle mode wants a tap)? Is an **admin** window focused (Windows doesn't let normal apps see keys typed into admin windows, and ShoutAbout couldn't paste there anyway)? `hub.log` says "listening for the dictation hotkey" when it's on. |
 | "Admin window" | The text is on the clipboard: paste it yourself (Windows blocks typing into apps running as administrator). It's in Recent too. |
+| "Not pasted · Ctrl+V to paste" | Nothing you could type in had the focus. The text is on the clipboard (and in Recent). See [troubleshooting.md](troubleshooting.md#not-pasted--ctrlv-to-paste). |
 | "Getting ready…" | The speech model is downloading or loading; see [models.md](models.md). |
 | The first word is cut off | Start talking when the mouth appears. |
 

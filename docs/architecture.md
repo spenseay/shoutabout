@@ -45,6 +45,7 @@ hub (pythonw.exe -m shoutabout run, logon task, user session, not elevated)
 | `benchmark.py` | LLM and STT benchmarks for the CLI. |
 | `inject/base.py`, `inject/__init__.py` | The `Injector` and `Notifier` protocols, `NullInjector`, and the `create_injector` factory. |
 | `inject/windows.py`, `inject/clipboard.py` | Foreground and integrity checks, clipboard snapshot/set/restore with exclusion formats, `SendInput` paste chord. |
+| `inject/focus.py`, `inject/focus_win.py`, `popup.py` | The focus probe run just before the paste: "text", "none" or "unknown" from `GetGUIThreadInfo` plus UI Automation (ctypes COM, own thread, 150 ms cap; `mac/focus_mac.py` uses the Accessibility API). With no text box the dictation stays on the clipboard and `popup.py` shows "Not pasted · Ctrl+V to paste" on the mouth pill (else a toast). |
 | `tray.py`, `icons.py`, `brand.py` | ctypes `Shell_NotifyIcon` tray icon, menu and balloon toasts. Icons are the brand mouth rendered in pure Python (`brand.py`): one per state, plus a talking animation while transcribing ([brand.md](brand.md)). |
 | `hardware.py`, `modelpick.py`, `modelstore.py` | v2 automatic model choice: NVIDIA GPU / CPU / RAM detection (NVML, nvidia-smi, CTranslate2), the best / balanced / light tiers with config.toml overrides, and the resumable model download with byte progress ([models.md](models.md)). |
 | `local_dictation.py`, `hotkey.py`, `mic.py`, `overlay.py` | v2 "Talk to this PC": the observe-only `WH_KEYBOARD_LL` hotkey listener and its state machine, the microphone recorder (sounddevice), the mouth-pill layered window, and the controller that feeds a streamed dictation while recording (`Pipeline.open_stream`; `process_audio` as the fallback) ([local-dictation.md](local-dictation.md)). |
@@ -227,6 +228,8 @@ Access JWT checks:
   iPhone Shortcut compares against, because "has any value" is true even for empty values.
 - Errors are returned as `{"detail": "..."}`, without `status`.
 - A failed paste is still `200`, with `pasted: false` and a `warning`.
+- `"copied": true` is added only when the text was left on the PC clipboard
+  ([protocol.md](protocol.md#copied-true-paste-and-transcribe)).
 
 ## Failure modes
 
@@ -241,6 +244,8 @@ Access JWT checks:
 | Upload too large, audio too long, undecodable | Request rejected before the GPU runs | `413` / `415` |
 | PC locked, or the UAC secure desktop showing (the input desktop isn't "Default") | No paste; the text is left on the PC clipboard | `pasted: false` and "The PC is locked — text is on your clipboard." |
 | No foreground window | No paste; the text is left on the PC clipboard | `pasted: false` and "No focused window on the PC (locked?) — text is on your clipboard." |
+| No text box has the focus (desktop, file list, button, read-only page) | Ctrl+V is still sent; looked at again 0.2 s later; the clipboard isn't restored | The pill "Not pasted · Ctrl+V to paste"; `pasted: false`, `copied: true` and "No text box was selected on <name>, so it's on that computer's clipboard." |
+| The focus probe can't tell (UI Automation slow or silent) | Pasted; the clipboard isn't restored | Nothing; `copied: true` |
 | Foreground window elevated (higher integrity) | No keystrokes. The clipboard holds the text and is not restored. | A toast plus the warning "Couldn't paste into an admin window — text is on your clipboard." |
 | Clipboard changed before the restore | The restore is skipped (sequence number check) | The newer clipboard content is kept |
 | Hub paused | Transcribes but doesn't paste | The phone gets the text and "Hub is paused — not pasted on the PC." |

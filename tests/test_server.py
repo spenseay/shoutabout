@@ -276,6 +276,27 @@ def test_two_files_400():
     assert r.status_code == 400
 
 
+def test_text_left_on_the_clipboard_adds_copied():
+    warning = "No text box was selected on Desktop, so it's on that computer's clipboard."
+    injector = FakeInjector(PasteResult(pasted=False, warning=warning, copied=True, focus="none"))
+    r = Hub(injector=injector).client().post("/transcribe", headers=AUTH, **upload())
+    body = r.json()
+    assert r.status_code == 200
+    assert body["pasted"] is False and body["copied"] is True
+    assert body["warning"] == warning and body["status"] == "warning"
+    assert set(body) == RESPONSE_KEYS | {"copied"}  # additive: older iPhone apps ignore it
+
+
+def test_copied_only_when_true():
+    injector = FakeInjector(PasteResult(pasted=True, copied=False))
+    body = Hub(injector=injector).client().post("/transcribe", headers=AUTH, **upload()).json()
+    assert "copied" not in body
+    # pasted, and kept on the clipboard just in case (the probe couldn't tell): ok + copied
+    injector = FakeInjector(PasteResult(pasted=True, copied=True, focus="unknown"))
+    body = Hub(injector=injector).client().post("/transcribe", headers=AUTH, **upload()).json()
+    assert body["status"] == "ok" and body["copied"] is True and body["pasted"] is True
+
+
 def test_paste_failure_is_200_with_warning():
     injector = FakeInjector(
         PasteResult(pasted=False, warning="Couldn't paste into an admin window")

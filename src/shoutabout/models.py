@@ -56,6 +56,11 @@ class CleanupResult:
 class PasteResult:
     pasted: bool
     warning: str | None = None
+    # The dictation was left on the computer's clipboard (its old contents won't come
+    # back), e.g. because no text box had the focus. The phone gets "copied": true.
+    copied: bool = False
+    # What the focus probe saw before the paste: "text", "none", "unknown" (None = no probe).
+    focus: str | None = None
 
 
 @dataclass
@@ -71,10 +76,11 @@ class TranscribeResult:
     audio_seconds: float = 0.0
     request_id: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
+    copied: bool = False  # the text was left on the computer's clipboard (PasteResult.copied)
 
     def to_response(self) -> dict[str, Any]:
         """The public API contract of POST /transcribe (see PLAN.md)."""
-        return {
+        out: dict[str, Any] = {
             "text": self.text,
             "raw_text": self.raw_text,
             "target": self.target,
@@ -87,3 +93,6 @@ class TranscribeResult:
             "cleanup": self.cleanup.status,
             "timings_ms": self.timings.as_dict(),
         }
+        if self.copied:  # additive: only when the text is waiting on the computer's clipboard
+            out["copied"] = True
+        return out

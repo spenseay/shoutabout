@@ -355,6 +355,19 @@ def test_longer_notices_stay_long_enough_to_read():
     assert frame_at("notice", 2.5, text="Paused").finished
 
 
+def test_not_pasted_notice_fits_and_stays_a_little_longer():
+    from shoutabout.inject.base import NOT_PASTED_HOLD_S, NOT_PASTED_NOTICE
+
+    assert short_text(NOT_PASTED_NOTICE) == NOT_PASTED_NOTICE  # fits the pill, uncut
+    t = notice_hold(NOT_PASTED_NOTICE) + 0.5  # the usual notice would be gone by now
+    assert frame_at("notice", t, text=NOT_PASTED_NOTICE).finished
+    held = frame_at("notice", t, text=NOT_PASTED_NOTICE, hold=NOT_PASTED_HOLD_S)
+    assert held.alpha == 255 and not held.finished
+    assert frame_at("notice", NOT_PASTED_HOLD_S + 0.4, text="x", hold=NOT_PASTED_HOLD_S).finished
+    # a plain yellow pill with words: no countdown, no glow (the same look as other notices)
+    assert held.look == frame_at("notice", 0.0, text=NOT_PASTED_NOTICE).look
+
+
 def test_short_text():
     assert short_text("Mic   blocked") == "Mic blocked"
     long = short_text("This is far too long for a little pill at the top")
@@ -375,6 +388,9 @@ def test_null_overlay_records_states():
     o.cancelled()
     o.hide()
     assert o.state == "hidden"
+    o.notice("Not pasted", hold=4.0)
+    assert (o.state, o.text, o.hold) == ("notice", "Not pasted", 4.0)
+    assert NullOverlay.shows is False  # nothing appears: the pop-up falls back to a toast
     o.stop()
 
 

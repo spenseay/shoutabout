@@ -20,6 +20,9 @@ from shoutabout.inject.base import (
     ADMIN_WINDOW_WARNING,
     COPIED_NOTICE,
     NO_PASTE_PERMISSION_WARNING,
+    NOT_PASTED_HOLD_S,
+    NOT_PASTED_NOTICE,
+    no_text_box_warning,
 )
 from shoutabout.local_dictation import (
     DictationState,
@@ -39,6 +42,8 @@ STOP = HotkeyEvent(Action.STOP, "release")
 
 
 class RecordingOverlay(NullOverlay):
+    shows = True  # stands in for a real pill
+
     def __init__(self) -> None:
         super().__init__()
         self.calls: list[str] = []
@@ -336,6 +341,42 @@ def test_no_paste_permission_copies_and_says_command_v():
         h.wait_state(DictationState.READY)
     assert h.notes == []
     assert len(COPIED_NOTICE) <= 28  # fits the pill
+    h.dictation.stop()
+
+
+def test_no_text_box_shows_the_not_pasted_pill():
+    """No text box had the focus: the words are on the clipboard and the pill says how to
+    paste them, for a little longer than other notices; no toast, no red pill."""
+    result = PasteResult(False, no_text_box_warning("Desktop"), copied=True, focus="none")
+    h = Harness(injector=FakeInjector(result))
+    h.dictation.start()
+    h.send(START)
+    h.send(STOP)
+    h.wait_overlay("notice")
+    assert h.overlay.calls[-1] == f"notice:{NOT_PASTED_NOTICE}"
+    assert h.overlay.hold == NOT_PASTED_HOLD_S
+    assert h.notes == []
+    h.dictation.stop()
+
+
+def test_popup_uses_the_pill_when_its_free(h):
+    assert h.dictation.popup(NOT_PASTED_NOTICE, hold=4.0) is True
+    assert h.overlay.calls[-1] == f"notice:{NOT_PASTED_NOTICE}" and h.overlay.hold == 4.0
+    h.send(START)
+    calls = list(h.overlay.calls)
+    assert h.dictation.popup(NOT_PASTED_NOTICE) is False  # recording: never cover it
+    assert h.overlay.calls == calls
+    h.send(STOP)
+    h.wait_state(DictationState.READY)
+    h.dictation.stop()
+    assert h.dictation.popup(NOT_PASTED_NOTICE) is False  # no pill any more
+
+
+def test_popup_is_refused_when_the_pill_is_turned_off():
+    h = Harness()
+    h.overlay.shows = False  # [dictation] overlay = false: a NullOverlay
+    h.dictation.start()
+    assert h.dictation.popup(NOT_PASTED_NOTICE) is False
     h.dictation.stop()
 
 

@@ -551,8 +551,12 @@ def first_listening_look() -> Look:
     return look
 
 
-def frame_at(state: str, t: float, level: float = 0.0, text: str = "") -> Frame:
-    """The frame for ``state``, ``t`` seconds after it began. Pure."""
+def frame_at(
+    state: str, t: float, level: float = 0.0, text: str = "", hold: float | None = None
+) -> Frame:
+    """The frame for ``state``, ``t`` seconds after it began. Pure. ``hold`` overrides how
+    long a notice stays (e.g. "Not pasted · Ctrl+V to paste": you may be looking at your
+    phone)."""
     t = max(0.0, t)
     if state == "listening":  # full opacity at once: it must be visible the moment it starts
         return Frame(Look("mouth", level_opening(level)), 255)
@@ -573,7 +577,7 @@ def frame_at(state: str, t: float, level: float = 0.0, text: str = "") -> Frame:
         alpha, finished = _fade(t, ERROR_HOLD_S, ERROR_FADE_S)
         return Frame(Look("text", tone="red", text=text), alpha, finished)
     if state == "notice":
-        alpha, finished = _fade(t, notice_hold(text), NOTICE_FADE_S)
+        alpha, finished = _fade(t, hold or notice_hold(text), NOTICE_FADE_S)
         return Frame(Look("text", text=text), alpha, finished)
     if state == "cancelled":
         alpha, finished = _fade(t, 0.0, CANCEL_FADE_S)
@@ -641,7 +645,7 @@ class OverlayLike(Protocol):
     def thinking(self) -> None: ...
     def done(self) -> None: ...
     def error(self, text: str) -> None: ...
-    def notice(self, text: str) -> None: ...
+    def notice(self, text: str, hold: float | None = None) -> None: ...
     def cancelled(self) -> None: ...
     def hide(self) -> None: ...
 
@@ -649,10 +653,13 @@ class OverlayLike(Protocol):
 class NullOverlay:
     """No window (overlay turned off, or not Windows). Remembers the last state for tests."""
 
+    shows = False  # nothing appears on screen (shoutabout.popup falls back to a notification)
+
     def __init__(self) -> None:
         self.state: str = "hidden"
         self.text = ""
         self.level = 0.0
+        self.hold: float | None = None
 
     def start(self) -> None:
         pass
@@ -678,8 +685,9 @@ class NullOverlay:
     def error(self, text: str) -> None:
         self._set("error", short_text(text))
 
-    def notice(self, text: str) -> None:
+    def notice(self, text: str, hold: float | None = None) -> None:
         self._set("notice", short_text(text))
+        self.hold = hold
 
     def cancelled(self) -> None:
         self._set("cancelled")
@@ -958,6 +966,7 @@ class OverlayWindow:
         self._state = "hidden"
         self._started = 0.0
         self._message = ""
+        self._hold: float | None = None  # a notice's own hold time (None = by its length)
         self._level = 0.0
         self._fresh = False  # the state changed and the window should re-place itself
         self._thread: threading.Thread | None = None
@@ -998,9 +1007,10 @@ class OverlayWindow:
         if thread is not None and thread is not threading.current_thread():
             thread.join(3.0)
 
-    def _set(self, state: str, text: str = "") -> None:
+    def _set(self, state: str, text: str = "", hold: float | None = None) -> None:
         with self._lock:
             self._state, self._message = state, short_text(text) if text else ""
+            self._hold = hold
             self._started = time.monotonic()
             self._fresh = True
             hwnd = self._hwnd
@@ -1025,8 +1035,8 @@ class OverlayWindow:
     def error(self, text: str) -> None:
         self._set("error", text)
 
-    def notice(self, text: str) -> None:
-        self._set("notice", text)
+    def notice(self, text: str, hold: float | None = None) -> None:
+        self._set("notice", text, hold)
 
     def cancelled(self) -> None:
         self._set("cancelled")
@@ -1037,6 +1047,11 @@ class OverlayWindow:
     @property
     def hwnd(self) -> int | None:
         return self._hwnd
+
+    @property
+    def shows(self) -> bool:
+        """The window exists (after :meth:`start`), so the pill can appear."""
+        return bool(self._hwnd)
 
     # -- warm-up (its own thread: rendering is slow-ish pure Python)
 
@@ -1161,8 +1176,9 @@ class OverlayWindow:
         gdi = _Gdi.get()
         with self._lock:
             state, started, message, fresh = self._state, self._started, self._message, self._fresh
+            hold = self._hold
             self._fresh = False
-        frame = frame_at(state, time.monotonic() - started, self._level, message)
+        frame = frame_at(state, time.monotonic() - started, self._level, message, hold)
         if frame.look is None or frame.finished:
             if self._visible:
                 gdi.ShowWindow(hwnd, SW_HIDE)

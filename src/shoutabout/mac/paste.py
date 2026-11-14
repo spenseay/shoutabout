@@ -19,6 +19,11 @@ system-wide, often held for hours by a password manager, a VPN or a company secu
 in the background, and it only stops other apps from *reading* keystrokes; a posted Cmd+V
 still reaches the app in front. It's logged once (with the app holding it), not obeyed.
 
+Before Cmd+V the focus probe (:mod:`shoutabout.mac.focus_mac`) looks for a text box, as on
+Windows: "text" pastes and restores; "none" still posts Cmd+V, looks again a moment later
+and, if there's still nowhere to type, leaves the dictation on the pasteboard with the
+"Not pasted · ⌘V to paste" pill; "unknown" pastes and leaves it on the pasteboard.
+
 The "V" key is looked up in the current keyboard layout (``UCKeyTranslate`` with the
 Command modifier, on the main thread, as macOS requires for the Text Input Sources API), so
 Dvorak and AZERTY users get Cmd+V too; it falls back to the ANSI V key.
@@ -30,11 +35,19 @@ import ctypes
 import logging
 import sys
 import threading
+import time
 from collections.abc import Callable
 from typing import Any, Protocol
 
 from shoutabout.config import PasteConfig
-from shoutabout.inject.base import NO_PASTE_PERMISSION_WARNING, Notifier
+from shoutabout.inject.base import (
+    NO_PASTE_PERMISSION_WARNING,
+    NOT_PASTED_NOTICE_MAC,
+    Notifier,
+    no_text_box_warning,
+    safe_name,
+)
+from shoutabout.inject.focus import NONE, TEXT, UNKNOWN, Focus, FocusProbe
 from shoutabout.mac import keys
 from shoutabout.models import PasteResult
 
@@ -52,6 +65,7 @@ NO_PASTE_TITLE = "ShoutAbout can't paste yet"
 NO_PASTE_MESSAGE = "Your words are copied: press ⌘V. Click to allow pasting."
 CLIPBOARD_WARNING = "Couldn't use the clipboard on the Mac — not pasted."
 SEND_FAILED_WARNING = "Couldn't send the paste keystroke — text is on your clipboard."
+REPROBE_DELAY_S = 0.2  # after "none": did the app move the focus into a text box?
 
 
 class Pasteboard(Protocol):
@@ -319,9 +333,21 @@ class MacPasteInjector:
         secure_input: Callable[[], bool] = secure_input_enabled,
         vkey: VKey | None = None,
         timer: Callable[[float, Callable[[], None]], Any] | None = None,
+        probe: FocusProbe | None = None,
+        popup: Callable[[str], Any] | None = None,
+        pc_name: Callable[[], str | None] | None = None,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.cfg = cfg
         self._notifier = notifier
+        if probe is None and pasteboard is None and getattr(cfg, "check_focus", True):
+            from shoutabout.mac.focus_mac import create_probe
+
+            probe = create_probe()
+        self._probe = probe
+        self._popup = popup
+        self._pc_name = pc_name
+        self._sleep = sleep
         self._pb = pasteboard
         self._poster = poster or QuartzKeyPoster()
         if trusted is None:
@@ -366,6 +392,10 @@ class MacPasteInjector:
             log.info("secure input is on (held by %s); pasting anyway", secure_input_holder())
         restore = self.cfg.restore_clipboard
         with self._lock:
+            focus = self._look()
+            kind = focus.kind if focus is not None else TEXT
+            if kind != TEXT:
+                restore = False  # the dictation stays on the clipboard (not marked transient)
             saved = None
             if restore:
                 try:
@@ -382,11 +412,62 @@ class MacPasteInjector:
                 self._poster.post_paste(self._vkey.current())
             except Exception:
                 log.exception("couldn't post Cmd+V")
-                return PasteResult(pasted=False, warning=SEND_FAILED_WARNING)
-        if restore and saved is not None:
-            self._schedule_restore(board, saved, ours)
+                return PasteResult(pasted=False, warning=SEND_FAILED_WARNING, copied=True)
         log.debug("pasted %d characters", len(text))
-        return PasteResult(pasted=True)
+        if kind == NONE:
+            return self._after_no_text_box(focus)
+        if kind == UNKNOWN:
+            log.info(
+                "pasted; couldn't tell if a text box had the focus (%s): text left on the "
+                "clipboard",
+                focus.reason if focus is not None else "",
+            )
+            return PasteResult(pasted=True, copied=True, focus=kind)
+        restoring = restore and saved is not None
+        if restoring:
+            self._schedule_restore(board, saved, ours)
+        return PasteResult(
+            pasted=True, copied=not restoring, focus=kind if focus is not None else None
+        )
+
+    def _look(self) -> Focus | None:
+        """The focus probe's answer (None when there is no probe). Never raises."""
+        if self._probe is None:
+            return None
+        try:
+            focus = self._probe.probe()
+        except Exception:
+            log.debug("focus probe raised", exc_info=True)
+            return Focus(UNKNOWN, "probe error")
+        log.debug("focus before the paste: %s", focus)
+        return focus
+
+    def _after_no_text_box(self, first: Focus | None) -> PasteResult:
+        """No text box had the focus; Cmd+V was posted anyway. Look again (an app may have
+        moved the focus into its text box); else say where the dictation is."""
+        self._sleep(REPROBE_DELAY_S)
+        again = self._look()
+        if again is not None and again.kind == TEXT:
+            log.info(
+                "no text box before the paste (%s), but one after (%s): pasted; text "
+                "left on the clipboard",
+                first.reason if first else "",
+                again.reason,
+            )
+            return PasteResult(pasted=True, copied=True, focus=NONE)
+        log.info(
+            "not pasted: no text box (%s): text left on the clipboard",
+            first.reason if first else "",
+        )
+        try:
+            if self._popup is not None:
+                self._popup(NOT_PASTED_NOTICE_MAC)
+            elif self._notifier is not None:
+                self._notifier.notify("ShoutAbout", NOT_PASTED_NOTICE_MAC)
+        except Exception:
+            log.exception("couldn't show the not-pasted pop-up")
+        warning = no_text_box_warning(safe_name(self._pc_name), "Mac")
+        return PasteResult(pasted=False, warning=warning, copied=True, focus=NONE)
 
     def _leave_on_clipboard(self, board: Pasteboard, text: str, warning: str) -> PasteResult:
         try:
@@ -402,7 +483,7 @@ class MacPasteInjector:
                 except Exception:
                     log.exception("notification failed")
         log.info("not pasted: %s", warning)
-        return PasteResult(pasted=False, warning=warning)
+        return PasteResult(pasted=False, warning=warning, copied=True)
 
     def _schedule_restore(self, board: Pasteboard, saved: list, ours: int) -> None:
         def restore() -> None:

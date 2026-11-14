@@ -670,6 +670,16 @@ def test_paste_failure_is_a_warning(hub):
     }
 
 
+def test_paste_left_on_the_clipboard_says_copied(hub):
+    warning = "No text box was selected on DESK-1, so it's on that computer's clipboard."
+    hub.injector.result = PasteResult(pasted=False, warning=warning, copied=True, focus="none")
+    r = hub.client().post("/paste", headers=bearer(HUB_TOKEN), json={"text": "hello"})
+    assert r.status_code == 200
+    assert r.json() == {"status": "warning", "pasted": False, "warning": warning, "copied": True}
+    (record,) = hub.recent.records
+    assert record.copied is True and record.text == "hello"  # Recent has it too
+
+
 def test_paste_injector_crash_is_contained(hub):
     def boom(_text):
         raise RuntimeError("clipboard locked")

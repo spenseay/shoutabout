@@ -11,13 +11,15 @@ from shoutabout.config import PasteConfig
 from shoutabout.inject import DISABLED_REASON, NullInjector, create_injector
 from shoutabout.inject import clipboard as cb
 from shoutabout.inject import win32 as w
-from shoutabout.inject.base import ADMIN_WINDOW_WARNING
+from shoutabout.inject.base import ADMIN_WINDOW_WARNING, NOT_PASTED_NOTICE
+from shoutabout.inject.focus import NONE, TEXT, UNKNOWN, Focus
 from shoutabout.inject.windows import (
     ALLOWED_VKS,
     CLIPBOARD_WARNING,
     LOCKED_WARNING,
     MODIFIER_WARNING,
     NO_WINDOW_WARNING,
+    REPROBE_DELAY_S,
     SEND_FAILED_WARNING,
     KeyEvent,
     PasteChord,
@@ -26,6 +28,7 @@ from shoutabout.inject.windows import (
     chord_events,
     normalize_process_names,
 )
+from shoutabout.models import PasteResult
 
 MEDIUM = w.SECURITY_MANDATORY_MEDIUM_RID
 HIGH = w.SECURITY_MANDATORY_HIGH_RID
@@ -555,6 +558,209 @@ def test_many_pastes_only_ever_send_paste_chords():
     inj.wait_idle(5)
     assert len(api.sent) == 12
     assert_only_paste_chords(api)
+
+
+# ---------------------------------------------------------------- focus probe
+
+
+class FakeProbe:
+    """Answers the scripted kinds in order (the last one repeats); records each look."""
+
+    def __init__(self, *kinds: str, ms: float = 3.0, fail: Exception | None = None) -> None:
+        self.kinds = list(kinds) or [TEXT]
+        self.ms = ms
+        self.fail = fail
+        self.calls = 0
+
+    def probe(self) -> Focus:
+        self.calls += 1
+        if self.fail:
+            raise self.fail
+        kind = self.kinds.pop(0) if len(self.kinds) > 1 else self.kinds[0]
+        return Focus(kind, f"fake {kind}", self.ms)
+
+
+def make_probed(*kinds: str, name: str | None = "Desktop", **cfg):
+    api = FakeApi()
+    notifier = FakeNotifier()
+    probe = FakeProbe(*kinds)
+    popups: list[str] = []
+    inj = WindowsPasteInjector(
+        PasteConfig(**cfg),
+        notifier,
+        api=api,
+        probe=probe,
+        popup=popups.append,
+        pc_name=lambda: name,
+    )
+    return inj, api, probe, popups, notifier
+
+
+def test_text_focus_pastes_and_restores_as_before():
+    inj, api, probe, popups, _ = make_probed(TEXT)
+    result = inj.paste("hello")
+    inj.wait_idle(5)
+    assert result == PasteResult(pasted=True, copied=False, focus=TEXT)
+    assert len(api.sent) == 1 and len(api.restores) == 1
+    assert api.clipboard_text == "user's original"
+    assert probe.calls == 1 and popups == []
+
+
+def test_no_text_box_still_sends_the_chord_but_keeps_the_text_on_the_clipboard():
+    inj, api, probe, popups, notifier = make_probed(NONE, NONE)
+    result = inj.paste("my dictation")
+    inj.wait_idle(5)
+    assert len(api.sent) == 1  # still pasted: some apps move the focus on Ctrl+V
+    assert api.restores == []  # the old clipboard is NOT put back
+    assert api.clipboard_text == "my dictation"
+    assert result.pasted is False and result.copied is True and result.focus == NONE
+    assert (
+        result.warning
+        == "No text box was selected on Desktop, so it's on that computer's clipboard."
+    )
+    assert popups == [NOT_PASTED_NOTICE] and len(NOT_PASTED_NOTICE) <= 28
+    assert notifier.messages == []  # the pop-up, not a toast
+    assert probe.calls == 2  # looked again after the keystroke
+    assert REPROBE_DELAY_S in api.sleeps
+    assert_only_paste_chords(api)
+
+
+def test_no_text_box_then_the_app_moved_focus_into_one():
+    inj, api, probe, popups, _ = make_probed(NONE, TEXT)  # e.g. Slack focusing its composer
+    result = inj.paste("hello")
+    inj.wait_idle(5)
+    assert result.pasted is True and result.warning is None
+    assert result.copied is True  # kept on the clipboard anyway, just in case
+    assert api.restores == [] and popups == []
+
+
+def test_no_text_box_then_unknown_still_shows_the_pop_up():
+    inj, api, _probe, popups, _ = make_probed(NONE, UNKNOWN)
+    result = inj.paste("hello")
+    assert result.pasted is False and popups == [NOT_PASTED_NOTICE]
+
+
+def test_unknown_focus_pastes_silently_and_keeps_the_text():
+    inj, api, probe, popups, notifier = make_probed(UNKNOWN)
+    result = inj.paste("hello")
+    inj.wait_idle(5)
+    assert result == PasteResult(pasted=True, copied=True, focus=UNKNOWN)
+    assert len(api.sent) == 1 and api.restores == []
+    assert api.clipboard_text == "hello"
+    assert popups == [] and notifier.messages == [] and probe.calls == 1
+
+
+def test_warning_without_a_name():
+    inj, *_ = make_probed(NONE, NONE, name=None)
+    assert inj.paste("x").warning == (
+        "No text box was selected on the PC, so it's on the PC's clipboard."
+    )
+
+
+def test_a_failing_name_or_pop_up_never_breaks_the_paste():
+    api = FakeApi()
+
+    def bad_name():
+        raise RuntimeError("identity file locked")
+
+    def bad_popup(_text):
+        raise RuntimeError("overlay gone")
+
+    inj = WindowsPasteInjector(
+        PasteConfig(),
+        FakeNotifier(),
+        api=api,
+        probe=FakeProbe(NONE, NONE),
+        popup=bad_popup,
+        pc_name=bad_name,
+    )
+    result = inj.paste("x")
+    assert result.pasted is False and result.copied is True
+    assert "the PC" in result.warning
+
+
+def test_without_a_pop_up_the_notifier_says_it():
+    api = FakeApi()
+    notifier = FakeNotifier()
+    inj = WindowsPasteInjector(PasteConfig(), notifier, api=api, probe=FakeProbe(NONE, NONE))
+    inj.paste("x")
+    assert notifier.messages == [("ShoutAbout", NOT_PASTED_NOTICE)]
+
+
+def test_a_crashing_probe_counts_as_unknown():
+    api = FakeApi()
+    probe = FakeProbe(fail=RuntimeError("COM exploded"))
+    inj = WindowsPasteInjector(PasteConfig(), FakeNotifier(), api=api, probe=probe)
+    result = inj.paste("x")
+    assert result.pasted is True and result.copied is True and result.focus == UNKNOWN
+    assert api.restores == []
+
+
+def test_probe_runs_after_the_clipboard_and_before_the_chord():
+    api = FakeApi()
+
+    class LoggingProbe(FakeProbe):
+        def probe(self):
+            api.log.append("probe")
+            return super().probe()
+
+    inj = WindowsPasteInjector(PasteConfig(), FakeNotifier(), api=api, probe=LoggingProbe(TEXT))
+    inj.paste("x")
+    inj.wait_idle(5)
+    order = [e for e in api.log if e in ("set_text", "probe", "send:ctrl+v")]
+    assert order == ["set_text", "probe", "send:ctrl+v"]
+
+
+def test_probe_time_counts_towards_the_settle_delay():
+    api = FakeApi()
+
+    class SlowProbe(FakeProbe):
+        def probe(self):
+            api.now += 0.03  # 30 ms looking
+            return super().probe()
+
+    inj = WindowsPasteInjector(PasteConfig(), FakeNotifier(), api=api, probe=SlowProbe(TEXT))
+    inj.paste("x")
+    assert any(abs(s - 0.01) < 1e-9 for s in api.sleeps)  # only the remaining 10 ms
+    assert 0.04 not in api.sleeps
+
+
+def test_no_probe_means_todays_behaviour():
+    inj, api, _ = make()
+    result = inj.paste("x")
+    inj.wait_idle(5)
+    assert result == PasteResult(pasted=True, copied=False, focus=None)
+    assert len(api.restores) == 1
+
+
+def test_check_focus_off_makes_no_probe():
+    inj = WindowsPasteInjector(PasteConfig(check_focus=False), FakeNotifier())
+    assert inj._probe is None
+
+
+def test_restore_disabled_reports_copied():
+    inj, api, *_ = make_probed(TEXT, restore_clipboard=False)
+    assert inj.paste("x") == PasteResult(pasted=True, copied=True, focus=TEXT)
+
+
+def test_existing_failures_report_copied():
+    inj, api, _ = make()
+    api.fg = None
+    assert inj.paste("x").copied is True  # no window: it's on the clipboard
+    inj, api, _ = make()
+    api.set_error = cb.ClipboardError("busy")
+    assert inj.paste("x").copied is False  # couldn't put it there at all
+    inj, api, _ = make()
+    api.send_result = 0
+    result = inj.paste("x")
+    assert result.warning == SEND_FAILED_WARNING and result.copied is True
+
+
+def test_no_text_box_is_skipped_when_the_target_check_fails_first():
+    inj, api, probe, popups, _ = make_probed(NONE)
+    api.fg_sequence = [0x1234, None]  # the window goes away right before the chord
+    result = inj.paste("x")
+    assert result.warning == NO_WINDOW_WARNING and api.sent == [] and popups == []
 
 
 # ---------------------------------------------------------------- clipboard selection

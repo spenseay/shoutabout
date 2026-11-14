@@ -154,6 +154,14 @@ of a session notifies once. That is the whole experience on a managed Mac that n
 Accessibility (the hotkey then needs Input Monitoring). With Secure Keyboard Entry active
 (password fields), the text stays on the clipboard too.
 
+**Is there a text box?** (`mac/focus_mac.py`). Before Cmd+V the focused element is read
+through the Accessibility API (`AXFocusedUIElement`: role, settable `AXValue`,
+`AXSelectedTextRange`, `AXEditableAncestor` for web text areas; terminals by bundle id), with
+a 150 ms limit. Nowhere to type: Cmd+V is still posted, the dictation stays on the
+pasteboard and the pill says **Not pasted · ⌘V to paste**. Can't tell: pasted, and the
+dictation stays on the pasteboard. Not yet tried on a real Mac: the rules are unit-tested
+with fakes.
+
 **Microphone** (`mac/mic_mac.py`). The shared `MicRecorder` (sounddevice → PortAudio's
 Core Audio backend). Before opening the device the permission is checked
 (`AVCaptureDevice`): not asked yet → macOS asks now and the pill says "Allow the mic";

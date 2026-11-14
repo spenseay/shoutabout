@@ -34,6 +34,7 @@ state changes happen under one lock; nothing here blocks the keyboard hook itsel
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 from collections.abc import Callable
 from enum import StrEnum
@@ -44,7 +45,15 @@ import numpy as np
 from shoutabout.config import Config
 from shoutabout.engine.base import SAMPLE_RATE, EngineError
 from shoutabout.hotkey import Action, HotkeyEvent, HotkeyListener, hotkey_label
-from shoutabout.inject.base import ADMIN_WINDOW_WARNING, COPIED_NOTICE, NO_PASTE_PERMISSION_WARNING
+from shoutabout.inject.base import (
+    ADMIN_WINDOW_WARNING,
+    COPIED_NOTICE,
+    NO_PASTE_PERMISSION_WARNING,
+    NOT_PASTED_HOLD_S,
+    NOT_PASTED_NOTICE,
+    NOT_PASTED_NOTICE_MAC,
+    is_no_text_box,
+)
 from shoutabout.mic import MicError, MicRecorder, has_input_device, no_mic_error, warm_up
 from shoutabout.models import HubStatus
 from shoutabout.overlay import OverlayLike, create_overlay
@@ -218,6 +227,19 @@ class LocalDictation:
             if overlay is None or self._state != DictationState.READY:
                 return False
         overlay.notice(ready_text(self.cfg))
+        return True
+
+    def popup(self, text: str, hold: float | None = None) -> bool:
+        """Show a short message on this pill (e.g. "Not pasted · Ctrl+V to paste" after a
+        phone dictation). False when there is no pill, or you're recording right now (the
+        listening pill isn't painted over): :mod:`shoutabout.popup` then notifies instead."""
+        with self._lock:
+            overlay = self._overlay
+            if overlay is None or self._state in (DictationState.OFF, DictationState.LISTENING):
+                return False
+            if not getattr(overlay, "shows", True):
+                return False
+        overlay.notice(text, hold=hold)
         return True
 
     def reload(self, cfg: Config) -> None:
@@ -437,6 +459,9 @@ class LocalDictation:
                 outcome = lambda o: o.notice("Didn't catch that")  # noqa: E731
             elif result.warning == NO_PASTE_PERMISSION_WARNING:  # v2-macos: ⌘V pastes it
                 outcome = lambda o: o.notice(COPIED_NOTICE)  # noqa: E731
+            elif is_no_text_box(result.warning):  # no text box: it's on the clipboard
+                notice = NOT_PASTED_NOTICE_MAC if sys.platform == "darwin" else NOT_PASTED_NOTICE
+                outcome = lambda o: o.notice(notice, hold=NOT_PASTED_HOLD_S)  # noqa: E731
             else:
                 warning = result.warning or "Not pasted"
                 if warning != ADMIN_WINDOW_WARNING:  # the injector already said so

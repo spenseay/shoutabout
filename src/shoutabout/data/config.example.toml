@@ -62,6 +62,7 @@ trailing_space = false     # add a space after the pasted text
 restore_clipboard = true
 restore_delay_ms = 500
 exclude_from_history = true
+check_focus = true         # no text box focused: keep the text on the clipboard, say so
 # Apps that paste with Shift+Insert instead of Ctrl+V (Git Bash/mintty, PuTTY).
 shift_insert_processes = ["mintty.exe", "putty.exe", "kitty.exe"]
 

@@ -904,6 +904,8 @@ def create_app(ctx: HubContext) -> FastAPI:
         out["pasted"] = result.pasted
         if result.warning is not None:
             out["warning"] = result.warning
+        if result.copied:  # the text is waiting on the computer's clipboard
+            out["copied"] = True
         return JSONResponse(out)
 
     # ------------------------------------------- streamed dictations (with auth)
