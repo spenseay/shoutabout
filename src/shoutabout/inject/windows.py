@@ -8,6 +8,14 @@ arbitrary keys (see :data:`CHORD_KEYS` and :meth:`Win32Api.send_chord`).
 All Win32 calls go through the small :class:`Win32Api` facade so the decision logic in
 :class:`WindowsPasteInjector` (no foreground window, locked PC, elevated target, held
 modifiers, chord choice, restore-if-unchanged) is unit-tested on any OS with a fake.
+
+Just before the keystroke, the focus probe (:mod:`shoutabout.inject.focus`) looks for a
+text box. ``text``: paste and restore the old clipboard, as always. ``none``: still send
+the paste chord (some apps move the focus into their text box on Ctrl+V), look again a
+moment later, and if there is still nowhere to type, leave the dictation on the
+clipboard, say so with the pop-up and tell the phone. ``unknown``: paste, and quietly
+leave the dictation on the clipboard. Losing a dictation is worse than losing what was
+copied before.
 """
 
 from __future__ import annotations
@@ -17,6 +25,7 @@ import logging
 import ntpath
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Protocol
@@ -24,7 +33,14 @@ from typing import Any, Protocol
 from shoutabout.config import PasteConfig
 from shoutabout.inject import clipboard
 from shoutabout.inject import win32 as w
-from shoutabout.inject.base import ADMIN_WINDOW_WARNING, Notifier
+from shoutabout.inject.base import (
+    ADMIN_WINDOW_WARNING,
+    NOT_PASTED_NOTICE,
+    Notifier,
+    no_text_box_warning,
+    safe_name,
+)
+from shoutabout.inject.focus import NONE, TEXT, UNKNOWN, Focus, FocusProbe
 from shoutabout.models import PasteResult
 
 log = logging.getLogger(__name__)
@@ -37,7 +53,8 @@ SEND_FAILED_WARNING = "Couldn't send the paste keystroke — text is on your cli
 CLIPBOARD_WARNING = "Couldn't access the clipboard on the PC — not pasted."
 NOT_COPIED_WARNING = "Couldn't paste on the PC, and the clipboard was busy — text not copied."
 
-PRE_PASTE_DELAY_S = 0.04  # let clipboard listeners settle before the chord
+PRE_PASTE_DELAY_S = 0.04  # let clipboard listeners settle before the chord (the probe runs then)
+REPROBE_DELAY_S = 0.2  # after "none": did the app move the focus into a text box?
 MODIFIER_WAIT_S = 1.0
 MODIFIER_POLL_S = 0.02
 DEFAULT_DESKTOP = "Default"
@@ -263,10 +280,30 @@ class Win32Api:
 class WindowsPasteInjector:
     """Implements :class:`shoutabout.inject.base.Injector` on Windows."""
 
-    def __init__(self, cfg: PasteConfig, notifier: Notifier, *, api: Api | None = None) -> None:
+    def __init__(
+        self,
+        cfg: PasteConfig,
+        notifier: Notifier,
+        *,
+        api: Api | None = None,
+        probe: FocusProbe | None = None,
+        popup: Callable[[str], Any] | None = None,
+        pc_name: Callable[[], str | None] | None = None,
+    ) -> None:
+        """``probe`` looks for a text box before the keystroke (default: the real one, unless
+        a fake ``api`` is given or ``paste.check_focus`` is off; no probe = always "text").
+        ``popup(text)`` shows the "not pasted" pill (default: a notification). ``pc_name()``
+        is the computer's friendly name, for the phone's warning."""
         self.cfg = cfg
         self.notifier = notifier
         self._api: Api = api if api is not None else Win32Api()
+        if probe is None and api is None and getattr(cfg, "check_focus", True):
+            from shoutabout.inject.focus_win import create_probe
+
+            probe = create_probe(list(cfg.shift_insert_processes))
+        self._probe = probe
+        self._popup = popup
+        self._pc_name = pc_name
         self._paste_lock = threading.Lock()
         self._restore_thread: threading.Thread | None = None
         self._own_rid: int | None = None
@@ -324,7 +361,12 @@ class WindowsPasteInjector:
             log.warning("couldn't put the text on the clipboard", exc_info=True)
             return PasteResult(pasted=False, warning=CLIPBOARD_WARNING)
 
-        api.sleep(PRE_PASTE_DELAY_S)
+        # Look for a text box while clipboard listeners settle (the probe takes ~1-30 ms).
+        started = api.monotonic()
+        focus = self._look()
+        settle = PRE_PASTE_DELAY_S - (api.monotonic() - started)
+        if settle > 0:
+            api.sleep(settle)
 
         # Focus can move while we were busy: re-check right before the keystroke.
         pid, problem = self._find_target()
@@ -338,14 +380,71 @@ class WindowsPasteInjector:
         expected = len(chord_events(chord))
         if sent != expected:
             log.warning("SendInput inserted %d of %d events", sent, expected)
-            return PasteResult(pasted=False, warning=SEND_FAILED_WARNING)
+            return PasteResult(pasted=False, warning=SEND_FAILED_WARNING, copied=True)
         log.debug("pasted %d chars with %s", len(text), chord.value)
 
-        if snap is not None and (snap.formats or snap.original_format_count == 0):
-            self._schedule_restore(snap, seq)
-        elif snap is not None:
-            log.info("clipboard had only formats we can't save; not restoring %r", snap)
-        return PasteResult(pasted=True)
+        kind = focus.kind if focus is not None else TEXT
+        if kind == TEXT:
+            restoring = False
+            if snap is not None and (snap.formats or snap.original_format_count == 0):
+                self._schedule_restore(snap, seq)
+                restoring = True
+            elif snap is not None:
+                log.info("clipboard had only formats we can't save; not restoring %r", snap)
+            return PasteResult(
+                pasted=True, copied=not restoring, focus=kind if focus is not None else None
+            )
+        if kind == NONE:
+            return self._after_no_text_box(focus)
+        # unknown: pasted (probably), and the dictation stays on the clipboard just in case.
+        log.info(
+            "pasted; couldn't tell if a text box had the focus (%s): text left on the clipboard",
+            focus.reason if focus is not None else "",
+        )
+        return PasteResult(pasted=True, copied=True, focus=kind)
+
+    def _look(self) -> Focus | None:
+        """The focus probe's answer (None when there is no probe). Never raises."""
+        if self._probe is None:
+            return None
+        try:
+            focus = self._probe.probe()
+        except Exception:
+            log.debug("focus probe raised", exc_info=True)
+            return Focus(UNKNOWN, "probe error")
+        log.debug("focus before the paste: %s", focus)
+        return focus
+
+    def _after_no_text_box(self, first: Focus | None) -> PasteResult:
+        """No text box had the focus; the chord was sent anyway. Look again: Slack and
+        others move the focus into their text box on Ctrl+V (then it pasted). Otherwise
+        the dictation is on the clipboard: the pop-up and the phone say so."""
+        self._api.sleep(REPROBE_DELAY_S)
+        again = self._look()
+        if again is not None and again.kind == TEXT:
+            log.info(
+                "no text box before the paste (%s), but one after (%s): pasted; text "
+                "left on the clipboard",
+                first.reason if first else "",
+                again.reason,
+            )
+            return PasteResult(pasted=True, copied=True, focus=NONE)
+        log.info(
+            "not pasted: no text box (%s): text left on the clipboard",
+            first.reason if first else "",
+        )
+        self._show_popup()
+        warning = no_text_box_warning(safe_name(self._pc_name), "PC")
+        return PasteResult(pasted=False, warning=warning, copied=True, focus=NONE)
+
+    def _show_popup(self) -> None:
+        try:
+            if self._popup is not None:
+                self._popup(NOT_PASTED_NOTICE)
+            else:
+                self.notifier.notify(NOTIFY_TITLE, NOT_PASTED_NOTICE)
+        except Exception:
+            log.exception("couldn't show the not-pasted pop-up")
 
     def _find_target(self) -> tuple[int, None] | tuple[None, str]:
         """(pid of the foreground window's process, None) or (None, warning)."""
@@ -416,7 +515,7 @@ class WindowsPasteInjector:
                 self.notifier.notify(NOTIFY_TITLE, warning)
             except Exception:
                 log.exception("notifier failed")
-        return PasteResult(pasted=False, warning=warning)
+        return PasteResult(pasted=False, warning=warning, copied=warning != NOT_COPIED_WARNING)
 
     def _schedule_restore(self, snap: clipboard.ClipboardSnapshot, seq: int) -> None:
         delay = self.cfg.restore_delay_ms / 1000

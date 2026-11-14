@@ -176,13 +176,21 @@ the final text. The text is never interpreted, and only its length is logged.
 | Reply | When |
 |---|---|
 | `200 {"status": "ok", "pasted": true}` | Pasted. |
-| `200 {"status": "warning", "pasted": false, "warning": "…"}` | Couldn't paste (admin window, locked PC, pasting turned off); the warning says where the text is, e.g. "…text is on your clipboard." |
+| `200 {"status": "warning", "pasted": false, "warning": "…", "copied": true}` | Couldn't paste (no text box selected, admin window, locked PC); the warning says where the text is, e.g. "No text box was selected on Desktop, so it's on that computer's clipboard." |
+| `200 {"status": "warning", "pasted": false, "warning": "…"}` | Not pasted and not copied (pasting turned off, clipboard busy). |
 | `409 {"detail": "Hub is paused — not pasted on the PC.", "status": "paused", "pasted": false}` | ShoutAbout is paused. |
 | `413` | Over 10,000 characters (or the body is over 160 KB). |
 | `422` | Not JSON, no `text` string, or only whitespace. |
 | `503` | The paster isn't ready (very early during start-up). |
 
 `/paste` works while the speech model is still loading.
+
+### `"copied": true` (`/paste` and `/transcribe`)
+
+Present only when the text was left on the computer's clipboard (its old contents won't
+come back), so the person can paste it themselves. Mostly with `pasted: false`, but also
+with `pasted: true` when the hub couldn't tell whether a text box had the focus (it pasted,
+and kept the text on the clipboard just in case). Older apps ignore it.
 
 ## 6. Errors and limits
 

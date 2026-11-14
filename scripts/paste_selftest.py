@@ -50,6 +50,7 @@ def main() -> int:
     from shoutabout.config import PasteConfig
     from shoutabout.inject import clipboard as cb
     from shoutabout.inject import win32 as w
+    from shoutabout.inject.focus_win import create_probe
     from shoutabout.inject.windows import PasteChord, Win32Api, WindowsPasteInjector
 
     report = Report()
@@ -155,7 +156,9 @@ def main() -> int:
         def run_paste(label: str, payload: str, cfg: PasteConfig, chord: PasteChord) -> None:
             text.delete("1.0", "end")
             cb.set_text(marker, exclude_from_history=True)
-            injector = WindowsPasteInjector(cfg, PrintNotifier(), api=api)
+            # The real focus probe: the Tk text box must count as a text box (else the old
+            # clipboard would be left out, and the restore check below fails).
+            injector = WindowsPasteInjector(cfg, PrintNotifier(), api=api, probe=create_probe())
             sent_before = len(api.sent)
             if not is_ours(w.user32.GetForegroundWindow(), frame):
                 report.check(f"{label}: foreground is still the test window", False)

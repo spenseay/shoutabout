@@ -506,6 +506,7 @@ def _paste_text(
         timings=Timings(paste=elapsed, total=elapsed),
         request_id=uuid.uuid4().hex[:12],
         extra={"stt_model": "phone", "llm_model": None, "source": source},
+        copied=bool(getattr(paste, "copied", False)),
     )
     if ctx.recent is not None:
         ctx.recent.add(result)
@@ -867,6 +868,8 @@ def create_app(ctx: HubContext) -> FastAPI:
         out["pasted"] = result.pasted
         if result.warning is not None:
             out["warning"] = result.warning
+        if result.copied:  # the text is waiting on the computer's clipboard
+            out["copied"] = True
         return JSONResponse(out)
 
     @app.post("/transcribe")

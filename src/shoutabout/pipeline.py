@@ -183,7 +183,7 @@ class Pipeline:
         timings.cleanup = _ms(t)
         text = normalize_whitespace(cleaned.text)
 
-        pasted, warning = False, None
+        pasted, warning, copied = False, None, False
         if not text:
             # Either target: lets the Shortcut tell "nothing heard" apart from a real result.
             warning = NO_SPEECH_WARNING
@@ -195,6 +195,7 @@ class Pipeline:
                 paste = self._paste(text)
                 timings.paste = _ms(t)
                 pasted, warning = bool(paste.pasted), paste.warning
+                copied = bool(getattr(paste, "copied", False))
 
         timings.total = _ms(t_total)
         cleaner_model = getattr(getattr(self.cleaner, "cfg", None), "model", None)
@@ -219,6 +220,7 @@ class Pipeline:
                 "llm_model": llm_model,
                 **(extra or {}),
             },
+            copied=copied,
         )
 
     def _hints(self) -> SttHints:

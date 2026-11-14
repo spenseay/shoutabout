@@ -347,8 +347,22 @@ def _run(
 
     # ------------------------------------------------------------- pipeline parts
     from shoutabout.inject import create_injector
+    from shoutabout.popup import Popup
 
-    injector = create_injector(cfg.paste, notifier)
+    # "Not pasted · Ctrl+V to paste" when no text box had the focus: on the "Talk to this
+    # PC" pill if it's free, else ShoutAbout's own pill, else a notification.
+    popup = Popup(
+        notify=notify,
+        dictation=lambda: getattr(voice, "dictation", None),
+        overlay_enabled=lambda: bool(cfg.dictation.overlay),
+    )
+
+    def pc_name() -> str | None:
+        """This computer's friendly name (the phone's "No text box was selected on …")."""
+        ident = ctx.identity.get() if ctx.identity is not None else None
+        return getattr(ident, "name", None) or None
+
+    injector = create_injector(cfg.paste, notifier, popup=popup.show, pc_name=pc_name)
     # --- v2-voice: automatic model choice, cleanup and "Talk to this PC" -------------
     from shoutabout.voice_runtime import VoiceRuntime
 
@@ -550,6 +564,7 @@ def _run(
     finally:
         stopping.set()
         voice.stop()  # v2-voice: removes the hotkey hook and the overlay
+        popup.stop()
         server.should_exit = True
         if not server_done.wait(SERVER_JOIN_TIMEOUT_S):
             log.warning("server didn't stop within %.0f s; forcing exit", SERVER_JOIN_TIMEOUT_S)

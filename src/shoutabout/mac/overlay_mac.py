@@ -99,6 +99,8 @@ class PanelLike(Protocol):
 class MacOverlay:
     """:class:`shoutabout.overlay.OverlayLike` for macOS. Thread-safe API."""
 
+    shows = True  # the panel is made on the main thread at start (shoutabout.popup)
+
     def __init__(
         self,
         *,
@@ -118,6 +120,7 @@ class MacOverlay:
         self._lock = threading.Lock()
         self._state = "hidden"
         self._message = ""
+        self._hold: float | None = None  # a notice's own hold time (None = by its length)
         self._started = 0.0
         self._level = 0.0
         self._fresh = False
@@ -141,10 +144,11 @@ class MacOverlay:
             self._state = "hidden"
         self._main(self._destroy)
 
-    def _set(self, state: str, text: str = "") -> None:
+    def _set(self, state: str, text: str = "", hold: float | None = None) -> None:
         with self._lock:
             self._state = state
             self._message = ov.short_text(text) if text else ""
+            self._hold = hold
             self._started = self._clock()
             self._fresh = True
         self._main(self._tick)
@@ -165,8 +169,8 @@ class MacOverlay:
     def error(self, text: str) -> None:
         self._set("error", text)
 
-    def notice(self, text: str) -> None:
-        self._set("notice", text)
+    def notice(self, text: str, hold: float | None = None) -> None:
+        self._set("notice", text, hold)
 
     def cancelled(self) -> None:
         self._set("cancelled")
@@ -229,8 +233,9 @@ class MacOverlay:
             return
         with self._lock:
             state, started, message, fresh = self._state, self._started, self._message, self._fresh
+            hold = self._hold
             self._fresh = False
-        frame = ov.frame_at(state, self._clock() - started, self._level, message)
+        frame = ov.frame_at(state, self._clock() - started, self._level, message, hold)
         if frame.look is None or frame.finished:
             if self._visible:
                 panel.hide()

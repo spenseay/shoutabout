@@ -185,6 +185,9 @@ class WindowsPasteInjector:                  # implements Injector
         #    V down, V up, Ctrl up (VK + scan codes) — NOTHING ELSE, never Enter
         # 4. after restore_delay_ms (background timer), restore snapshot iff the clipboard
         #    sequence number is unchanged; next paste waits for a pending restore.
+        # (later) a focus probe before the chord (inject/focus.py): "none" -> chord still
+        #    sent, no restore, the "Not pasted" pill, PasteResult(False, warning, copied=True);
+        #    "unknown" -> no restore, copied=True. See docs/troubleshooting.md.
 # inject/__init__.py
 def create_injector(cfg: PasteConfig, notifier: Notifier) -> Injector
     # Windows -> WindowsPasteInjector; else NullInjector. paste.enabled=false -> NullInjector(
@@ -318,7 +321,8 @@ route also carries `Cf-Access-Jwt-Assertion` (added by Cloudflare Access).
  "timings_ms": {"decode": 0, "stt": 0, "cleanup": 0, "paste": 0, "total": 0}}
 ```
 `cleanup` ∈ applied | fallback | disabled | skipped. Paste failure is still 200 with
-`pasted:false` + `warning`.
+`pasted:false` + `warning`. `"copied": true` is added when the text was left on the PC
+clipboard (later addition; see docs/protocol.md).
 
 Errors (JSON `{"detail": "..."}`): 400 bad multipart / missing file · 401 bad/missing bearer
 (`WWW-Authenticate: Bearer`) · 403 non-private source or invalid/missing Access JWT on the
