@@ -18,8 +18,8 @@ struct DictateIntent: AudioRecordingIntent, LiveActivityIntent {
     static let description = IntentDescription(
         "Starts recording without opening ShoutAbout. Run it again to stop and send."
     )
-    /// Background first; the app comes forward only when it has to (Live Activities off, or
-    /// the microphone permission hasn't been asked yet).
+    /// Background first; the app comes forward only when it has to (Live Activities off, the
+    /// microphone permission hasn't been asked yet, or a phone dictation for the clipboard).
     static let supportedModes: IntentModes = [.background, .foreground(.dynamic)]
     /// From a locked iPhone, iOS asks for Face ID first: nobody can dictate into your PC with
     /// your phone without unlocking it.
@@ -33,6 +33,14 @@ struct DictateIntent: AudioRecordingIntent, LiveActivityIntent {
         switch await DictationLauncher.toggleFromSystem() {
         case .started, .finished, .busy:
             break
+        case .copyWaits:
+            // iOS keeps background apps off the clipboard: the app comes forward and copies
+            // it, no tap needed. Where it can't (iOS says no), the Live Activity's "Tap here to
+            // copy it" stays.
+            if systemContext.currentMode.canContinueInForeground {
+                try? await continueInForeground(nil, alwaysConfirm: false)
+            }
+            await DictationLauncher.copyWaitingText()
         case .needsForeground(let reason):
             guard systemContext.currentMode.canContinueInForeground else {
                 throw DictationIntentError(reason)
@@ -53,7 +61,8 @@ struct DictateIntent: AudioRecordingIntent, LiveActivityIntent {
 struct StopDictationIntent: AudioRecordingIntent, LiveActivityIntent {
     static let title: LocalizedStringResource = "Stop Dictating"
     static let description = IntentDescription("Stops the recording and sends it.")
-    static let supportedModes: IntentModes = .background
+    /// Background; the app comes forward only to put a phone dictation on the clipboard.
+    static let supportedModes: IntentModes = [.background, .foreground(.dynamic)]
     static let isDiscoverable = false
 
     init() {}
@@ -61,7 +70,13 @@ struct StopDictationIntent: AudioRecordingIntent, LiveActivityIntent {
     @MainActor
     func perform() async throws -> some IntentResult {
         #if SHOUTABOUT_APP
-        await DictationLauncher.stopFromSystem()
+        if await DictationLauncher.stopFromSystem() {
+            // As in DictateIntent: only the app in front can write the clipboard.
+            if systemContext.currentMode.canContinueInForeground {
+                try? await continueInForeground(nil, alwaysConfirm: false)
+            }
+            await DictationLauncher.copyWaitingText()
+        }
         #endif
         return .result()
     }

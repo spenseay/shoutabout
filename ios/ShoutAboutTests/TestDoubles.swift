@@ -150,6 +150,81 @@ actor MockOnDevice: OnDeviceTranscribing {
     }
 }
 
+/// A hub's /stream/* endpoints: by default it takes chunks in order like the real one (a chunk
+/// past the expected one is "missing"), and scripted answers can replace any step.
+actor FakeStreamTransport: HubStreamTransport {
+    var helloResult: Result<HelloResponse, HubFailure>
+    var startResult: Result<StreamStarted, HubFailure>
+    /// Answers for the chunk posts in order; when they run out, the hub answers itself.
+    var chunkReplies: [Result<StreamChunkReply, HubFailure>]
+    /// Answers for finish in order; when they run out, the text.
+    var finishResults: [Result<TranscribeResponse, HubFailure>]
+    /// Each chunk post takes this long (cancellable).
+    var chunkDelay: Duration
+
+    private(set) var calls: [String] = []
+    /// What the hub has, in order.
+    private(set) var received = Data()
+    private(set) var chunkSizes: [Int] = []
+    private(set) var tokensSent: [String] = []
+    private var expected = 0
+
+    init(
+        hello: Result<HelloResponse, HubFailure> = .success(.sample),
+        start: Result<StreamStarted, HubFailure> = .success(StreamStarted(streamID: "stream_ABC-123", maxChunkBytes: 262_144)),
+        chunkReplies: [Result<StreamChunkReply, HubFailure>] = [],
+        finish: [Result<TranscribeResponse, HubFailure>] = [],
+        chunkDelay: Duration = .zero
+    ) {
+        helloResult = hello
+        startResult = start
+        self.chunkReplies = chunkReplies
+        finishResults = finish
+        self.chunkDelay = chunkDelay
+    }
+
+    func hello(_ base: URL, timeout: TimeInterval) async throws -> HelloResponse {
+        calls.append("hello")
+        return try helloResult.get()
+    }
+
+    func startStream(target: DictationTarget, endpoint: HubEndpoint, timeout: TimeInterval) async throws -> StreamStarted {
+        calls.append("start:\(target.rawValue)")
+        tokensSent.append(endpoint.token)
+        return try startResult.get()
+    }
+
+    func sendChunk(_ audio: Data, seq: Int, streamID: String, endpoint: HubEndpoint, timeout: TimeInterval) async throws -> StreamChunkReply {
+        calls.append("audio:\(seq)")
+        if chunkDelay > .zero {
+            try? await Task.sleep(for: chunkDelay)
+            if Task.isCancelled { throw HubFailure.unreachable("cancelled") }
+        }
+        if !chunkReplies.isEmpty {
+            return try chunkReplies.removeFirst().get()
+        }
+        if seq > expected { return .missing(nextSeq: expected) }
+        if seq == expected {
+            received.append(audio)
+            chunkSizes.append(audio.count)
+            expected += 1
+        }
+        return .accepted(nextSeq: expected)
+    }
+
+    func finishStream(streamID: String, chunks: Int, endpoint: HubEndpoint, timeout: TimeInterval) async throws -> TranscribeResponse {
+        calls.append("finish:\(chunks)")
+        if !finishResults.isEmpty {
+            return try finishResults.removeFirst().get()
+        }
+        return TranscribeResponse(text: Samples.pcText, pasted: true, route: "lan")
+    }
+
+    func cancelStream(streamID: String, endpoint: HubEndpoint) async {
+        calls.append("delete")
+    }
+}
+
 actor StageLog {
     private(set) var stages: [DictationStage] = []
 

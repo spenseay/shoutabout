@@ -48,8 +48,13 @@ tour runs in the iOS Simulator. Nothing has run on a real iPhone yet (see
 - **One screen.**
   - Top: a small **Computer | Phone** switch, only when a computer is paired; the computer side
     shows the PC's name.
-  - Middle: the big mouth button. Tap to talk, tap to send. While you talk the mouth opens and
-    closes with your voice and punches on loud peaks; while it works it chews (saTalk) with a
+  - Middle: the big mouth button. **Tap anywhere** under the top bar to talk, anywhere again to
+    send (the buttons on the screen only do their own thing; VoiceOver uses the mouth button).
+    While recording the whole screen turns red (deep red in dark mode) with a big timer, and
+    **Cancel** is a large button at the bottom. Cancel keeps the audio 8 seconds: "Discarded"
+    with **Undo** in the same spot, which sends it as if you had tapped to send. While you
+    talk the mouth opens and closes with your voice and punches on loud peaks; while it works
+    it chews (saTalk) with a
     shimmer; when the words land (pasted or copied) it punches with a haptic and **zips shut**
     (the desktop's "Paddle pull" finish, ~0.7 s: a white slider zips the mouth into an ink line
     with white teeth, the pull swings and settles, the line flattens away and the idle mouth
@@ -78,12 +83,15 @@ tour runs in the iOS Simulator. Nothing has run on a real iPhone yet (see
   **The clipboard from the background.** iOS keeps apps in the background away from the
   clipboard, and a dictation from the Action Button, Control Center or Stop finishes with the
   app in the background. So the app tries anyway (the pasteboard's change count says whether
-  it took); when it didn't, the text waits as a `PendingCopy` in the App Group, the island says
-  "Copy ›" (expanded / Lock Screen: "READY! Tap here to copy it") for 8 seconds, and the app
-  writes it the moment it's in front: a tap on the Live Activity opens it (or just switch to
-  it). A waiting copy is only applied for 10 minutes, so an old dictation never replaces
-  something copied much later; after that the main screen says "Ready!" and its copy button
-  does it. In the foreground (the in-app button) it's copied right away.
+  it took); when it didn't, the text waits as a `PendingCopy` in the App Group and the intent
+  that's waiting for the dictation (`DictateIntent`, `StopDictationIntent`) asks iOS to bring
+  the app forward (`continueInForeground(nil, alwaysConfirm: false)`), which copies it with no
+  tap. Not when the ShoutAbout keyboard on screen typed it: the keyboard puts it on the
+  clipboard itself. Where iOS doesn't allow the jump, the island says "Copy ›" (expanded /
+  Lock Screen: "READY! Tap here to copy it") for 8 seconds and a tap on it opens the app (or
+  just switch to it). A waiting copy is only applied for 10 minutes, so an old dictation never
+  replaces something copied much later; after that the main screen says "Ready!" and its copy
+  button does it. In the foreground (the in-app button) it's copied right away.
 - **Where the words go** (details in [the contract](#the-cross-device-contract-phone-side)):
   - **Phone**: the text goes to the clipboard. At home, a paired PC that isn't slow writes it
     (best quality, nothing is pasted on the PC); otherwise the iPhone transcribes on-device.
@@ -98,7 +106,8 @@ tour runs in the iOS Simulator. Nothing has run on a real iPhone yet (see
 - **The ShoutAbout keyboard** (Settings › Keyboard): a big mouth, the globe (when iOS wants
   one), space, delete (hold to repeat) and return. Tap the mouth to talk, again to stop: the
   words land at the cursor by themselves. Every phone dictation (any trigger) is typed when
-  the keyboard is on screen, or comes up within a minute; computer ones never are. A
+  the keyboard is on screen, or comes up within a minute, and the keyboard puts it on the
+  clipboard too; computer ones never are. A
   keyboard can't use the microphone, so the app records: a **keyboard session** keeps the
   app's microphone input running in the background (an `AVAudioEngine` tap that throws the
   audio away between dictations) so a tap starts at once, and it ends after 5 minutes
@@ -139,6 +148,8 @@ ios/
       HubTransport.swift      the HubTransport protocol, PairedComputer, ComputerLink,
                               DiscoveredComputer (Bonjour TXT)
       DictationRouter.swift   where a recording goes (the v2 phone routing), with notices
+      StreamProtocol.swift    /stream/* wire types, URLs, answers (transcribe while you talk)
+      StreamSession.swift     the stream: chunk/retry state machine, inbox, PCM16, the session
       DevicePairing.swift     /hello -> /pair/request -> poll /pair/status
       DictationActivityState  the Live Activity's content + level throttle
       Pairing.swift           legacy pairing QR payload + URL rules (private hosts, VPN)
@@ -168,6 +179,7 @@ ios/
                               Debug screenshot scenes), DictationLauncher (intent entry points)
     Services/                 HubClient (LiveHubTransport), ComputerFinder (NWBrowser +
                               resolution), LiveActivityController, AudioRecorder,
+                              StreamingUploader (the stream's input tap + its HTTP calls),
                               OfflineTranscriber, KeychainStore, NetworkPath
     Views/                    RootView, OnboardingView, ConnectComputerView (+ PairingModel),
                               MainView, HistoryView (Recent), SettingsView (+ Advanced), PairingViews
@@ -189,8 +201,10 @@ Action Button -> DictateIntent (app process, background)
    -> LiveActivityController.start      (BEFORE the mic: iOS stops a background recording
                                           without a Live Activity)
    -> AudioRecorder.start                (.m4a, AAC mono 16 kHz 32 kbps, mixable session)
+   -> StreamingUploader.start            (only to a PC that streams: 2 s PCM chunks meanwhile)
    -> metering: the in-app mouth (20 Hz) + the island mouth (quantised level, <= 4 updates/s)
 Action Button again / Stop -> stop -> DictationJob (snapshot of target, computer link, /info)
+   -> streamed: POST /stream/{id}/finish -> the text (any problem: on to the router)
    -> DictationRouter.run (Shared/Core)
         Phone: PC at home and not slow -> POST /transcribe?target=phone -> clipboard
                otherwise (no PC, away, slow, any PC error) -> on-device -> clipboard
@@ -320,6 +334,25 @@ The PC side is specified in the v2 brief and implemented by the Windows app. The
 | `POST /paste {"text"}` → `{"status":"ok","pasted":true}`, 409 when paused | bearer | the phone transcribed (slow PC) |
 | `GET /health` | none | reachability for PCs from before `/hello` |
 | `GET/POST /vocab` | bearer | custom words |
+| `POST /stream/start`, `POST /stream/{id}/audio?seq=`, `POST /stream/{id}/finish`, `DELETE /stream/{id}` | bearer | transcribe while you talk (below) |
+
+**Transcribe while you talk.** When the selected PC's cached `/info` lists `"stream"` in
+`accepts` and isn't `slow`, a dictation is also streamed to it while it's recorded, so at stop
+it only has the last seconds left (`StreamSession`, `StreamingUploader`):
+
+- Only on Wi-Fi, to the PC's LAN address after `/hello` confirms its id; never the tunnel, the
+  on-device path, or the keyboard's dictations (its session already runs an input).
+- The AVAudioRecorder `.m4a` is recorded exactly as before; the stream comes from a separate
+  AVAudioEngine tap (16 kHz mono s16le via AVAudioConverter) and is best effort.
+- `POST /stream/start`, then ~2 s chunks in order, one in flight; a failed chunk is tried twice
+  more, a 409 resends from the hub's `next_seq` if the chunk is still kept (the last 4).
+  Anything else, a route change or interruption on the tap, or 30 s of backlog gives the
+  stream up (`DELETE`) and the dictation goes the usual way.
+- At stop: the rest as a last chunk (at most 3 s for these), then `finish` with the chunk
+  count; with no answer it's asked once more (it's idempotent). The answer is the `/transcribe`
+  body and is delivered the same way. Any other outcome, or a stream shorter than the
+  recording (by more than 0.75 s), sends the `.m4a` through the router as before. Cancel sends
+  `DELETE`; Undo and Retry use the `.m4a`.
 
 Routing rules (`DictationRouter`, every branch unit-tested):
 
@@ -589,6 +622,10 @@ None of this has been tried on a real iPhone:
   parallel and hasn't been run against this app)
 - recording itself (AAC 16 kHz acceptance, metering), real uploads, the clipboard written from
   the background, on-device transcription and model downloads, haptics
+- streaming: the AVAudioEngine tap running next to AVAudioRecorder (also from the background),
+  and against the hub's `/stream/*`
+- the app coming forward by itself (`continueInForeground`) to copy a background phone
+  dictation, from the Action Button and from the Live Activity's Stop (also on a locked phone)
 - the Control Center controls, the Lock Screen widget, App Shortcuts phrases and Siri
 - the **keyboard**: opening the app from it (the responder-chain call), the system's back
   link afterwards, the background keyboard session (does iOS keep the input running and
@@ -602,6 +639,5 @@ None of this has been tried on a real iPhone:
    [What's untested](#whats-untested).
 2. **Keyboard extension** ("ShoutAbout keyboard"): a mic key that records and inserts the text
    in any app (the shared keychain group is already set up for it).
-3. **Live streaming** to the PC while you talk, so long dictations finish sooner.
-4. **On-device Parakeet** (FluidAudio, Core ML) as a stronger engine behind
+3. **On-device Parakeet** (FluidAudio, Core ML) as a stronger engine behind
    `OfflineTranscriber`.

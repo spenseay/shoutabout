@@ -10,6 +10,11 @@ enum MainSheet: String, Identifiable, Sendable {
 /// The one screen: Computer | Phone at the top (only with a paired computer), the big mouth
 /// button in the middle, one status line, and the last result as a compact card that always
 /// sits above the bottom safe area. Recent and Settings open as sheets.
+///
+/// Everything under the top bar is one big target: a tap anywhere starts recording, and while
+/// recording a tap anywhere sends (the buttons in it, Cancel, Undo, Retry, Stop waiting and
+/// the card's copy, only do their own thing). While recording the whole screen is red, with a
+/// big timer, and Cancel is a large button at the bottom.
 struct MainView: View {
     @Environment(AppModel.self) private var model
     @State private var sheet: MainSheet? = MainView.initialSheet
@@ -21,21 +26,27 @@ struct MainView: View {
                 TopBar(sheet: $sheet)
                     .padding(.horizontal, Theme.Spacing.l)
                     .padding(.top, Theme.Spacing.s)
-                Spacer(minLength: Theme.Spacing.m)
-                MouthButton()
-                    .frame(width: tile, height: tile)
-                StatusBlock()
-                    .padding(.top, Theme.Spacing.xl)
-                    .padding(.horizontal, Theme.Spacing.xl)
-                Spacer(minLength: Theme.Spacing.m)
-                ResultArea()
-                    .padding(.horizontal, Theme.Spacing.l)
-                    .padding(.bottom, Theme.Spacing.m)
+                VStack(spacing: 0) {
+                    Spacer(minLength: Theme.Spacing.m)
+                    MouthButton()
+                        .frame(width: tile, height: tile)
+                    StatusBlock()
+                        .padding(.top, Theme.Spacing.xl)
+                        .padding(.horizontal, Theme.Spacing.xl)
+                    Spacer(minLength: Theme.Spacing.m)
+                    BottomArea()
+                        .padding(.horizontal, Theme.Spacing.l)
+                        .padding(.bottom, Theme.Spacing.m)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .onTapGesture { model.toggleRecording() }
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
-        .background(Theme.Colors.ground.ignoresSafeArea())
+        .background(ground.ignoresSafeArea())
         .animation(.spring(duration: 0.35), value: model.phase)
+        .animation(.spring(duration: 0.35), value: model.discarded)
         .sheet(item: $sheet) { which in
             switch which {
             case .history:
@@ -48,6 +59,10 @@ struct MainView: View {
         .sensoryFeedback(.success, trigger: model.successTick)
         .sensoryFeedback(.warning, trigger: model.warningTick)
         .sensoryFeedback(.error, trigger: model.failureTick)
+    }
+
+    private var ground: Color {
+        model.phase == .recording ? Theme.Colors.groundRecording : Theme.Colors.ground
     }
 
     private nonisolated static var initialSheet: MainSheet? {
@@ -181,7 +196,7 @@ struct MouthButton: View {
                 ZStack {
                     if model.phase == .recording {
                         RoundedRectangle(cornerRadius: radius * 1.1, style: .continuous)
-                            .stroke(Theme.Palette.tongueRed, lineWidth: 6)
+                            .stroke(Theme.Colors.recordingStroke, lineWidth: 6)
                             .padding(-12)
                             .scaleEffect(1 + 0.05 * model.level)
                             .opacity(0.45 + 0.55 * model.level)
@@ -307,9 +322,10 @@ private struct StatusBlock: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        let recording = model.phase == .recording
         VStack(spacing: Theme.Spacing.s) {
             Text(title)
-                .shoutHeadline(36)
+                .shoutHeadline(recording ? 64 : 36)
                 .multilineTextAlignment(.center)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
@@ -318,19 +334,17 @@ private struct StatusBlock: View {
             if let subtitle {
                 Text(subtitle)
                     .font(Theme.Typography.body(15))
-                    .foregroundStyle(Theme.Colors.inkMuted)
+                    .foregroundStyle(recording ? Theme.Colors.inkMutedRecording : Theme.Colors.inkMuted)
                     .multilineTextAlignment(.center)
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            HStack(spacing: Theme.Spacing.xl) {
-                if model.phase == .recording {
-                    Button("Cancel", role: .cancel) { model.cancelRecording() }
-                } else if model.phase.isBusy {
-                    Button("Stop waiting", role: .cancel) { model.cancelProcessing() }
+            HStack(spacing: Theme.Spacing.m) {
+                if model.phase.isBusy {
+                    TextActionButton(title: "Stop waiting", role: .cancel) { model.cancelProcessing() }
                 }
                 if model.canRetry {
-                    Button("Retry") { model.retryLast() }
+                    TextActionButton(title: "Retry") { model.retryLast() }
                 }
             }
             .font(Theme.Typography.bold(16))
@@ -342,7 +356,7 @@ private struct StatusBlock: View {
     private var title: String {
         switch model.phase {
         case .idle:
-            return "Tap & talk"
+            return model.discarded != nil ? "Discarded" : "Tap anywhere & talk"
         case .recording:
             return Duration.seconds(model.elapsed).formatted(.time(pattern: .minuteSecond))
         case .processing:
@@ -360,12 +374,13 @@ private struct StatusBlock: View {
     private var subtitle: String? {
         switch model.phase {
         case .idle:
+            if model.discarded != nil { return nil }
             if model.effectiveTarget == .pc {
                 return "Types on \(model.computerDisplayName)"
             }
             return "Copies to your clipboard"
         case .recording:
-            return "Tap again to send"
+            return "Tap anywhere to send"
         case .processing(let status):
             return status
         case .done:
@@ -380,16 +395,72 @@ private struct StatusBlock: View {
     }
 }
 
-// MARK: - Result
+/// A text button with room around it, so a near miss still hits it rather than the screen
+/// behind it (which would start recording).
+private struct TextActionButton: View {
+    var title: String
+    var role: ButtonRole?
+    var action: () -> Void
 
-private struct ResultArea: View {
+    init(title: String, role: ButtonRole? = nil, action: @escaping () -> Void) {
+        self.title = title
+        self.role = role
+        self.action = action
+    }
+
+    var body: some View {
+        Button(role: role, action: action) {
+            Text(title)
+                .padding(.horizontal, Theme.Spacing.m)
+                .padding(.vertical, Theme.Spacing.s)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Bottom: Cancel, Undo, or the result
+
+/// Where the thumb is: Cancel while recording (a mis-tap is undone with Undo, in the same
+/// spot), Undo for a few seconds after Cancel, otherwise the last result.
+private struct BottomArea: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        if model.phase == .done, let item = model.lastItem, item.succeeded {
+        if model.phase == .recording {
+            CapsuleActionButton(title: "Cancel", systemImage: "xmark") { model.cancelRecording() }
+                .accessibilityIdentifier("cancelButton")
+                .transition(.opacity)
+        } else if model.phase == .idle, model.discarded != nil {
+            CapsuleActionButton(title: "Undo", systemImage: "arrow.uturn.backward") { model.undoCancel() }
+                .accessibilityHint("Sends the recording you cancelled")
+                .accessibilityIdentifier("undoButton")
+                .transition(.opacity)
+        } else if model.phase == .done, let item = model.lastItem, item.succeeded {
             ResultCard(item: item)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
         }
+    }
+}
+
+/// A large outlined capsule with an icon (Cancel, Undo): easy to hit, and clearly not part of
+/// "tap anywhere".
+private struct CapsuleActionButton: View {
+    var title: String
+    var systemImage: String
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(Theme.Typography.bold(18))
+                .foregroundStyle(Theme.Colors.ink)
+                .padding(.horizontal, Theme.Spacing.xxl)
+                .frame(minWidth: 200, minHeight: 56)
+                .overlay(Capsule().strokeBorder(Theme.Colors.ink, lineWidth: Theme.Size.borderWidth))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(SquishButtonStyle())
     }
 }
 
