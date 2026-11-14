@@ -48,14 +48,18 @@ def uses_outside(files: list[Path], compiled: list[Path]) -> list[str]:
     """Project types used in `files` but declared only outside `compiled`."""
     everywhere = declared_anywhere()
     declared_here = {
-        name for path in compiled for name in DECLARATION.findall(code_only(path.read_text("utf-8")))
+        name
+        for path in compiled
+        for name in DECLARATION.findall(code_only(path.read_text("utf-8")))
     }
     problems = []
     for path in files:
         code = code_only(path.read_text("utf-8"))
         for name in sorted(set(re.findall(r"\b[A-Z]\w*\b", code))):
             if name in everywhere and name not in declared_here:
-                problems.append(f"{path.relative_to(IOS)} uses {name} from {sorted(everywhere[name])}")
+                problems.append(
+                    f"{path.relative_to(IOS)} uses {name} from {sorted(everywhere[name])}"
+                )
     return problems
 
 
