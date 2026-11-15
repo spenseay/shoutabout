@@ -115,9 +115,23 @@ tour runs in the iOS Simulator. Nothing has run on a real iPhone yet (see
     clipboard, with a short note.
 - **Control Center**: **Dictate** (the same background recording) and a **Computer / Phone**
   toggle. **Lock Screen widget**: the mouth; tapping it opens the app recording.
-- **The ShoutAbout keyboard** (Settings › Keyboard): a big mouth, the globe (when iOS wants
-  one), space, delete (hold to repeat) and return. Tap the mouth to talk, again to stop: the
-  words land at the cursor by themselves. Every phone dictation (any trigger) is typed when
+- **The ShoutAbout keyboard** (Settings › Keyboard): the iPhone keyboard's layout and colours
+  (letters, shift and caps lock, 123 and #+=, delete that repeats and then takes whole words,
+  a return key labeled like the field asks, the letter pop-up, keyboard clicks) with the
+  **mouth where the emoji key sits**. Typing follows the iPhone's habits: a capital to start a
+  sentence, two spaces for ". ", a drag along the space bar moves the cursor, and a suggestion
+  bar from iOS's own spell checker (`UITextChecker`) with your text replacements from Settings.
+  Space (or return, or punctuation) corrects only careful cases: a text replacement, a missing
+  apostrophe ("dont", "im"), the lone "i", or a misspelling one letter from iOS's best guess
+  (two for longer words); delete right after it puts back what you typed and stops
+  correcting that word; contacts' names are never touched. Tap the mouth and talk, then tap
+  anywhere on the keyboard to finish (the keys make way for a yellow panel with the mouth and
+  a labeled **Cancel**); or hold the mouth, talk, and let go. Right after a dictation the
+  suggestion bar shows the start of it with **Insert again**. Typing works without Full
+  Access; the mouth needs it and says so. Layout and typing rules:
+  `Shared/Core/KeyboardTyping.swift`; drawing: `Shared/UI/KeyboardFace.swift`. The words land
+  at the cursor by themselves, always on the phone (whatever the Computer / Phone switch
+  says). Every phone dictation (any trigger) is typed when
   the keyboard is on screen, or comes up within a minute, and the keyboard puts it on the
   clipboard too; computer ones never are. A
   keyboard can't use the microphone, so the app records: a **keyboard session** keeps the
@@ -125,8 +139,8 @@ tour runs in the iOS Simulator. Nothing has run on a real iPhone yet (see
   audio away between dictations) so a tap starts at once, and it ends after 5 minutes
   without a dictation or on an interruption. Without a session, the keyboard opens
   `shoutabout://keyboard`; the app opens one, starts listening and says only "Listening /
-  Go back to keep typing.". Needs Full Access (the App Group); without it the keyboard
-  says "Allow Full Access to dictate". Details: `Shared/Core/KeyboardBridge.swift`.
+  Go back to keep typing.". Cancel on the panel sends `cancel` (nothing is typed). Details:
+  `Shared/Core/KeyboardBridge.swift`.
 - **Siri / Shortcuts**: "Dictate with ShoutAbout", "Open ShoutAbout and dictate" (the
   foreground fallback), "Toggle ShoutAbout target", plus Set Dictation Target.
 - **Recent**: the last 3 dictations (ones with words), newest first, each with a copy
@@ -180,12 +194,14 @@ ios/
       KeyboardBridge.swift    the keyboard <-> app link: state + heartbeat, tap decisions,
                               the dictation hand-off and its once-only claim
       KeyboardSignals.swift   Darwin notifications (fyi.shoutabout.keyboard.*)
+      KeyboardTyping.swift    the keyboard's layout (key frames, touch areas) and typing rules
     LiveActivity/             DictationActivityAttributes (ActivityKit)
     UI/Theme.swift            ALL brand tokens (colours, type, spacing, geometry, motion)
     UI/Mouth.swift            MouthView (animatable shapes), TalkingMouthView, .shoutPunch()
     UI/ZipMouth.swift         ZipMouthView: the "done" zip, drawn from a ZipPose
                               (Core/ZipTimeline.swift: geometry + timeline, unit-tested)
     UI/MouthMotion.swift      BreathingMouth, ZipFinishMouth (app button and keyboard)
+    UI/KeyboardFace.swift     what the keyboard looks like (keys, suggestion bar, listening panel)
     Intents/                  DictateIntent, StopDictationIntent, DictateInAppIntent,
                               Toggle/Set target intents, the Control Center toggle intent
   ShoutAbout/                 the app
@@ -201,8 +217,9 @@ ios/
     Resources/                Assets.xcassets (icons, launch colour), Fonts (+ OFL licences)
   ShoutAboutWidgets/          widget extension: Control Center controls, Lock Screen widget,
                               DictationLiveActivity (Dynamic Island + Lock Screen UI)
-  ShoutAboutKeyboard/         keyboard extension: KeyboardViewController, KeyboardView,
-                              AppOpener (opens the app from the keyboard); compiles only
+  ShoutAboutKeyboard/         keyboard extension: KeyboardViewController, KeyTouchSurface (one
+                              view takes every touch), AppOpener (opens the app from the
+                              keyboard); compiles only
                               the shared files project.yml lists, none of the app's code
   ShoutAboutTests/            XCTest logic tests (no host app), mocked transport
   ShoutAboutUITests/          XCUITest screenshot tour (Debug sample data)
@@ -623,9 +640,9 @@ If the run fails:
   `audio`, `ITSAppUsesNonExemptEncryption = NO`.
 - Display name **ShoutAbout**; version `MARKETING_VERSION = 1.0.0` in `Config/Base.xcconfig`,
   build number from the CI run.
-- The keyboard (`RequestsOpenAccess`): fine for TestFlight. Before the App Store, guideline
-  4.4.1 expects a keyboard to offer typing and to work without Full Access; this one has no
-  letter keys and only space / delete / return without it.
+- The keyboard (`RequestsOpenAccess`): guideline 4.4.1 expects a keyboard to offer typing and
+  to work without Full Access. It types like the iPhone keyboard without it; only the mouth
+  (dictation) needs Full Access.
 
 ## What's untested
 

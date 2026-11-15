@@ -178,6 +178,7 @@ final class AppModel {
     @ObservationIgnored private var keyboardPhaseSince = Date()
     @ObservationIgnored private var keyboardStarting = false
     @ObservationIgnored private var keyboardStopRequested = false
+    @ObservationIgnored private var keyboardCancelRequested = false
     @ObservationIgnored private var keyboardOpenPending = false
     /// The recording in progress, streamed to the PC meanwhile (nil: not streamed).
     @ObservationIgnored private var stream: StreamingUploader?
@@ -1387,7 +1388,7 @@ final class AppModel {
     private func setUpKeyboardLink() {
         keyboardOn = keyboardLink.keyboardIsSetUp
         _ = keyboardLink.handoff()  // removes one past its few minutes
-        KeyboardSignals.observe([.start, .stop]) { [weak self] signal in
+        KeyboardSignals.observe([.start, .stop, .cancel]) { [weak self] signal in
             self?.handleKeyboardSignal(signal)
         }
         publishKeyboardState()
@@ -1399,6 +1400,8 @@ final class AppModel {
             Task { await startForKeyboard(showScreen: false) }
         case .stop:
             stopForKeyboard()
+        case .cancel:
+            cancelForKeyboard()
         case .state, .result:
             break  // the app's own signals
         }
@@ -1432,6 +1435,7 @@ final class AppModel {
         defer {
             keyboardStarting = false
             keyboardStopRequested = false
+            keyboardCancelRequested = false
         }
         if !recorder.isLiveInputRunning {
             guard UIApplication.shared.applicationState == .active else {
@@ -1458,8 +1462,24 @@ final class AppModel {
             }
         }
         guard await startRecording(forKeyboard: true) == .started else { return }
+        if keyboardCancelRequested {  // the keyboard said cancel while it started
+            cancelRecording()
+            return
+        }
         if showScreen { keyboardListeningScreen = true }
         if keyboardStopRequested { stopAndSend() }  // the keyboard said stop while it started
+    }
+
+    /// Cancel on the keyboard's listening panel: nothing is typed. The recording is kept for
+    /// Undo like a Cancel in the app.
+    private func cancelForKeyboard() {
+        if phase == .recording {
+            cancelRecording()
+        } else if keyboardStarting {
+            keyboardCancelRequested = true
+        } else {
+            publishKeyboardState()  // it thought this app was listening: tell it how things are
+        }
     }
 
     private func stopForKeyboard() {
@@ -1603,6 +1623,17 @@ enum ScreenshotScene: String, CaseIterable, Sendable {
     case islandSending = "island-sending"
     case islandDone = "island-done"
     case islandAlert = "island-alert"
+    case keyboardTyping = "keyboard-typing"
+    case keyboardListening = "keyboard-listening"
+    case keyboardDictated = "keyboard-dictated"
+
+    /// The ShoutAbout keyboard's face under a sample chat (KeyboardPreviewScreen).
+    var showsKeyboard: Bool {
+        switch self {
+        case .keyboardTyping, .keyboardListening, .keyboardDictated: return true
+        default: return false
+        }
+    }
 
     static var current: ScreenshotScene? {
         UserDefaults.standard.string(forKey: "ScreenshotScene").flatMap(ScreenshotScene.init(rawValue:))
@@ -1694,7 +1725,7 @@ extension AppModel {
             hubInfos = []
             history = HistoryStore()
             target = .phone
-        case .mainComputer, .mainComputers:
+        case .mainComputer, .mainComputers, .keyboardTyping, .keyboardListening, .keyboardDictated:
             break
         case .mainPhone:
             target = .phone

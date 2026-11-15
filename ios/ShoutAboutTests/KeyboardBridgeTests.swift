@@ -26,11 +26,11 @@ final class KeyboardBridgeTests: XCTestCase {
     // MARK: Signals
 
     func testSignalNamesAreUnderTheKeyboardPrefix() {
-        XCTAssertEqual(KeyboardSignal.allCases.count, 4)
+        XCTAssertEqual(KeyboardSignal.allCases.count, 5)
         for signal in KeyboardSignal.allCases {
             XCTAssertTrue(signal.rawValue.hasPrefix("fyi.shoutabout.keyboard."), signal.rawValue)
         }
-        XCTAssertEqual(Set(KeyboardSignal.allCases.map(\.rawValue)).count, 4)
+        XCTAssertEqual(Set(KeyboardSignal.allCases.map(\.rawValue)).count, 5)
     }
 
     // MARK: The app's heartbeat

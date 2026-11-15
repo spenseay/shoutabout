@@ -24,6 +24,11 @@ struct RootView: View {
         .animation(.easeInOut(duration: 0.25), value: model.keyboardListeningScreen)
         .tint(Theme.Colors.tint)
 #if DEBUG
+        .overlay {
+            if let scene = ScreenshotScene.current, scene.showsKeyboard {
+                KeyboardPreviewScreen(scene: scene)
+            }
+        }
         .preferredColorScheme(ScreenshotScene.forcedColorScheme)
 #endif
     }

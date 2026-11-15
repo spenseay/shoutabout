@@ -182,6 +182,23 @@ final class ScreenshotTests: XCTestCase {
         }
     }
 
+    // MARK: The ShoutAbout keyboard (its face under a sample chat)
+
+    func test30Keyboard() {
+        launch("keyboard-typing")
+        snap("keyboard-31-typing-light")
+        launch("keyboard-typing", dark: true)
+        snap("keyboard-32-typing-dark")
+        launch("keyboard-listening")
+        snap("keyboard-33-listening-light")
+        launch("keyboard-listening", dark: true)
+        snap("keyboard-34-listening-dark")
+        launch("keyboard-dictated")
+        snap("keyboard-35-dictated-light")
+        launch("keyboard-dictated", dark: true)
+        snap("keyboard-36-dictated-dark")
+    }
+
     // MARK: Lock Screen (last: it leaves the simulator locked)
 
     func test99LockScreen() {

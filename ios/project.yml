@@ -135,7 +135,7 @@ targets:
         com.apple.security.application-groups:
           - $(APP_GROUP_ID)
 
-  # The ShoutAbout keyboard: the mouth, the globe (when iOS wants one), space, delete, return.
+  # The ShoutAbout keyboard: the iPhone keyboard's layout with the mouth where the emoji key sits.
   # A keyboard can't record, so the app does and the keyboard types the result; they talk
   # through the App Group (hence RequestsOpenAccess) and Darwin notifications. Keyboards get
   # little memory (~48-70 MB): only the small shared pieces below, none of the app's code.
@@ -147,8 +147,10 @@ targets:
       - path: Shared/Core/AppGroup.swift
       - path: Shared/Core/KeyboardBridge.swift
       - path: Shared/Core/KeyboardSignals.swift
+      - path: Shared/Core/KeyboardTyping.swift
       - path: Shared/Core/ZipTimeline.swift
       - path: Shared/UI/Theme.swift
+      - path: Shared/UI/KeyboardFace.swift
       - path: Shared/UI/Mouth.swift
       - path: Shared/UI/MouthMotion.swift
       - path: Shared/UI/ZipMouth.swift

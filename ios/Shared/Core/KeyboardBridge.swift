@@ -5,7 +5,8 @@ import Foundation
 // reaches them only with Full Access) and nudge each other with Darwin notifications, which
 // carry no data (`KeyboardSignals`):
 //
-//   keyboard -> app   start, stop   a tap on the keyboard's mouth
+//   keyboard -> app   start, stop   a tap on the keyboard's mouth (or the listening panel)
+//                     cancel        Cancel on the listening panel: nothing is typed
 //   app -> keyboard   state         `KeyboardAppState` changed (listening, working, ...)
 //                     result        a `KeyboardHandoff` is waiting to be typed
 //
@@ -18,6 +19,7 @@ import Foundation
 enum KeyboardSignal: String, CaseIterable, Sendable {
     case start = "fyi.shoutabout.keyboard.start"
     case stop = "fyi.shoutabout.keyboard.stop"
+    case cancel = "fyi.shoutabout.keyboard.cancel"
     case state = "fyi.shoutabout.keyboard.state"
     case result = "fyi.shoutabout.keyboard.result"
 }
