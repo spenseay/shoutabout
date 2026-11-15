@@ -203,4 +203,76 @@ final class KeyboardTypingTests: XCTestCase {
         XCTAssertEqual(KeyboardTyping.editDistance("", "abc"), 3)
         XCTAssertEqual(KeyboardTyping.editDistance("same", "same"), 0)
     }
+
+    // MARK: Undo
+
+    func testUndoOnlyWhileTheDictationIsRightBeforeTheCursor() {
+        XCTAssertTrue(KeyboardTyping.isJustBeforeCursor(" see you at six.", before: "Sounds good, see you at six."))
+        XCTAssertFalse(KeyboardTyping.isJustBeforeCursor(" see you at six.", before: "Sounds good, see you at six. Bring"))
+        XCTAssertFalse(KeyboardTyping.isJustBeforeCursor("six", before: nil))
+        XCTAssertFalse(KeyboardTyping.isJustBeforeCursor("", before: "six"))
+        // iOS showed only the end of a long dictation: long enough to be sure.
+        let long = "Running about ten minutes late, save me a seat by the window please."
+        XCTAssertTrue(KeyboardTyping.isJustBeforeCursor(long, before: String(long.suffix(30))))
+        XCTAssertFalse(KeyboardTyping.isJustBeforeCursor(long, before: "please."))
+    }
+
+    // MARK: Up and down on the space bar
+
+    /// Every character 10 points wide.
+    private func lines(_ text: String, width: CGFloat) -> KeyboardTextLines {
+        KeyboardTextLines(Array(text), width: width) { _ in 10 }
+    }
+
+    func testLinesBreakAtLineBreaksAndWrapWholeWords() {
+        XCTAssertEqual(lines("ab\ncd", width: 1000).lineStarts, [0, 3])
+        // "hello " fits 60 points (the space hangs past the edge), "world" goes down.
+        XCTAssertEqual(lines("hello world", width: 60).lineStarts, [0, 6])
+        // One word wider than the line is broken where it runs out of room.
+        XCTAssertEqual(lines("abcdefghij", width: 40).lineStarts, [0, 4, 8])
+        // A line break at the very end: an empty last line for the cursor.
+        XCTAssertEqual(lines("ab\n", width: 1000).lineStarts, [0, 3])
+        XCTAssertEqual(lines("", width: 100).lineStarts, [0])
+        XCTAssertEqual(lines("one two three four", width: 90).lineStarts, [0, 8, 14])
+    }
+
+    func testWhereTheCursorIs() {
+        let text = lines("hello world", width: 60)
+        XCTAssertEqual(text.line(of: 0), 0)
+        XCTAssertEqual(text.line(of: 5), 0)
+        XCTAssertEqual(text.line(of: 6), 1)  // where it wraps: the line it starts
+        XCTAssertEqual(text.line(of: 11), 1)
+        XCTAssertEqual(text.x(of: 8), 20)
+        XCTAssertEqual(text.x(of: 3), 30)
+    }
+
+    func testUpAndDownKeepTheirPlaceAcrossAShortLine() {
+        let text = lines("a long line\nab\nanother long", width: 1000)
+        XCTAssertEqual(text.lineStarts, [0, 12, 15])
+        // From "a long li|ne" (90 points along): the short line's end, then back to 90 points.
+        let goal = text.x(of: 9)
+        XCTAssertEqual(goal, 90)
+        XCTAssertEqual(text.position(onLine: 1, nearestX: goal), 14)  // before its line break
+        XCTAssertEqual(text.position(onLine: 2, nearestX: goal), 24)
+        XCTAssertEqual(text.position(onLine: 0, nearestX: 0), 0)
+        XCTAssertEqual(text.position(onLine: 2, nearestX: 1000), 27)  // the end of the text
+        // Lines past either end are clamped.
+        XCTAssertEqual(text.position(onLine: -3, nearestX: 30), 3)
+        XCTAssertEqual(text.position(onLine: 9, nearestX: 30), 18)
+    }
+
+    func testAWrappedLineEndsBeforeTheSpaceItWrapsAt() {
+        let text = lines("hello world", width: 60)
+        XCTAssertEqual(text.position(onLine: 0, nearestX: 1000), 5)
+        XCTAssertEqual(text.position(onLine: 1, nearestX: 1000), 11)
+        XCTAssertEqual(text.position(onLine: 1, nearestX: 24), 8)  // nearest: 20 beats 30
+    }
+
+    func testCursorMovesCountUTF16() {
+        let text = lines("a\u{1F600}b", width: 1000)
+        XCTAssertEqual(text.characterCount, 3)
+        XCTAssertEqual(text.utf16Distance(from: 1, to: 2), 2)  // over the emoji
+        XCTAssertEqual(text.utf16Distance(from: 3, to: 0), -4)
+        XCTAssertEqual(text.utf16Distance(from: 2, to: 2), 0)
+    }
 }

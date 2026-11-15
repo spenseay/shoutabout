@@ -168,6 +168,8 @@ def test_darwin_names_match_between_the_two_sides():
     bridge = (IOS / "Shared" / "Core" / "KeyboardBridge.swift").read_text("utf-8")
     names = re.findall(r'case \w+ = "(fyi\.shoutabout\.keyboard\.\w+)"', bridge)
     assert sorted(names) == [
+        "fyi.shoutabout.keyboard.cancel",
+        "fyi.shoutabout.keyboard.hidden",
         "fyi.shoutabout.keyboard.result",
         "fyi.shoutabout.keyboard.start",
         "fyi.shoutabout.keyboard.state",

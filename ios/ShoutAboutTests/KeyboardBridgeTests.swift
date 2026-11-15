@@ -26,11 +26,11 @@ final class KeyboardBridgeTests: XCTestCase {
     // MARK: Signals
 
     func testSignalNamesAreUnderTheKeyboardPrefix() {
-        XCTAssertEqual(KeyboardSignal.allCases.count, 5)
+        XCTAssertEqual(KeyboardSignal.allCases.count, 6)
         for signal in KeyboardSignal.allCases {
             XCTAssertTrue(signal.rawValue.hasPrefix("fyi.shoutabout.keyboard."), signal.rawValue)
         }
-        XCTAssertEqual(Set(KeyboardSignal.allCases.map(\.rawValue)).count, 5)
+        XCTAssertEqual(Set(KeyboardSignal.allCases.map(\.rawValue)).count, 6)
     }
 
     // MARK: The app's heartbeat
@@ -289,12 +289,62 @@ final class KeyboardBridgeTests: XCTestCase {
 
     // MARK: The session
 
-    func testTheSessionClosesAfterFiveIdleMinutes() {
+    /// The keyboard on screen at `at` (it vouches a few seconds ahead).
+    private func onScreen(at moment: Date) -> Date {
+        moment.addingTimeInterval(KeyboardSessionPolicy.onScreenValidity)
+    }
+
+    func testTheSessionClosesAfterTwoIdleMinutesEvenWithTheKeyboardUp() {
         let lastUse = now
-        XCTAssertFalse(KeyboardSessionPolicy.shouldClose(lastUse: lastUse, now: now.addingTimeInterval(299), dictating: false))
-        XCTAssertTrue(KeyboardSessionPolicy.shouldClose(lastUse: lastUse, now: now.addingTimeInterval(300), dictating: false))
-        XCTAssertFalse(KeyboardSessionPolicy.shouldClose(lastUse: lastUse, now: now.addingTimeInterval(900), dictating: true))
-        XCTAssertEqual(KeyboardSessionPolicy.idleTimeout, 5 * 60)
+        let later = now.addingTimeInterval(119)
+        XCTAssertFalse(KeyboardSessionPolicy.shouldClose(lastUse: lastUse, keyboardOnScreenUntil: onScreen(at: later), now: later, dictating: false))
+        let twoMinutes = now.addingTimeInterval(120)
+        XCTAssertTrue(KeyboardSessionPolicy.shouldClose(lastUse: lastUse, keyboardOnScreenUntil: onScreen(at: twoMinutes), now: twoMinutes, dictating: false))
+        XCTAssertEqual(KeyboardSessionPolicy.idleTimeout, 2 * 60)
+    }
+
+    func testTheSessionClosesTenSecondsAfterTheKeyboardLeaves() {
+        let lastUse = now
+        let left = now.addingTimeInterval(20)  // the keyboard went at +20 s (it writes "now" as it goes)
+        XCTAssertFalse(KeyboardSessionPolicy.shouldClose(lastUse: lastUse, keyboardOnScreenUntil: left, now: left.addingTimeInterval(9), dictating: false))
+        XCTAssertTrue(KeyboardSessionPolicy.shouldClose(lastUse: lastUse, keyboardOnScreenUntil: left, now: left.addingTimeInterval(10), dictating: false))
+        // A keyboard that stopped saying so (killed) counts as gone once its word runs out.
+        let lastWord = onScreen(at: now.addingTimeInterval(30))
+        XCTAssertFalse(KeyboardSessionPolicy.shouldClose(lastUse: lastUse, keyboardOnScreenUntil: lastWord, now: lastWord.addingTimeInterval(9), dictating: false))
+        XCTAssertTrue(KeyboardSessionPolicy.shouldClose(lastUse: lastUse, keyboardOnScreenUntil: lastWord, now: lastWord.addingTimeInterval(10), dictating: false))
+        // Never heard from a keyboard: from the last dictation.
+        XCTAssertTrue(KeyboardSessionPolicy.shouldClose(lastUse: lastUse, keyboardOnScreenUntil: nil, now: now.addingTimeInterval(10), dictating: false))
+        XCTAssertEqual(KeyboardSessionPolicy.hiddenGrace, 10)
+    }
+
+    func testTheSessionStaysOpenDuringADictationAndForAMomentAfter() {
+        let long = now.addingTimeInterval(900)
+        XCTAssertFalse(KeyboardSessionPolicy.shouldClose(lastUse: now, keyboardOnScreenUntil: nil, now: long, dictating: true))
+        // Opened from the app (the keyboard was away all along): 10 s after the dictation ended.
+        let ended = now.addingTimeInterval(40)
+        XCTAssertFalse(KeyboardSessionPolicy.shouldClose(lastUse: ended, keyboardOnScreenUntil: now, now: ended.addingTimeInterval(5), dictating: false))
+        XCTAssertTrue(KeyboardSessionPolicy.shouldClose(lastUse: ended, keyboardOnScreenUntil: now, now: ended.addingTimeInterval(10), dictating: false))
+    }
+
+    func testAKeyboardDictationLeftListeningFinishesAfterAMinute() {
+        let started = now
+        let left = now.addingTimeInterval(5)
+        XCTAssertFalse(KeyboardSessionPolicy.shouldFinishDictation(keyboardOnScreenUntil: left, startedAt: started, now: left.addingTimeInterval(59), appInFront: false))
+        XCTAssertTrue(KeyboardSessionPolicy.shouldFinishDictation(keyboardOnScreenUntil: left, startedAt: started, now: left.addingTimeInterval(60), appInFront: false))
+        // The keyboard still up: keeps listening.
+        let later = now.addingTimeInterval(300)
+        XCTAssertFalse(KeyboardSessionPolicy.shouldFinishDictation(keyboardOnScreenUntil: onScreen(at: later), startedAt: started, now: later, appInFront: false))
+        // The app's own listening screen (opened from the keyboard): you finish it there.
+        XCTAssertFalse(KeyboardSessionPolicy.shouldFinishDictation(keyboardOnScreenUntil: left, startedAt: started, now: later, appInFront: true))
+    }
+
+    func testTheKeyboardsWordOnBeingOnScreenIsKept() {
+        let store = makeStore()
+        XCTAssertNil(store.keyboardOnScreenUntil)
+        store.keyboardOnScreenUntil = now
+        XCTAssertEqual(KeyboardLinkStore(defaults: store.defaults).keyboardOnScreenUntil, now)
+        store.keyboardOnScreenUntil = nil
+        XCTAssertNil(store.keyboardOnScreenUntil)
     }
 
     // MARK: Setup

@@ -321,6 +321,15 @@ enum KeyboardTyping {
         return items
     }
 
+    /// Is `typed` (a dictation the keyboard typed) right before the cursor, so Undo can take it
+    /// back? iOS may show a keyboard only the end of a long text, so a `before` that's all the
+    /// end of `typed` counts too, when it's long enough to be sure.
+    static func isJustBeforeCursor(_ typed: String, before: String?) -> Bool {
+        guard let before, !before.isEmpty, !typed.isEmpty else { return false }
+        if before.hasSuffix(typed) { return true }
+        return before.count >= 24 && typed.hasSuffix(before)
+    }
+
     /// Edits (insert, delete, change, swap two neighbours) from `a` to `b`.
     static func editDistance(_ a: String, _ b: String) -> Int {
         let s = Array(a), t = Array(b)
@@ -339,5 +348,138 @@ enum KeyboardTyping {
             }
         }
         return d[s.count][t.count]
+    }
+}
+
+/// The text around the cursor laid out in lines, so dragging on the space bar can move the
+/// cursor up and down as well as along. iOS tells a keyboard nothing about where a text field's
+/// lines break, so this lays the text out the way the field probably does: a new line after
+/// each line break in the text, and words wrapped to fit `width` points (`characterWidth`
+/// measures in the field's likely font). Exact across the line breaks you typed; an estimate
+/// inside a long wrapped paragraph. Positions count the text's `Character`s (0 ... count).
+struct KeyboardTextLines {
+    let characters: [Character]
+    /// Each line's first position; a line runs to the next one's start.
+    let lineStarts: [Int]
+    private let widths: [CGFloat]
+    /// UTF-16 length up to each position: text fields count cursor moves in UTF-16 units.
+    private let utf16Offsets: [Int]
+
+    init(_ characters: [Character], width: CGFloat, characterWidth: (Character) -> CGFloat) {
+        self.characters = characters
+        let widths = characters.map(characterWidth)
+        self.widths = widths
+        var offsets = [0]
+        offsets.reserveCapacity(characters.count + 1)
+        for character in characters {
+            offsets.append(offsets[offsets.count - 1] + character.utf16.count)
+        }
+        utf16Offsets = offsets
+        lineStarts = Self.wrap(characters, widths: widths, width: max(width, 1))
+    }
+
+    var characterCount: Int { characters.count }
+    var lineCount: Int { lineStarts.count }
+
+    /// The line the cursor at `position` is on (where a line wraps: the line it starts).
+    func line(of position: Int) -> Int {
+        var low = 0
+        var high = lineStarts.count - 1
+        while low < high {
+            let middle = (low + high + 1) / 2
+            if lineStarts[middle] <= position {
+                low = middle
+            } else {
+                high = middle - 1
+            }
+        }
+        return low
+    }
+
+    /// How far along its line the cursor at `position` is, in points.
+    func x(of position: Int) -> CGFloat {
+        let start = lineStarts[line(of: position)]
+        let end = min(max(position, start), widths.count)
+        return widths[start..<end].reduce(0, +)
+    }
+
+    /// The cursor position on `line` nearest to `x` points along it (the end of a shorter
+    /// line, before its line break or the space it wraps at).
+    func position(onLine line: Int, nearestX x: CGFloat) -> Int {
+        let line = min(max(line, 0), lineStarts.count - 1)
+        let start = lineStarts[line]
+        let last = lastPosition(onLine: line)
+        var best = start
+        var bestDistance = abs(x)
+        var along: CGFloat = 0
+        var position = start
+        while position < last {
+            along += widths[position]
+            position += 1
+            let distance = abs(along - x)
+            if distance < bestDistance {
+                best = position
+                bestDistance = distance
+            }
+        }
+        return best
+    }
+
+    /// UTF-16 units from one position to another (negative going back), for
+    /// `adjustTextPosition(byCharacterOffset:)`.
+    func utf16Distance(from: Int, to: Int) -> Int {
+        utf16Offsets[to] - utf16Offsets[from]
+    }
+
+    private func lastPosition(onLine line: Int) -> Int {
+        guard line + 1 < lineStarts.count else { return characters.count }
+        return max(lineStarts[line], lineStarts[line + 1] - 1)
+    }
+
+    /// Greedy word wrap: spaces hang past the edge, a word that doesn't fit starts the next
+    /// line, and one word wider than the line is broken where it runs out of room.
+    private static func wrap(_ characters: [Character], widths: [CGFloat], width: CGFloat) -> [Int] {
+        var starts = [0]
+        var lineStart = 0
+        var lineWidth: CGFloat = 0
+        var breakAt: Int?  // where this line could wrap: the start of the word after spaces
+        var widthBeforeBreak: CGFloat = 0
+        var index = 0
+        while index < characters.count {
+            let character = characters[index]
+            if character.isNewline {
+                index += 1
+                starts.append(index)
+                lineStart = index
+                lineWidth = 0
+                breakAt = nil
+                continue
+            }
+            if character.isWhitespace {
+                lineWidth += widths[index]
+                index += 1
+                if index < characters.count, !characters[index].isWhitespace {
+                    breakAt = index
+                    widthBeforeBreak = lineWidth
+                }
+                continue
+            }
+            if lineWidth + widths[index] > width, index > lineStart {
+                if let at = breakAt, at > lineStart {
+                    starts.append(at)
+                    lineWidth -= widthBeforeBreak
+                    lineStart = at
+                } else {
+                    starts.append(index)
+                    lineWidth = 0
+                    lineStart = index
+                }
+                breakAt = nil
+                continue  // this character again, on the new line
+            }
+            lineWidth += widths[index]
+            index += 1
+        }
+        return starts
     }
 }

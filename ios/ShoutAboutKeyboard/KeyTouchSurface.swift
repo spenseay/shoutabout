@@ -10,8 +10,13 @@ protocol KeyTouchSurfaceDelegate: AnyObject {
     func keyUp(_ key: KeyboardKey)
     /// The touch ended without typing (cancelled, or the space bar moved the cursor).
     func keyCancelled(_ key: KeyboardKey)
-    /// Dragging along the space bar moves the cursor.
+    /// Dragging on the space bar (or holding it) turned the keys into a trackpad for the
+    /// cursor; it ends with `keyCancelled(.space)`.
+    func cursorDragBegan()
+    /// Side to side: the cursor moves this many characters (negative: back).
     func moveCursor(by characters: Int)
+    /// Up and down: this many lines (negative: up).
+    func moveCursor(lines: Int)
     func panelTapped()
     func panelCancelTapped()
     /// iOS's keyboard switcher wants the globe's touches with their event.
@@ -23,10 +28,11 @@ protocol KeyTouchSurfaceDelegate: AnyObject {
 
 /// One clear view over the whole keyboard that takes every touch. It finds the key from the
 /// shared `KeyboardLayout` frames (no dead spots between keys), types when the finger lifts like
-/// the iPhone keyboard, lets thumbs overlap (a new letter commits the one still held), moves the
-/// cursor when you drag along the space bar, and on the listening panel turns any tap into
-/// "finish" (Cancel apart). A touch that began on a key stays that key's until it lifts, even
-/// if the panel appears meanwhile (holding the mouth to talk).
+/// the iPhone keyboard, lets thumbs overlap (a new letter commits the one still held), turns the
+/// space bar into a trackpad for the cursor (drag it, or touch and hold it, then move in any
+/// direction), and on the listening panel turns any tap into "finish" (Cancel apart). A touch
+/// that began on a key stays that key's until it lifts, even if the panel appears meanwhile
+/// (holding the mouth to talk).
 final class KeyTouchSurface: UIView {
     weak var delegate: KeyTouchSurfaceDelegate?
 
@@ -34,17 +40,34 @@ final class KeyTouchSurface: UIView {
     private(set) var keyAreaTop: CGFloat = 0
     private(set) var panelMode = false
 
+    private struct KeyTouch {
+        var key: KeyboardKey
+        var start: CGPoint
+        var last: CGPoint
+        /// The space bar is a trackpad: moves go to the cursor, nothing is typed.
+        var cursorMode = false
+        /// Where the cursor's last step was taken from.
+        var anchor: CGPoint = .zero
+    }
+
     private enum Tracked {
-        case key(KeyboardKey, start: CGPoint, cursorMode: Bool, anchorX: CGFloat)
+        case key(KeyTouch)
         case panel(startedOnCancel: Bool)
     }
 
     private var tracked: [ObjectIdentifier: Tracked] = [:]
     /// Character touches still down, oldest first.
     private var heldCharacters: [ObjectIdentifier] = []
+    private var spaceHold: Task<Void, Never>?
 
-    /// Points of drag along the space bar per character the cursor moves.
+    /// Points of drag per character the cursor moves along a line.
     private static let cursorStep: CGFloat = 9
+    /// Points of drag per line the cursor moves up or down.
+    private static let lineStep: CGFloat = 20
+    /// A drag this far on the space bar starts the trackpad.
+    private static let dragToTrackpad: CGFloat = 14
+    /// So does holding the space bar this long (as on the iPhone).
+    private static let holdToTrackpad: Duration = .milliseconds(450)
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -90,41 +113,52 @@ final class KeyTouchSurface: UIView {
                 commitHeldCharacters()
                 heldCharacters.append(id)
             }
-            tracked[id] = .key(key, start: point, cursorMode: false, anchorX: point.x)
+            tracked[id] = .key(KeyTouch(key: key, start: point, last: point))
             delegate?.keyDown(key)
             if key == .globe { delegate?.globeTouch(from: self, with: event) }
+            if key == .space { startSpaceHold(id) }
         }
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         for touch in touches {
             let id = ObjectIdentifier(touch)
-            guard case .key(let key, let start, var cursorMode, var anchorX)? = tracked[id] else { continue }
+            guard case .key(var item)? = tracked[id] else { continue }
             let point = touch.location(in: self)
-            switch key {
+            item.last = point
+            switch item.key {
             case .globe:
                 delegate?.globeTouch(from: self, with: event)
             case .space:
-                if !cursorMode, abs(point.x - start.x) > 14 {
-                    cursorMode = true
-                    anchorX = point.x
+                if !item.cursorMode,
+                   hypot(point.x - item.start.x, point.y - item.start.y) > Self.dragToTrackpad {
+                    item.cursorMode = true
+                    item.anchor = point
+                    cancelSpaceHold()
+                    delegate?.cursorDragBegan()
                 }
-                if cursorMode {
-                    let steps = Int((point.x - anchorX) / Self.cursorStep)
-                    if steps != 0 {
-                        delegate?.moveCursor(by: steps)
-                        anchorX += CGFloat(steps) * Self.cursorStep
+                if item.cursorMode {
+                    let characters = Int((point.x - item.anchor.x) / Self.cursorStep)
+                    if characters != 0 {
+                        delegate?.moveCursor(by: characters)
+                        item.anchor.x += CGFloat(characters) * Self.cursorStep
+                    }
+                    let lines = Int((point.y - item.anchor.y) / Self.lineStep)
+                    if lines != 0 {
+                        delegate?.moveCursor(lines: lines)
+                        item.anchor.y += CGFloat(lines) * Self.lineStep
                     }
                 }
-                tracked[id] = .key(key, start: start, cursorMode: cursorMode, anchorX: anchorX)
             case .character:
-                if let now = KeyboardLayout.key(at: point, in: frames), now != key, case .character = now {
-                    tracked[id] = .key(now, start: start, cursorMode: false, anchorX: anchorX)
-                    delegate?.keyMoved(from: key, to: now)
+                if let now = KeyboardLayout.key(at: point, in: frames), now != item.key, case .character = now {
+                    let old = item.key
+                    item.key = now
+                    delegate?.keyMoved(from: old, to: now)
                 }
             default:
                 break
             }
+            tracked[id] = .key(item)
         }
     }
 
@@ -132,20 +166,21 @@ final class KeyTouchSurface: UIView {
         for touch in touches {
             let id = ObjectIdentifier(touch)
             heldCharacters.removeAll { $0 == id }
-            guard let item = tracked.removeValue(forKey: id) else { continue }
-            switch item {
+            guard let tracking = tracked.removeValue(forKey: id) else { continue }
+            switch tracking {
             case .panel(let startedOnCancel):
                 if startedOnCancel {
                     if cancelHitFrame.contains(touch.location(in: self)) { delegate?.panelCancelTapped() }
                 } else {
                     delegate?.panelTapped()
                 }
-            case .key(let key, _, let cursorMode, _):
-                if key == .globe { delegate?.globeTouch(from: self, with: event) }
-                if key == .space, cursorMode {
-                    delegate?.keyCancelled(key)
+            case .key(let item):
+                if item.key == .space { cancelSpaceHold() }
+                if item.key == .globe { delegate?.globeTouch(from: self, with: event) }
+                if item.key == .space, item.cursorMode {
+                    delegate?.keyCancelled(item.key)
                 } else {
-                    delegate?.keyUp(key)
+                    delegate?.keyUp(item.key)
                 }
             }
         }
@@ -155,20 +190,41 @@ final class KeyTouchSurface: UIView {
         for touch in touches {
             let id = ObjectIdentifier(touch)
             heldCharacters.removeAll { $0 == id }
-            guard case .key(let key, _, _, _)? = tracked.removeValue(forKey: id) else { continue }
-            if key == .globe { delegate?.globeTouch(from: self, with: event) }
-            delegate?.keyCancelled(key)
+            guard case .key(let item)? = tracked.removeValue(forKey: id) else { continue }
+            if item.key == .space { cancelSpaceHold() }
+            if item.key == .globe { delegate?.globeTouch(from: self, with: event) }
+            delegate?.keyCancelled(item.key)
         }
     }
 
     /// Fast typing: the next letter's touch types the ones still held, in order.
     private func commitHeldCharacters() {
         for id in heldCharacters {
-            if case .key(let key, _, _, _)? = tracked.removeValue(forKey: id) {
-                delegate?.keyUp(key)
+            if case .key(let item)? = tracked.removeValue(forKey: id) {
+                delegate?.keyUp(item.key)
             }
         }
         heldCharacters.removeAll()
+    }
+
+    /// Holding the space bar still: the trackpad starts where the finger is.
+    private func startSpaceHold(_ id: ObjectIdentifier) {
+        spaceHold?.cancel()
+        spaceHold = Task { [weak self] in
+            try? await Task.sleep(for: Self.holdToTrackpad)
+            guard let self, !Task.isCancelled else { return }
+            self.spaceHold = nil
+            guard case .key(var item)? = self.tracked[id], item.key == .space, !item.cursorMode else { return }
+            item.cursorMode = true
+            item.anchor = item.last
+            self.tracked[id] = .key(item)
+            self.delegate?.cursorDragBegan()
+        }
+    }
+
+    private func cancelSpaceHold() {
+        spaceHold?.cancel()
+        spaceHold = nil
     }
 
     // MARK: VoiceOver

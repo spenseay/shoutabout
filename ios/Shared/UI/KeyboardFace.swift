@@ -19,10 +19,11 @@ final class KeyboardState {
     /// Blue, like the iPhone keyboard's go / search / send keys.
     var returnIsPrimary = false
     var suggestions: [KeyboardSuggestion] = []
-    /// The last dictation typed here, for Insert again. Only in memory.
-    var lastText: String?
-    /// The suggestion bar offers Insert again (right after a dictation, until you type).
-    var showsAgain = false
+    /// Undo (right after a dictation) or Redo (right after that Undo) in the suggestion bar,
+    /// until you type.
+    var history: KeyboardHistory?
+    /// Dragging on the space bar: the keys go blank, like the iPhone keyboard's trackpad.
+    var trackpad = false
     /// A short message in the suggestion bar (Full Access, a failed dictation).
     var notice: String?
     var keyFrames: [KeyboardKeyFrame] = []
@@ -51,10 +52,16 @@ final class KeyboardState {
     }
 }
 
+/// Taking the last dictation back out, or putting it back.
+enum KeyboardHistory: Equatable, Sendable {
+    case undo
+    case redo
+}
+
 /// The suggestion bar's buttons (closures into the controller).
 struct KeyboardFaceActions {
     var suggestion: @MainActor (KeyboardSuggestion) -> Void = { _ in }
-    var again: @MainActor () -> Void = {}
+    var history: @MainActor () -> Void = {}
 }
 
 /// The iPhone keyboard's colours.
@@ -119,7 +126,8 @@ private struct KeyboardKeyCap: View {
         RoundedRectangle(cornerRadius: 8.5, style: .continuous)
             .fill(fill)
             .shadow(color: shadow, radius: 0, x: 0, y: 1)
-            .overlay { label }
+            .overlay { label.opacity(state.trackpad ? 0 : 1) }
+            .animation(.easeOut(duration: 0.12), value: state.trackpad)
             .frame(width: item.frame.width, height: item.frame.height)
             .offset(x: item.frame.minX, y: item.frame.minY)
             .accessibilityHidden(true)  // the touch surface carries the keys' accessibility
@@ -252,9 +260,8 @@ private struct KeyboardSuggestionBar: View {
                 .minimumScaleFactor(0.8)
                 .padding(.horizontal, 16)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if state.showsAgain, let last = state.lastText {
-            KeyboardAgainChip(text: last, action: actions.again)
-                .padding(.horizontal, 6)
+        } else if let history = state.history {
+            KeyboardHistoryButton(history: history, action: actions.history)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if !state.suggestions.isEmpty {
             let corrects = state.suggestions.contains { $0.kind == .correction }
@@ -297,38 +304,29 @@ private struct KeyboardSuggestionBar: View {
     }
 }
 
-/// Type the last dictation again: the start of what you said, and a plain label.
-private struct KeyboardAgainChip: View {
-    var text: String
+/// Undo or Redo for the last dictation, in the middle of the bar where a suggestion would be,
+/// drawn like one: plain text and a symbol, no box.
+private struct KeyboardHistoryButton: View {
+    var history: KeyboardHistory
     var action: @MainActor () -> Void
 
     var body: some View {
         Button {
             action()
         } label: {
-            HStack(spacing: 10) {
-                Text("“\(text)”")
-                    .font(.system(size: 15))
-                    .foregroundStyle(KeyboardPalette.ink.opacity(0.7))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Text("Insert again")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Theme.Palette.black)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 4)
-                    .background(Theme.Palette.shoutYellow, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            HStack(spacing: 6) {
+                Image(systemName: history == .undo ? "arrow.uturn.backward" : "arrow.uturn.forward")
+                    .font(.system(size: 15, weight: .medium))
+                Text(history == .undo ? "Undo" : "Redo")
+                    .font(.system(size: 16))
             }
-            .padding(.leading, 12)
-            .padding(.trailing, 5)
-            .frame(height: 34)
-            .background(KeyboardPalette.key, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .shadow(color: KeyboardPalette.shadow, radius: 0, x: 0, y: 1)
+            .foregroundStyle(KeyboardPalette.ink)
+            .padding(.horizontal, 28)
+            .frame(maxHeight: .infinity)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Insert the last dictation again")
+        .accessibilityLabel(history == .undo ? "Undo dictation" : "Redo dictation")
     }
 }
 

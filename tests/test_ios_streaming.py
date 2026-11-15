@@ -176,7 +176,7 @@ def test_the_keyboard_copies_what_it_types():
     controller = code_only(read("ShoutAboutKeyboard", "KeyboardViewController.swift"))
     body = function_body(controller, "private func typeWaitingDictation()")
     assert "if self.hasFullAccess { UIPasteboard.general.string = handoff.text }" in body
-    assert "UIPasteboard" not in function_body(controller, "private func typeAgain()")
+    assert "UIPasteboard" not in function_body(controller, "private func historyTapped()")
 
 
 # MARK: The main screen

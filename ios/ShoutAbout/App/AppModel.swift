@@ -173,10 +173,13 @@ final class AppModel {
     @ObservationIgnored private var demoEffectsDone = false
     @ObservationIgnored private let keyboardLink = KeyboardLinkStore()
     @ObservationIgnored private var keyboardTicker: Task<Void, Never>?
+    @ObservationIgnored private var keyboardHiddenCheck: Task<Void, Never>?
     @ObservationIgnored private var keyboardSessionLastUse = Date()
     @ObservationIgnored private var keyboardPublishedPhase: KeyboardAppState.Phase = .idle
     @ObservationIgnored private var keyboardPhaseSince = Date()
     @ObservationIgnored private var keyboardStarting = false
+    /// The recording in progress was started from the keyboard (not the app or the Action Button).
+    @ObservationIgnored private var keyboardRecording = false
     @ObservationIgnored private var keyboardStopRequested = false
     @ObservationIgnored private var keyboardCancelRequested = false
     @ObservationIgnored private var keyboardOpenPending = false
@@ -1379,16 +1382,18 @@ final class AppModel {
     //
     // The keyboard can't use the microphone, so this app records for it. A keyboard session
     // keeps the microphone input running in the background (`AudioRecorder.startLiveInput`)
-    // for up to 5 minutes after the last dictation, so a tap on the keyboard's mouth (a Darwin
-    // `start`) begins one at once without leaving the app you're typing in. Without a session
-    // the keyboard opens shoutabout://keyboard, which opens one and starts listening. The state
+    // while the keyboard is on screen, up to 2 minutes after the last dictation, so a tap on
+    // the keyboard's mouth (a Darwin `start`) begins one at once without leaving the app you're
+    // typing in. iOS shows its orange microphone dot meanwhile, so the session closes 10 s
+    // after the keyboard leaves the screen (`KeyboardSessionPolicy`). Without a session the
+    // keyboard opens shoutabout://keyboard, which opens one and starts listening. The state
     // (and a heartbeat) goes to the App Group for the keyboard; phone dictations go there too
     // (`KeyboardHandoff`) and the keyboard types them.
 
     private func setUpKeyboardLink() {
         keyboardOn = keyboardLink.keyboardIsSetUp
         _ = keyboardLink.handoff()  // removes one past its few minutes
-        KeyboardSignals.observe([.start, .stop, .cancel]) { [weak self] signal in
+        KeyboardSignals.observe([.start, .stop, .cancel, .hidden]) { [weak self] signal in
             self?.handleKeyboardSignal(signal)
         }
         publishKeyboardState()
@@ -1402,8 +1407,23 @@ final class AppModel {
             stopForKeyboard()
         case .cancel:
             cancelForKeyboard()
+        case .hidden:
+            keyboardLeftTheScreen()
         case .state, .result:
             break  // the app's own signals
+        }
+    }
+
+    /// The keyboard went away: unless it comes back, the session (and iOS's microphone dot)
+    /// ends `hiddenGrace` later, not at the next heartbeat.
+    private func keyboardLeftTheScreen() {
+        guard recorder.isLiveInputRunning else { return }
+        keyboardHiddenCheck?.cancel()
+        keyboardHiddenCheck = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(KeyboardSessionPolicy.hiddenGrace + 0.5))
+            guard let self, !Task.isCancelled else { return }
+            self.keyboardHiddenCheck = nil
+            _ = self.keyboardTick()
         }
     }
 
@@ -1462,6 +1482,7 @@ final class AppModel {
             }
         }
         guard await startRecording(forKeyboard: true) == .started else { return }
+        keyboardRecording = true
         if keyboardCancelRequested {  // the keyboard said cancel while it started
             cancelRecording()
             return
@@ -1504,6 +1525,8 @@ final class AppModel {
     /// Ends the keyboard session (the microphone indicator goes off). A dictation still being
     /// recorded is sent first.
     func closeKeyboardSession() {
+        keyboardHiddenCheck?.cancel()
+        keyboardHiddenCheck = nil
         guard recorder.isLiveInputRunning else { return }
         if phase == .recording { stopAndSend() }
         recorder.stopLiveInput()
@@ -1518,6 +1541,7 @@ final class AppModel {
     private func keyboardPhaseChanged(from old: DictationPhase) {
         guard !isDemo else { return }
         if phase != .recording, keyboardListeningScreen { keyboardListeningScreen = false }
+        if phase != .recording { keyboardRecording = false }
         if old == .recording || phase == .recording { keyboardSessionLastUse = Date() }
         guard old.keyboardPhase != phase.keyboardPhase else { return }
         publishKeyboardState()
@@ -1560,9 +1584,23 @@ final class AppModel {
 
     /// One heartbeat; false when there's nothing left to keep alive.
     private func keyboardTick() -> Bool {
+        if phase == .recording, keyboardRecording,
+           KeyboardSessionPolicy.shouldFinishDictation(
+               keyboardOnScreenUntil: keyboardLink.keyboardOnScreenUntil,
+               startedAt: keyboardSessionLastUse,  // set as the recording began
+               now: Date(),
+               appInFront: UIApplication.shared.applicationState == .active
+           ) {
+            stopAndSend()  // the keyboard left a while ago, still listening
+        }
         let dictating = phase == .recording || phase.isBusy || keyboardStarting
         if recorder.isLiveInputRunning,
-           KeyboardSessionPolicy.shouldClose(lastUse: keyboardSessionLastUse, now: Date(), dictating: dictating) {
+           KeyboardSessionPolicy.shouldClose(
+               lastUse: keyboardSessionLastUse,
+               keyboardOnScreenUntil: keyboardLink.keyboardOnScreenUntil,
+               now: Date(),
+               dictating: dictating
+           ) {
             closeKeyboardSession()
         } else {
             publishKeyboardState()

@@ -7,12 +7,14 @@ import Foundation
 //
 //   keyboard -> app   start, stop   a tap on the keyboard's mouth (or the listening panel)
 //                     cancel        Cancel on the listening panel: nothing is typed
+//                     hidden        the keyboard left the screen (the session closes soon)
 //   app -> keyboard   state         `KeyboardAppState` changed (listening, working, ...)
 //                     result        a `KeyboardHandoff` is waiting to be typed
 //
 // With a keyboard session open (the app keeps its microphone input running in the background),
 // a tap starts a dictation right away; without one the keyboard opens shoutabout://keyboard and
-// the app opens a session and starts listening. Every decision is a pure function here
+// the app opens a session and starts listening. The session closes soon after the keyboard
+// leaves the screen (`KeyboardSessionPolicy`). Every decision is a pure function here
 // (unit-tested in ShoutAboutTests); the keyboard and the app only act on them.
 
 /// The Darwin notification names.
@@ -20,6 +22,7 @@ enum KeyboardSignal: String, CaseIterable, Sendable {
     case start = "fyi.shoutabout.keyboard.start"
     case stop = "fyi.shoutabout.keyboard.stop"
     case cancel = "fyi.shoutabout.keyboard.cancel"
+    case hidden = "fyi.shoutabout.keyboard.hidden"
     case state = "fyi.shoutabout.keyboard.state"
     case result = "fyi.shoutabout.keyboard.result"
 }
@@ -206,13 +209,36 @@ enum KeyboardText {
     }
 }
 
-/// The app's keyboard session ends by itself after `idleTimeout` without a dictation (the
-/// microphone indicator then goes off).
+/// The app's keyboard session keeps the microphone on, so iOS shows its orange microphone dot
+/// the whole time. It closes by itself (the dot goes off) `hiddenGrace` after the keyboard left
+/// the screen (Home, another app, a field without a keyboard), and after `idleTimeout` without
+/// a dictation even while the keyboard is still up. Never during a dictation.
 enum KeyboardSessionPolicy {
-    static let idleTimeout: TimeInterval = 5 * 60
+    static let idleTimeout: TimeInterval = 2 * 60
+    /// Long enough to switch chats or copy something from another app and come back.
+    static let hiddenGrace: TimeInterval = 10
+    /// While on screen the keyboard says so every second, each time vouching for this long
+    /// (`KeyboardLinkStore.keyboardOnScreenUntil`): a keyboard that's gone stops saying it.
+    static let onScreenValidity: TimeInterval = 3
 
-    static func shouldClose(lastUse: Date, now: Date, dictating: Bool) -> Bool {
-        !dictating && now.timeIntervalSince(lastUse) >= idleTimeout
+    /// `keyboardOnScreenUntil`: the keyboard's last word on being on screen (nil: never).
+    static func shouldClose(lastUse: Date, keyboardOnScreenUntil: Date?, now: Date, dictating: Bool) -> Bool {
+        guard !dictating else { return false }
+        if now.timeIntervalSince(lastUse) >= idleTimeout { return true }
+        // Off screen: from when it went (or the last dictation, if that ended later).
+        let since = max(keyboardOnScreenUntil ?? .distantPast, lastUse)
+        return now.timeIntervalSince(since) >= hiddenGrace
+    }
+
+    /// A dictation started from the keyboard that's still listening this long after the
+    /// keyboard left the screen (with the app in the background) is finished and sent, as if
+    /// the panel had been tapped: nobody is there to finish it, and it shouldn't listen on.
+    static let abandonedDictation: TimeInterval = 60
+
+    static func shouldFinishDictation(keyboardOnScreenUntil: Date?, startedAt: Date, now: Date, appInFront: Bool) -> Bool {
+        guard !appInFront else { return false }  // the app's own listening screen
+        let since = max(keyboardOnScreenUntil ?? .distantPast, startedAt)
+        return now.timeIntervalSince(since) >= abandonedDictation
     }
 }
 
@@ -223,6 +249,7 @@ struct KeyboardLinkStore {
         static let handoff = "keyboardHandoff"
         static let claim = "keyboardHandoffClaim"
         static let fullAccessSeenAt = "keyboardFullAccessSeenAt"
+        static let onScreenUntil = "keyboardOnScreenUntil"
     }
 
     let defaults: UserDefaults
@@ -302,6 +329,19 @@ struct KeyboardLinkStore {
     }
 
     var keyboardIsSetUp: Bool { fullAccessSeenAt != nil }
+
+    /// The keyboard is on screen until then (it writes it every second while it is, and "now"
+    /// as it goes). The app closes its session soon after (`KeyboardSessionPolicy`).
+    var keyboardOnScreenUntil: Date? {
+        get { defaults.object(forKey: Key.onScreenUntil) as? Date }
+        nonmutating set {
+            if let newValue {
+                defaults.set(newValue, forKey: Key.onScreenUntil)
+            } else {
+                defaults.removeObject(forKey: Key.onScreenUntil)
+            }
+        }
+    }
 
     private func decode<T: Decodable>(_ type: T.Type, _ key: String) -> T? {
         guard let data = defaults.data(forKey: key) else { return nil }

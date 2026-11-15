@@ -119,15 +119,20 @@ tour runs in the iOS Simulator. Nothing has run on a real iPhone yet (see
   (letters, shift and caps lock, 123 and #+=, delete that repeats and then takes whole words,
   a return key labeled like the field asks, the letter pop-up, keyboard clicks) with the
   **mouth where the emoji key sits**. Typing follows the iPhone's habits: a capital to start a
-  sentence, two spaces for ". ", a drag along the space bar moves the cursor, and a suggestion
-  bar from iOS's own spell checker (`UITextChecker`) with your text replacements from Settings.
+  sentence, two spaces for ". ", the space bar as a trackpad (drag it, or touch and hold it;
+  the keys go blank) that moves the cursor along and up and down, and a suggestion bar from
+  iOS's own spell checker (`UITextChecker`) with your text replacements from Settings. iOS
+  tells a keyboard nothing about where a field's lines wrap, so up and down lay the nearby
+  text out themselves (`KeyboardTextLines`): exact across the line breaks you typed, an
+  estimate inside a long wrapped paragraph (the field is taken as 3/4 of the screen wide).
   Space (or return, or punctuation) corrects only careful cases: a text replacement, a missing
   apostrophe ("dont", "im"), the lone "i", or a misspelling one letter from iOS's best guess
   (two for longer words); delete right after it puts back what you typed and stops
   correcting that word; contacts' names are never touched. Tap the mouth and talk, then tap
   anywhere on the keyboard to finish (the keys make way for a yellow panel with the mouth and
   a labeled **Cancel**); or hold the mouth, talk, and let go. Right after a dictation the
-  suggestion bar shows the start of it with **Insert again**. Typing works without Full
+  suggestion bar offers **Undo** (takes it back out while it's right before the cursor), then
+  **Redo**, until you type. Typing works without Full
   Access; the mouth needs it and says so. Layout and typing rules:
   `Shared/Core/KeyboardTyping.swift`; drawing: `Shared/UI/KeyboardFace.swift`. The words land
   at the cursor by themselves, always on the phone (whatever the Computer / Phone switch
@@ -136,8 +141,13 @@ tour runs in the iOS Simulator. Nothing has run on a real iPhone yet (see
   clipboard too; computer ones never are. A
   keyboard can't use the microphone, so the app records: a **keyboard session** keeps the
   app's microphone input running in the background (an `AVAudioEngine` tap that throws the
-  audio away between dictations) so a tap starts at once, and it ends after 5 minutes
-  without a dictation or on an interruption. Without a session, the keyboard opens
+  audio away between dictations) so a tap starts at once. iOS shows its orange microphone dot
+  the whole time, so the session ends 10 s after the keyboard leaves the screen (it writes
+  `keyboardOnScreenUntil` every second while up and sends `hidden` as it goes), after 2
+  minutes without a dictation even with the keyboard up, or on an interruption; a keyboard
+  dictation still listening a minute after the keyboard left (app in the background) is
+  finished and sent (`KeyboardSessionPolicy`). Settings › Keyboard explains the dot. Without
+  a session, the keyboard opens
   `shoutabout://keyboard`; the app opens one, starts listening and says only "Listening /
   Go back to keep typing.". Cancel on the panel sends `cancel` (nothing is typed). Details:
   `Shared/Core/KeyboardBridge.swift`.
@@ -668,7 +678,8 @@ None of this has been tried on a real iPhone:
 - the Control Center controls, the Lock Screen widget, App Shortcuts phrases and Siri
 - the **keyboard**: opening the app from it (the responder-chain call), the system's back
   link afterwards, the background keyboard session (does iOS keep the input running and
-  the app alive for 5 minutes), Darwin start/stop, auto-typing, memory, Full Access
+  the app alive, and does the orange dot go off 10 s after leaving the keyboard), Darwin
+  start/stop/hidden, auto-typing, memory, Full Access, up and down on the space bar
 - keychain access groups with real entitlements, the App Group shared with the extension
 - the `testflight` job (signing, export, upload): never run, the secrets don't exist yet
 

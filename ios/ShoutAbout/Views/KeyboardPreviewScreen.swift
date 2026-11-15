@@ -73,8 +73,7 @@ struct KeyboardPreviewScreen: View {
         case .keyboardListening:
             state.mouth = .listening
         case .keyboardDictated:
-            state.lastText = Self.dictation
-            state.showsAgain = true
+            state.history = .undo
         default:
             state.suggestions = [
                 KeyboardSuggestion(text: "Runnin", kind: .typed),

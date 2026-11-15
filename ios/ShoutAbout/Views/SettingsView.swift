@@ -31,7 +31,10 @@ struct SettingsView: View {
                     }
                     KeyboardSetupRow()
                 } footer: {
-                    if !model.keyboardOn {
+                    if model.keyboardOn {
+                        // The keyboard session (KeyboardSessionPolicy) shows iOS's microphone dot.
+                        Text("The orange dot while you type means the mic is on, so the mouth starts at once. Nothing is kept until you tap it, and it turns off when you leave the keyboard.")
+                    } else {
                         Text("Keyboards › ShoutAbout, then Allow Full Access.")
                     }
                 }

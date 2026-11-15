@@ -53,6 +53,22 @@ final class KeyboardViewController: UIInputViewController, KeyTouchSurfaceDelega
     private var knownWords: Set<String> = []
     private var deleteRepeat: Task<Void, Never>?
     private var noticeEnd: Task<Void, Never>?
+    /// The last dictation as typed here (with the space put in front), for Undo and Redo in
+    /// the suggestion bar. Only in memory.
+    private var lastInsertion: String?
+
+    // The cursor (the space bar as a trackpad)
+    /// The text around the cursor while you drag, in lines (`KeyboardTextLines`), and where the
+    /// cursor is in it. The text field reports cursor moves back late, so it's read once and
+    /// kept in step; read again (after `contextSettle`) once the cursor goes past what it holds.
+    private var cursorText: KeyboardTextLines?
+    private var cursorPosition = 0
+    /// How far along a line up and down aim: kept across a shorter line, like the iPhone's.
+    private var cursorGoalX: CGFloat?
+    /// Moves that came in while the text was being read again.
+    private var cursorQueue = (characters: 0, lines: 0)
+    private var cursorReread: Task<Void, Never>?
+    private static let contextSettle: Duration = .milliseconds(120)
 
     override func loadView() {
         // Keyboard clicks (UIDevice.playInputClick) need an input view that asks for them.
@@ -65,7 +81,7 @@ final class KeyboardViewController: UIInputViewController, KeyTouchSurfaceDelega
 
         let face = KeyboardFace(state: state, actions: KeyboardFaceActions(
             suggestion: { [weak self] in self?.suggestionTapped($0) },
-            again: { [weak self] in self?.typeAgain() }
+            history: { [weak self] in self?.historyTapped() }
         ))
         let hosting = UIHostingController(rootView: face)
         hosting.safeAreaRegions = []
@@ -121,8 +137,17 @@ final class KeyboardViewController: UIInputViewController, KeyTouchSurfaceDelega
         ticker = nil
         stopDeleting()
         endHold()
+        cursorDragEnded()
         state.pressed = []
         state.popup = nil
+        dismissHistory()
+        lastInsertion = nil
+        if hasFullAccess {
+            // The app closes its keyboard session (and iOS's microphone dot) soon after,
+            // unless a keyboard comes back.
+            store.keyboardOnScreenUntil = Date()
+            KeyboardSignals.post(.hidden)
+        }
     }
 
     override func viewWillLayoutSubviews() {
@@ -209,7 +234,7 @@ final class KeyboardViewController: UIInputViewController, KeyTouchSurfaceDelega
 
     /// Capitals and suggestions for where the cursor is now.
     private func refreshTyping() {
-        guard !state.showsPanel else { return }
+        guard !state.showsPanel, !state.trackpad else { return }
         if state.shift != .locked {
             let capital = KeyboardTyping.capitalizes(autoCapitalization, before: textDocumentProxy.documentContextBeforeInput)
             setShift(capital ? .on : .off)
@@ -346,15 +371,130 @@ final class KeyboardViewController: UIInputViewController, KeyTouchSurfaceDelega
         switch key {
         case .delete: stopDeleting()
         case .mouth: endHold()
+        case .space: cursorDragEnded()
         default: break
         }
     }
 
-    func moveCursor(by characters: Int) {
+    // MARK: The cursor (the space bar as a trackpad)
+
+    func cursorDragBegan() {
+        resetCursorTrack()
         lastCorrection = nil
         autoSpace = false
-        textDocumentProxy.adjustTextPosition(byCharacterOffset: characters)
+        lastSpaceAt = nil
+        dismissHistory()
+        state.pressed = []
+        state.popup = nil
+        state.trackpad = true
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()  // with Full Access only
+    }
+
+    private func cursorDragEnded() {
+        resetCursorTrack()
+        guard state.trackpad else { return }
+        state.trackpad = false
         refreshTyping()
+    }
+
+    private func resetCursorTrack() {
+        cursorReread?.cancel()
+        cursorReread = nil
+        cursorText = nil
+        cursorGoalX = nil
+        cursorQueue = (0, 0)
+    }
+
+    func moveCursor(by characters: Int) {
+        guard cursorReread == nil else {
+            cursorQueue.characters += characters
+            return
+        }
+        let text = cursorTextNow()
+        let target = cursorPosition + characters
+        cursorGoalX = nil
+        if (0...text.characterCount).contains(target) {
+            adjustCursor(to: target, in: text)
+        } else {
+            // Past the text it knows: to its end, on from there, and read the text again.
+            let edge = target < 0 ? 0 : text.characterCount
+            adjustCursor(to: edge, in: text)
+            textDocumentProxy.adjustTextPosition(byCharacterOffset: target - edge)
+            rereadCursorText(crossing: 0)
+        }
+    }
+
+    func moveCursor(lines: Int) {
+        guard cursorReread == nil else {
+            cursorQueue.lines += lines
+            return
+        }
+        let text = cursorTextNow()
+        let goal = cursorGoalX ?? text.x(of: cursorPosition)
+        cursorGoalX = goal
+        let line = text.line(of: cursorPosition)
+        let target = line + lines
+        if (0..<text.lineCount).contains(target) {
+            adjustCursor(to: text.position(onLine: target, nearestX: goal), in: text)
+            return
+        }
+        // Past the first or last line it knows: to that end, one step on (over the line
+        // break), and the rest once the text there has been read.
+        let up = target < 0
+        adjustCursor(to: up ? 0 : text.characterCount, in: text)
+        textDocumentProxy.adjustTextPosition(byCharacterOffset: up ? -1 : 1)
+        let used = up ? -(line + 1) : text.lineCount - line
+        cursorQueue.lines += lines - used
+        rereadCursorText(crossing: up ? -1 : 1)
+    }
+
+    /// The text around the cursor, laid out as the text field probably does: its width isn't
+    /// told to keyboards, and three quarters of the screen sits between a chat's message box
+    /// and a full-width page.
+    private func cursorTextNow() -> KeyboardTextLines {
+        if let cursorText { return cursorText }
+        let proxy = textDocumentProxy
+        let before = Array(proxy.documentContextBeforeInput ?? "")
+        let after = Array(proxy.documentContextAfterInput ?? "")
+        let font = UIFont.preferredFont(forTextStyle: .body)
+        var widths: [Character: CGFloat] = [:]
+        let text = KeyboardTextLines(before + after, width: max(160, view.bounds.width * 0.75)) { character in
+            if let known = widths[character] { return known }
+            let width = (String(character) as NSString).size(withAttributes: [.font: font]).width
+            widths[character] = width
+            return width
+        }
+        cursorText = text
+        cursorPosition = before.count
+        return text
+    }
+
+    private func adjustCursor(to position: Int, in text: KeyboardTextLines) {
+        guard position != cursorPosition else { return }
+        textDocumentProxy.adjustTextPosition(byCharacterOffset: text.utf16Distance(from: cursorPosition, to: position))
+        cursorPosition = position
+    }
+
+    /// After stepping past the text it knew: once the field has caught up, reads the text there,
+    /// puts the cursor where up or down aimed on its new line (`crossing`: -1 up, 1 down; not
+    /// at the very start or end of the text), then makes the moves that came in meanwhile.
+    private func rereadCursorText(crossing: Int) {
+        cursorText = nil
+        cursorReread = Task { [weak self] in
+            try? await Task.sleep(for: Self.contextSettle)
+            guard let self, !Task.isCancelled else { return }
+            self.cursorReread = nil
+            let text = self.cursorTextNow()
+            let atEnd = crossing < 0 ? self.cursorPosition == 0 : self.cursorPosition == text.characterCount
+            if crossing != 0, !atEnd, let goal = self.cursorGoalX {
+                let line = text.line(of: self.cursorPosition)
+                self.adjustCursor(to: text.position(onLine: line, nearestX: goal), in: text)
+            }
+            let queued = self.cursorQueue
+            self.cursorQueue = (0, 0)
+            if queued.characters != 0 { self.moveCursor(by: queued.characters) }
+            if queued.lines != 0 { self.moveCursor(lines: queued.lines) }
+        }
     }
 
     func globeTouch(from view: UIView, with event: UIEvent?) {
@@ -388,7 +528,7 @@ final class KeyboardViewController: UIInputViewController, KeyTouchSurfaceDelega
     // MARK: Typing
 
     private func typeCharacter(_ character: String) {
-        dismissAgain()
+        dismissHistory()
         let proxy = textDocumentProxy
         let text = state.page == .letters && state.shift != .off ? character.uppercased() : character
         let punctuation = ".,!?;:".contains(character)
@@ -409,7 +549,7 @@ final class KeyboardViewController: UIInputViewController, KeyTouchSurfaceDelega
     }
 
     private func typeSpace() {
-        dismissAgain()
+        dismissHistory()
         let proxy = textDocumentProxy
         let now = Date()
         if let last = lastSpaceAt, now.timeIntervalSince(last) < KeyboardTyping.doubleSpaceWindow,
@@ -428,7 +568,7 @@ final class KeyboardViewController: UIInputViewController, KeyTouchSurfaceDelega
     }
 
     private func typeReturn() {
-        dismissAgain()
+        dismissHistory()
         correctWord(thenType: "\n")
         autoSpace = false
         lastSpaceAt = nil
@@ -443,7 +583,7 @@ final class KeyboardViewController: UIInputViewController, KeyTouchSurfaceDelega
     }
 
     private func suggestionTapped(_ suggestion: KeyboardSuggestion) {
-        dismissAgain()
+        dismissHistory()
         let proxy = textDocumentProxy
         let word = KeyboardTyping.currentWord(before: proxy.documentContextBeforeInput)
         for _ in 0..<word.count { proxy.deleteBackward() }
@@ -484,7 +624,7 @@ final class KeyboardViewController: UIInputViewController, KeyTouchSurfaceDelega
     /// One delete; right after an automatic correction it puts back what you typed instead
     /// (and stops correcting that word).
     private func deleteOnce() {
-        dismissAgain()
+        dismissHistory()
         let proxy = textDocumentProxy
         if let fix = lastCorrection, proxy.documentContextBeforeInput?.hasSuffix(fix.replacement + fix.suffix) == true {
             for _ in 0..<(fix.replacement.count + fix.suffix.count) { proxy.deleteBackward() }
@@ -504,7 +644,7 @@ final class KeyboardViewController: UIInputViewController, KeyTouchSurfaceDelega
         deleteRepeat = nil
     }
 
-    // MARK: Notices and Insert again
+    // MARK: Notices and Undo
 
     private func showNotice(_ text: String) {
         state.notice = text
@@ -516,8 +656,8 @@ final class KeyboardViewController: UIInputViewController, KeyTouchSurfaceDelega
         }
     }
 
-    private func dismissAgain() {
-        if state.showsAgain { state.showsAgain = false }
+    private func dismissHistory() {
+        if state.history != nil { state.history = nil }
     }
 
     // MARK: The app's state
@@ -527,7 +667,7 @@ final class KeyboardViewController: UIInputViewController, KeyTouchSurfaceDelega
         switch signal {
         case .state, .result:
             refresh()
-        case .start, .stop, .cancel:
+        case .start, .stop, .cancel, .hidden:
             break  // the keyboard's own signals
         }
     }
@@ -554,6 +694,10 @@ final class KeyboardViewController: UIInputViewController, KeyTouchSurfaceDelega
         }
         appState = store.appState
         let now = Date()
+        if visible {
+            // Every second while up: the app keeps its session only while a keyboard is.
+            store.keyboardOnScreenUntil = now.addingTimeInterval(KeyboardSessionPolicy.onScreenValidity)
+        }
         if let since = startPendingSince {
             switch appState?.phase(at: now) ?? .idle {
             case .listening, .working:
@@ -607,6 +751,7 @@ final class KeyboardViewController: UIInputViewController, KeyTouchSurfaceDelega
             return
         }
         panelHiddenUntil = nil
+        dismissHistory()
         appState = store.appState
         let now = Date()
         switch KeyboardMouthAction.decide(hasFullAccess: true, app: appState, startPending: startPendingSince != nil, now: now) {
@@ -714,16 +859,35 @@ final class KeyboardViewController: UIInputViewController, KeyTouchSurfaceDelega
         }
     }
 
-    private func typeAgain() {
-        guard let text = state.lastText else { return }
-        type(text)
-    }
-
     private func type(_ text: String) {
         let proxy = textDocumentProxy
-        proxy.insertText(KeyboardText.insertion(text, after: proxy.documentContextBeforeInput))
-        if state.lastText != text { state.lastText = text }
-        state.showsAgain = true
+        let typed = KeyboardText.insertion(text, after: proxy.documentContextBeforeInput)
+        proxy.insertText(typed)
+        lastInsertion = typed
+        state.history = .undo
+        lastCorrection = nil
+        autoSpace = false
+        lastSpaceAt = nil
+        refreshTyping()
+    }
+
+    /// Undo takes the dictation back out (only while it's right before the cursor); Redo puts
+    /// it back. Neither touches the clipboard.
+    private func historyTapped() {
+        guard let typed = lastInsertion, let history = state.history else { return }
+        let proxy = textDocumentProxy
+        switch history {
+        case .undo:
+            guard KeyboardTyping.isJustBeforeCursor(typed, before: proxy.documentContextBeforeInput) else {
+                state.history = nil  // the cursor moved away from it
+                return
+            }
+            for _ in 0..<typed.count { proxy.deleteBackward() }
+            state.history = .redo
+        case .redo:
+            proxy.insertText(typed)
+            state.history = .undo
+        }
         lastCorrection = nil
         autoSpace = false
         lastSpaceAt = nil
