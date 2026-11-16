@@ -14,7 +14,7 @@ struct KeyboardPreviewScreen: View {
         GeometryReader { geo in
             VStack(spacing: 0) {
                 VStack(spacing: 10) {
-                    Text("Sample chat")
+                    Text("Sam")
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                         .padding(.top, geo.safeAreaInsets.top + 8)

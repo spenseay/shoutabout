@@ -471,8 +471,9 @@ gh run download <run id> -n ios-screenshots -D .screens\ios
 
 `ShoutAboutUITests/ScreenshotTests.swift` launches the Debug app once per scene with
 `-ScreenshotScene <name>` (and `-ScreenshotAppearance dark` for the dark shots). The scenes
-(`ScreenshotScene` in `AppModel.swift`, Debug builds only) fill the app with obviously made-up
-data: "Sample-Desktop", "Sample text: …", the documentation-only address `192.0.2.10`. No
+(`ScreenshotScene` in `AppModel.swift`, Debug builds only) fill the app with made-up data that
+reads naturally in store screenshots: a computer called "Desktop", everyday sentences, a
+chat with "Sam", and the documentation-only address `192.0.2.10`. No
 network, no keychain, nothing saved. Looping animations freeze on one frame in this mode
 (`MotionPolicy.frozen`) so XCUITest sees an idle app.
 

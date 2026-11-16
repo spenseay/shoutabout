@@ -1705,11 +1705,11 @@ enum ScreenshotScene: String, CaseIterable, Sendable {
     }
 
     static let sampleComputer = DiscoveredComputer(
-        id: "00000000-sample-desktop", name: "Sample-Desktop", version: "2.0.0", serviceName: "Sample-Desktop"
+        id: "00000000-sample-desktop", name: "Desktop", version: "2.0.0", serviceName: "Desktop"
     )
     static let sampleComputers = [
         sampleComputer,
-        DiscoveredComputer(id: "00000000-sample-laptop", name: "Sample-Laptop", version: "2.0.0", serviceName: "Sample-Laptop"),
+        DiscoveredComputer(id: "00000000-sample-laptop", name: "Laptop", version: "2.0.0", serviceName: "Laptop"),
     ]
 }
 
@@ -1779,7 +1779,7 @@ extension AppModel {
             phase = .done
         case .away:
             let item = HistoryItem(
-                text: "Sample text: book the dentist for Tuesday morning and move the gym to Thursday.",
+                text: "Book the dentist for Tuesday morning and move the gym to Thursday.",
                 target: .pc, route: .offline, warning: DictationNotice.away,
                 audioSeconds: 4.8, roundTripMs: 1450, engine: "SpeechTranscriber"
             )
@@ -1810,7 +1810,7 @@ extension AppModel {
         guard !demoEffectsDone, let scene = ScreenshotScene.current else { return }
         demoEffectsDone = true
         let state = DictationActivityState(
-            phase: .listening, target: .pc, computerName: "Sample-Desktop",
+            phase: .listening, target: .pc, computerName: "Desktop",
             startedAt: Date().addingTimeInterval(-7), level: 3
         )
         switch scene {
@@ -1825,7 +1825,7 @@ extension AppModel {
             var done = state
             done.phase = .done
             done.outcome = .pasted
-            done.message = DictationActivityState.doneDetail(.pasted, notice: nil, computerName: "Sample-Desktop")
+            done.message = DictationActivityState.doneDetail(.pasted, notice: nil, computerName: "Desktop")
             await activity.showDemo(done)
         case .islandAlert:
             await activity.showDemo(state)
@@ -1834,7 +1834,7 @@ extension AppModel {
             var done = state
             done.phase = .done
             done.outcome = .pasted
-            done.message = DictationActivityState.doneDetail(.pasted, notice: nil, computerName: "Sample-Desktop")
+            done.message = DictationActivityState.doneDetail(.pasted, notice: nil, computerName: "Desktop")
             await activity.alertDemo(done)
             try? await Task.sleep(for: .seconds(10))
             endBackgroundWork()
@@ -1848,20 +1848,20 @@ extension AppModel {
         return [
             HistoryItem(
                 date: now.addingTimeInterval(-40),
-                text: "Sample text: push the release to Friday and tell the team the build is green.",
+                text: "Push the release to Friday and tell the team the build is green.",
                 target: .pc, route: .lan, pasted: true, cleanup: "applied",
                 timings: .init(decode: 12, stt: 148, cleanup: 91, paste: 35, total: 296),
                 audioSeconds: 6.4, roundTripMs: 610
             ),
             HistoryItem(
                 date: now.addingTimeInterval(-25 * 60),
-                text: "Sample text: remember oat milk and coffee filters on the way home.",
+                text: "Remember oat milk and coffee filters on the way home.",
                 target: .phone, route: .offline,
                 audioSeconds: 4.1, roundTripMs: 980, engine: "SpeechTranscriber"
             ),
             HistoryItem(
                 date: now.addingTimeInterval(-3 * 3600),
-                text: "Sample text: the slides look great, ship them after lunch.",
+                text: "The slides look great, ship them after lunch.",
                 target: .pc, route: .lan, pasted: true, cleanup: "applied",
                 timings: .init(decode: 10, stt: 139, cleanup: 94, paste: 33, total: 281),
                 audioSeconds: 5.0, roundTripMs: 560
