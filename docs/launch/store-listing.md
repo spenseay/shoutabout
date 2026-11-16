@@ -1,7 +1,12 @@
 # App Store listing (draft)
 
-Drafts for App Store Connect and TestFlight, for the iPhone app `fyi.shoutabout.app`. Nothing
-has been entered anywhere yet. The owner has a paid Apple Developer membership; builds come
+Drafts for App Store Connect and TestFlight, for the iPhone app `fyi.shoutabout.app`. On
+2026-11-15 the listing below was entered in App Store Connect through the API (nothing
+submitted): subtitle, privacy URL, categories, age rating (4+), content rights, version 1.0.0,
+copyright, description, keywords, promotional text, support and marketing URLs, review notes,
+and availability (every territory except mainland China, which needs an ICP filing; new
+territories automatically). Still the owner's: App Privacy (web only), the review contact,
+the video link in the notes, EU trader status. The owner has a paid Apple Developer membership; builds come
 from Codemagic ([LAUNCH.md](LAUNCH.md#apple-what-the-membership-covers)). Field limits are
 Apple's as of October 2026
 ([app information](https://developer.apple.com/help/app-store-connect/reference/app-information/app-information),
@@ -17,15 +22,15 @@ tongue (in screenshots too).
 
 | Field | Draft | Notes |
 |---|---|---|
-| Name (2–30) | `ShoutAbout` (10) | Must be unique on the App Store. Fallback: `ShoutAbout Dictation` (20). The name under the icon stays "ShoutAbout". |
-| Subtitle (≤ 30) | `Private voice dictation` (23) | Alternative: `Voice typing, kept private` (26) |
+| Name (2–30) | `ShoutAbout Dictation` (20) | The store name (`ShoutAbout` alone was taken). The name under the icon stays "ShoutAbout". |
+| Subtitle (≤ 30) | `Voice typing, kept private` (26) | Entered. (`Private voice dictation` would repeat the name's "Dictation".) |
 | Bundle ID | `fyi.shoutabout.app` | From `ios/Config/Base.xcconfig` |
 | SKU | `shoutabout-ios` | |
 | Primary category | Productivity | |
 | Secondary category | Utilities | |
 | Content rights | Contains no third-party content | |
 | Price | Free (USD 0), all territories | No in-app purchases |
-| Copyright | `2026 Spencer Seay` | Or the company name, if you form one |
+| Copyright | `2026 ShoutAbout` | Entered, like the website's footer. Change it to your own name (or a company's) if you prefer |
 | Privacy Policy URL | `https://shoutabout.fyi/privacy` | Required. Apple also wants it reachable **inside the app** (guideline 5.1.1(i)): see [LAUNCH.md](LAUNCH.md#apple-what-the-membership-covers) |
 | Support URL | `https://shoutabout.fyi/support` | The help page. Guideline **1.5** asks that the app and its Support URL include an easy way to contact you: set `contact_email` in `site/downloads.json` (a free forwarding address, [hosting.md › D](hosting.md#d-a-contact-address-optional)) before submitting, and it appears on that page. |
 | Marketing URL | `https://shoutabout.fyi/` | |
@@ -42,19 +47,22 @@ Press the Action Button, talk, press again. Your words land on your clipboard, o
 ```
 
 **Keywords** (≤ 100 bytes, comma-separated, no spaces after commas; words already in the
-name and subtitle don't need repeating), 99 bytes:
+name and subtitle don't need repeating), 96 bytes:
 
 ```text
-dictation,speech to text,voice typing,transcribe,dictate,action button,windows,mac,computer,private
+speech to text,transcribe,dictate,keyboard,action button,windows,mac,computer,talk to text,notes
 ```
 
-**Description** (≤ 4,000), 1,882 characters:
+**Description** (≤ 4,000), 2,242 characters:
 
 ```text
 ShoutAbout is private voice dictation. Press the Action Button (or tap the big mouth), say what you want to write, and press again. Your words are ready to paste on your iPhone, or typed straight into the window you're working in on your computer.
 
 YOUR VOICE STAYS HOME
 Your iPhone turns speech into text by itself, with Apple's on-device speech recognition. Or your own computer does it. Nothing goes to a cloud service, and nothing comes to us. No account, no ads, no tracking.
+
+A KEYBOARD THAT LISTENS
+Add the ShoutAbout keyboard and talk in any app. It types like the iPhone keyboard, with the mouth where the emoji key sits: tap it, talk, tap anywhere to finish, and your words land at the cursor. Typing works without Full Access; the mouth needs it to reach the app. The keyboard sends nothing and keeps nothing you type.
 
 ONE PRESS, FROM ANYWHERE
 Set the Action Button to ShoutAbout and dictate without opening the app. A little mouth pops up in the Dynamic Island and on the Lock Screen while it listens.
@@ -166,13 +174,15 @@ non-trader's aren't. The owner decides ([hosting.md › D](hosting.md#d-a-contac
 - **Notes** (≤ 4,000):
 
 ```text
-ShoutAbout is a voice dictation app. There is no account or sign-in.
+ShoutAbout is a voice dictation app. There is no account or sign-in. We run no servers and receive no data.
 
-How to try it without a computer: on first launch choose "This iPhone", allow the microphone and speech recognition, tap the big mouth, say a sentence, and tap again. The text appears and is copied to the clipboard. Transcription runs on the device (SpeechTranscriber / DictationTranscriber, or SFSpeechRecognizer with requiresOnDeviceRecognition = true).
+How to try it without a computer: on first launch choose "This iPhone", allow the microphone and speech recognition, tap the big mouth, say a sentence, and tap again. The text appears and is copied to the clipboard. Transcription runs on the device.
 
-Companion computer app (optional): ShoutAbout for Windows and for Mac are free desktop apps from https://shoutabout.fyi. When the user chooses "My computer", the iPhone finds the user's own computer on the local network (Bonjour service _shoutabout._tcp) and, after the user clicks Allow on the computer with a matching 4-digit code, sends recordings directly to that computer over the local network. This is why the app asks for Local Network access. We run no servers and receive no data. A short video of the computer flow: [VIDEO URL TO ADD].
+The ShoutAbout keyboard: Settings > Apps > ShoutAbout > Keyboards > turn on ShoutAbout. It types without Full Access. To dictate, also turn on Allow Full Access, switch to the keyboard in any text field with the globe key, and tap the yellow mouth (where the emoji key usually is). A keyboard can't use the microphone, so the first time the keyboard opens its own app, ShoutAbout, which starts listening; go back to the app you were typing in, talk, and tap anywhere on the keyboard to finish. The words are typed at the cursor. While the keyboard stays on screen, the ShoutAbout app keeps its microphone input running in the background so the next tap on the mouth starts at once: that audio is discarded until the mouth is tapped, iOS shows its orange microphone indicator, and the app turns the microphone off 10 seconds after the keyboard leaves the screen or after 2 minutes without a dictation. Settings > Keyboard in the app tells users this. Together with recording a dictation started from the Action Button, this is what the "audio" background mode is used for.
 
-Action Button: the "Dictate" App Intent (AudioRecordingIntent) records in the background and shows a Live Activity in the Dynamic Island and on the Lock Screen for the whole recording, as Apple requires for background recording. The "audio" background mode is used only during a dictation.
+Companion computer app (optional): ShoutAbout for Windows and for Mac are free desktop apps from https://shoutabout.fyi. When the user chooses "My computer", the iPhone finds the user's own computer on the local network (Bonjour service _shoutabout._tcp) and, after the user clicks Allow on the computer with a matching 4-digit code, sends recordings directly to that computer over the local network. This is why the app asks for Local Network access. A short video of the computer flow: [VIDEO URL TO ADD].
+
+Action Button: the "Dictate" App Intent (AudioRecordingIntent) records in the background and shows a Live Activity in the Dynamic Island and on the Lock Screen for the whole recording, as Apple requires for background recording.
 
 Camera: used only for the optional "Scan a code instead" pairing QR code.
 ```
