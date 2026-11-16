@@ -31,7 +31,7 @@ tongue (in screenshots too).
 | Content rights | Contains no third-party content | |
 | Price | Free (USD 0), all territories | No in-app purchases |
 | Copyright | `2026 ShoutAbout` | Entered, like the website's footer. Change it to your own name (or a company's) if you prefer |
-| Privacy Policy URL | `https://shoutabout.fyi/privacy` | Required. Apple also wants it reachable **inside the app** (guideline 5.1.1(i)): see [LAUNCH.md](LAUNCH.md#apple-what-the-membership-covers) |
+| Privacy Policy URL | `https://shoutabout.fyi/privacy` | Required. Apple also wants it reachable **inside the app** (guideline 5.1.1(i)): Settings › About has Privacy policy, Terms of use and Help and support |
 | Support URL | `https://shoutabout.fyi/support` | The help page. Guideline **1.5** asks that the app and its Support URL include an easy way to contact you: set `contact_email` in `site/downloads.json` (a free forwarding address, [hosting.md › D](hosting.md#d-a-contact-address-optional)) before submitting, and it appears on that page. |
 | Marketing URL | `https://shoutabout.fyi/` | |
 
@@ -92,8 +92,9 @@ about what changed, without the version number.
 
 ## Screenshots
 
-The screenshot tour (`ios/ShoutAboutUITests/ScreenshotTests.swift`) uses only sample data
-("Sample-Desktop", "Sample text: …"). The owner's rule for all marketing, store screenshots
+The screenshot tour (`ios/ShoutAboutUITests/ScreenshotTests.swift`) uses only made-up data
+that reads naturally (a computer called "Desktop", everyday sentences, a chat with "Sam").
+The owner's rule for all marketing, store screenshots
 included: the only mouth shown is the primary mark (black mouth, white teeth band, red
 tongue), never without its tongue and **never with a yellow ring or outline** around it. In
 today's app that rules out most screens:
@@ -101,29 +102,32 @@ today's app that rules out most screens:
 | Tour shots | Mouth | Use? |
 |---|---|---|
 | `light-01-onboarding-choice` | the wordmark's mouth on yellow | yes |
-| `dark-07-recording`, `dark-09-result-card` | black mouth on the yellow tile (the red ring on the recording screen surrounds the tile, not the mouth) | yes |
-| `light-05/06/07/08/09/10/11-*` | black tile, mouth with a yellow ring | no |
+| `dark-07-recording`, `light-07-recording` | the mouth with its tongue on the yellow tile (the red ring surrounds the tile, not the mouth) | yes |
+| `keyboard-31…34` | the mouth key and the listening panel's mouth, with the tongue | yes |
+| `*-09-result-card`, `*-05/06-main-*` | mouth at rest, no tongue (checked 2026-11-15) | no |
 | `island-*`, `lock-*`, `light-04-action-button-card` | mouth with a yellow ring in the Dynamic Island / Lock Screen | no |
 | `dark-01-onboarding-choice` | the wordmark's mouth with a yellow ring | no |
 | idle main screens, pairing screens | mouth ajar, no tongue | no |
 
-Suggested set for now, with captions:
+The set uploaded on 2026-11-15 (6.9-inch, from the tour on an iPhone 17 Pro Max: the iOS
+workflow's `store_size` input), each shot under an Anton caption on the brand yellow with a
+black outline, 1320 × 2868:
 
 | # | Shot (from the tour) | Caption on the image |
 |---|---|---|
 | 1 | `light-01-onboarding-choice` | PRIVATE VOICE DICTATION. |
 | 2 | `dark-07-recording` | PRESS. TALK. PRESS. |
-| 3 | `dark-09-result-card` | PASTED ON YOUR COMPUTER. |
+| 3 | `keyboard-31-typing-light` | A KEYBOARD THAT LISTENS. |
+| 4 | `keyboard-33-listening-light` | TAP THE MOUTH. TALK. |
 
 For a fuller set (the Action Button, the Dynamic Island, light mode), the app itself would
 need the primary mark in those places (the mouth on a yellow tile instead of a ringed mouth
 on black): a change for the iOS workstream, since App Store screenshots must show the real
 app.
 
-Size: the tour currently runs on iPhone 17 Pro (1206 × 2622). App Store Connect asks for the
-largest iPhone display size; re-run the tour on the **iPhone 17 Pro Max** simulator (6.9")
-for the required set (check the accepted pixel sizes in App Store Connect when uploading:
-not verified here).
+Size: the tour normally runs on an iPhone 17 Pro (1206 × 2622). App Store Connect requires
+the 6.9-inch set (1320 × 2868) when no 6.5-inch set is given; run the iOS workflow with
+`testflight=false screenshots=true store_size=true` for it.
 
 ## App Privacy ("nutrition label")
 
