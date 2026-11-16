@@ -29,6 +29,10 @@ on:
         description: "With testflight off: simulator screenshots with sample data (artifact ios-screenshots)"
         type: boolean
         default: false
+      store_size:
+        description: "Screenshots on an iPhone 17 Pro Max (1320 x 2868, the App Store's 6.9-inch set) instead of an iPhone 17 Pro"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -72,13 +76,16 @@ jobs:
         run: xcodegen generate
 
       - name: Pick an iPhone simulator
+        env:
+          # The App Store's screenshots: the 6.9-inch Pro Max (store_size); otherwise the Pro.
+          WANTED: ${{ inputs.store_size && 'iPhone 17 Pro Max' || 'iPhone 17 Pro' }}
         run: |
-          # Newest iOS 26+ runtime; prefer iPhone 17 Pro (Dynamic Island) for the screenshots.
-          UDID=$(xcrun simctl list devices available --json | jq -r '
+          # Newest iOS 26+ runtime; prefer $WANTED (Dynamic Island) for the screenshots.
+          UDID=$(xcrun simctl list devices available --json | jq -r --arg wanted "$WANTED" '
             [.devices | to_entries | sort_by(.key) | .[]
               | select(.key | test("iOS-(2[6-9]|[3-9][0-9])"))
               | .value[] | select(.name | startswith("iPhone"))]
-            | ((map(select(.name == "iPhone 17 Pro")) | last)
+            | ((map(select(.name == $wanted)) | last)
                // (map(select(.name | test("Pro$"))) | last)
                // last)
             | .udid // empty')

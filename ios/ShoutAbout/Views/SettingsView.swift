@@ -59,6 +59,19 @@ struct SettingsView: View {
                 }
                 Section {
                     LabeledContent("Version", value: Self.version)
+                    // The App Store asks for the privacy policy inside the app too (5.1.1).
+                    ForEach(Self.pages) { page in
+                        Link(destination: page.url) {
+                            HStack {
+                                Text(page.title)
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                Image(systemName: "arrow.up.right")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
                     NavigationLink("Font licenses") { LicensesView() }
                 } header: {
                     Text("About")
@@ -224,6 +237,21 @@ struct SettingsView: View {
         }
         if model.computerLink()?.tunnel != nil { parts.append("tunnel when away") }
         return parts.joined(separator: " · ")
+    }
+
+    /// The website's pages for the App Store: privacy, terms, help (they open in Safari).
+    static let pages: [WebPage] = [
+        ("Privacy policy", "https://shoutabout.fyi/privacy.html"),
+        ("Terms of use", "https://shoutabout.fyi/terms.html"),
+        ("Help and support", "https://shoutabout.fyi/support.html"),
+    ].compactMap { (item: (String, String)) -> WebPage? in
+        URL(string: item.1).map { WebPage(title: item.0, url: $0) }
+    }
+
+    struct WebPage: Identifiable {
+        let title: String
+        let url: URL
+        var id: String { title }
     }
 
     static var version: String {
